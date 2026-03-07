@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatCurrency, getInitials, calculateProfitDistribution } from '../utils/helpers';
-import { UserPlus, Trash2, Edit, Search, Mail, Phone } from 'lucide-react';
+import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users } from 'lucide-react';
 
 export default function Investors() {
   const { investors, birds, sales, addInvestor, updateInvestor, deleteInvestor } = useApp();
