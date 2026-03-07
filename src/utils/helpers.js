@@ -8,11 +8,13 @@ export function formatCurrency(value) {
 export function formatDate(dateStr) {
   if (!dateStr) return '-';
   try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return String(dateStr).split(',')[0] || dateStr;
     return new Intl.DateTimeFormat('pt-BR', {
       day: '2-digit', month: '2-digit', year: 'numeric'
-    }).format(new Date(dateStr));
+    }).format(d);
   } catch {
-    return dateStr;
+    return String(dateStr).split(',')[0] || dateStr;
   }
 }
 

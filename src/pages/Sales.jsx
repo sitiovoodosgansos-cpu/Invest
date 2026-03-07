@@ -82,7 +82,6 @@ export default function Sales() {
           matchedBirdId,
           matchedInvestorId,
           matchedBreed,
-          date: row.date || new Date().toISOString(),
         };
       });
 
