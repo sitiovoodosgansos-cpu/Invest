@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import Dashboard from './pages/Dashboard';
 import Investors from './pages/Investors';
@@ -82,9 +82,9 @@ function AppLayout() {
 export default function App() {
   return (
     <AppProvider>
-      <BrowserRouter>
+      <HashRouter>
         <AppLayout />
-      </BrowserRouter>
+      </HashRouter>
     </AppProvider>
   );
 }
