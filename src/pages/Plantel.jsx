@@ -1,66 +1,51 @@
 import React, { useState } from 'react';
 import { useApp, BIRD_SPECIES } from '../context/AppContext';
 import { formatCurrency, getInitials } from '../utils/helpers';
-import { Plus, Trash2, Edit, Search, Bird, Filter } from 'lucide-react';
+import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X } from 'lucide-react';
 
 const SPECIES_EMOJI = {
   'Galinha': '🐔', 'Faisão': '🪶', 'Pavão': '🦚', 'Pato': '🦆',
   'Marreco': '🦆', 'Peru': '🦃', 'Ganso': '🪿', 'Codorna': '🐦',
+  'Coelho': '🐰', 'Cachorro': '🐕', 'Gato': '🐱', 'Cavalo': '🐴',
+  'Ovelha': '🐑', 'Cabra': '🐐', 'Porco': '🐷', 'Vaca': '🐄',
+  'Cisne': '🦢', 'Emu': '🪶', 'Avestruz': '🪶',
 };
 
 export default function Plantel() {
-  const { investors, birds, addBird, updateBird, deleteBird } = useApp();
+  const { investors, birds, addBird, updateBird, deleteBird, customSpecies, addCustomSpecies, deleteCustomSpecies } = useApp();
   const [showModal, setShowModal] = useState(false);
+  const [showNewAnimalModal, setShowNewAnimalModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState('');
   const [filterInvestor, setFilterInvestor] = useState('');
-  const [customSpecies, setCustomSpecies] = useState('');
-  const [customBreed, setCustomBreed] = useState('');
-  const [useCustom, setUseCustom] = useState(false);
   const [form, setForm] = useState({
     investorId: '', species: '', breed: '', matrixCount: '', breederCount: '', investmentValue: '',
   });
 
-  const selectedSpeciesData = BIRD_SPECIES.find(s => s.species === form.species);
+  // New animal form
+  const [newAnimalForm, setNewAnimalForm] = useState({ species: '', breeds: '' });
+
+  // Merge built-in + custom species
+  const allSpecies = [...BIRD_SPECIES, ...(customSpecies || [])];
+  const selectedSpeciesData = allSpecies.find(s => s.species === form.species);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const finalSpecies = useCustom ? customSpecies : form.species;
-    const finalBreed = useCustom ? customBreed : form.breed;
-    const birdData = {
-      ...form,
-      species: finalSpecies,
-      breed: finalBreed,
-    };
     if (editingId) {
-      updateBird(editingId, birdData);
+      updateBird(editingId, form);
     } else {
-      addBird(birdData);
+      addBird(form);
     }
     resetForm();
   };
 
   const resetForm = () => {
     setForm({ investorId: '', species: '', breed: '', matrixCount: '', breederCount: '', investmentValue: '' });
-    setCustomSpecies('');
-    setCustomBreed('');
-    setUseCustom(false);
     setEditingId(null);
     setShowModal(false);
   };
 
   const handleEdit = (bird) => {
-    const isKnownSpecies = BIRD_SPECIES.some(s => s.species === bird.species);
-    const isKnownBreed = isKnownSpecies && BIRD_SPECIES.find(s => s.species === bird.species)?.breeds.includes(bird.breed);
-
-    if (!isKnownSpecies || !isKnownBreed) {
-      setUseCustom(true);
-      setCustomSpecies(bird.species);
-      setCustomBreed(bird.breed);
-    } else {
-      setUseCustom(false);
-    }
-
     setForm({
       investorId: bird.investorId,
       species: bird.species,
@@ -74,7 +59,27 @@ export default function Plantel() {
   };
 
   const handleDelete = (id) => {
-    if (window.confirm('Remover esta ave do plantel?')) deleteBird(id);
+    if (window.confirm('Remover este animal do plantel?')) deleteBird(id);
+  };
+
+  const handleNewAnimalSubmit = (e) => {
+    e.preventDefault();
+    const species = newAnimalForm.species.trim();
+    const breeds = newAnimalForm.breeds
+      .split(',')
+      .map(b => b.trim())
+      .filter(b => b.length > 0);
+    if (!species || breeds.length === 0) return;
+
+    addCustomSpecies({ species, breeds });
+    setNewAnimalForm({ species: '', breeds: '' });
+    setShowNewAnimalModal(false);
+  };
+
+  const handleDeleteCustomSpecies = (speciesName) => {
+    if (window.confirm(`Remover "${speciesName}" da lista de animais?`)) {
+      deleteCustomSpecies(speciesName);
+    }
   };
 
   const filtered = birds.filter(b => {
@@ -89,7 +94,7 @@ export default function Plantel() {
     <div className="animate-in">
       <div className="page-header">
         <h2>Plantel</h2>
-        <p>Gerencie as aves matrizes e reprodutores dos investidores</p>
+        <p>Gerencie os animais matrizes e reprodutores dos investidores</p>
       </div>
 
       <div className="filter-bar">
@@ -114,8 +119,11 @@ export default function Plantel() {
             <option key={i.id} value={i.id}>{i.name}</option>
           ))}
         </select>
+        <button className="btn btn-secondary" onClick={() => setShowNewAnimalModal(true)} title="Cadastrar novo tipo de animal">
+          <PlusCircle size={16} /> Novo Animal
+        </button>
         <button className="btn btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
-          <Plus size={16} /> Cadastrar Ave
+          <Plus size={16} /> Cadastrar no Plantel
         </button>
       </div>
 
@@ -124,7 +132,7 @@ export default function Plantel() {
           <div className="bird-card" key={bird.id}>
             <div className="bird-card-header">
               <div style={{ display: 'flex', alignItems: 'center' }}>
-                <span className="bird-emoji">{SPECIES_EMOJI[bird.species] || '🐦'}</span>
+                <span className="bird-emoji">{SPECIES_EMOJI[bird.species] || '🐾'}</span>
                 <div className="bird-info">
                   <h4>{bird.breed}</h4>
                   <p>{bird.species}</p>
@@ -165,15 +173,16 @@ export default function Plantel() {
       {filtered.length === 0 && (
         <div className="empty-state">
           <Bird size={48} />
-          <h3>Nenhuma ave cadastrada</h3>
-          <p>Cadastre aves no plantel para comecar</p>
+          <h3>Nenhum animal cadastrado</h3>
+          <p>Cadastre animais no plantel para comecar</p>
         </div>
       )}
 
+      {/* Modal Cadastrar no Plantel */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3 className="modal-title">{editingId ? 'Editar Ave' : 'Cadastrar Nova Ave'}</h3>
+            <h3 className="modal-title">{editingId ? 'Editar Animal' : 'Cadastrar no Plantel'}</h3>
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label className="form-label">Investidor *</label>
@@ -185,62 +194,33 @@ export default function Plantel() {
                 </select>
               </div>
 
-              <div className="form-group" style={{ marginBottom: 12 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={useCustom}
-                    onChange={e => setUseCustom(e.target.checked)}
-                  />
-                  Especie/Raca personalizada (nao listada)
-                </label>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Especie *</label>
+                  <select className="form-input" required value={form.species} onChange={e => setForm({ ...form, species: e.target.value, breed: '' })}>
+                    <option value="">Selecione</option>
+                    {allSpecies.map(s => (
+                      <option key={s.species} value={s.species}>{SPECIES_EMOJI[s.species] || '🐾'} {s.species}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => { setShowNewAnimalModal(true); }}
+                    style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: 12, cursor: 'pointer', padding: '4px 0', marginTop: 4 }}
+                  >
+                    + Nao encontrou? Cadastrar novo animal
+                  </button>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Raca *</label>
+                  <select className="form-input" required value={form.breed} onChange={e => setForm({ ...form, breed: e.target.value })}>
+                    <option value="">Selecione</option>
+                    {selectedSpeciesData?.breeds.map(b => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-
-              {useCustom ? (
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Especie *</label>
-                    <input
-                      className="form-input"
-                      required
-                      value={customSpecies}
-                      onChange={e => setCustomSpecies(e.target.value)}
-                      placeholder="Ex: Cisne, Emu..."
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Raca *</label>
-                    <input
-                      className="form-input"
-                      required
-                      value={customBreed}
-                      onChange={e => setCustomBreed(e.target.value)}
-                      placeholder="Ex: Branco, Negro..."
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Especie *</label>
-                    <select className="form-input" required value={form.species} onChange={e => setForm({ ...form, species: e.target.value, breed: '' })}>
-                      <option value="">Selecione</option>
-                      {BIRD_SPECIES.map(s => (
-                        <option key={s.species} value={s.species}>{SPECIES_EMOJI[s.species] || '🐦'} {s.species}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Raca *</label>
-                    <select className="form-input" required value={form.breed} onChange={e => setForm({ ...form, breed: e.target.value })}>
-                      <option value="">Selecione</option>
-                      {selectedSpeciesData?.breeds.map(b => (
-                        <option key={b} value={b}>{b}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
 
               <div className="form-row">
                 <div className="form-group">
@@ -283,6 +263,80 @@ export default function Plantel() {
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
                 <button type="submit" className="btn btn-primary">{editingId ? 'Salvar' : 'Cadastrar'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cadastrar Novo Animal */}
+      {showNewAnimalModal && (
+        <div className="modal-overlay" onClick={() => setShowNewAnimalModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3 className="modal-title">Cadastrar Novo Tipo de Animal</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              Adicione um novo tipo de animal ao sistema. Ele ficara disponivel na lista de especies para todos os cadastros.
+            </p>
+            <form onSubmit={handleNewAnimalSubmit}>
+              <div className="form-group">
+                <label className="form-label">Nome do Animal / Especie *</label>
+                <input
+                  className="form-input"
+                  required
+                  value={newAnimalForm.species}
+                  onChange={e => setNewAnimalForm({ ...newAnimalForm, species: e.target.value })}
+                  placeholder="Ex: Coelho, Cachorro, Gato, Cisne..."
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Racas (separadas por virgula) *</label>
+                <input
+                  className="form-input"
+                  required
+                  value={newAnimalForm.breeds}
+                  onChange={e => setNewAnimalForm({ ...newAnimalForm, breeds: e.target.value })}
+                  placeholder="Ex: Rex, Angorá, Lion Head, Mini Lop"
+                />
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                  Separe cada raca com uma virgula. Voce pode adicionar mais racas depois.
+                </span>
+              </div>
+
+              {/* List existing custom species */}
+              {customSpecies && customSpecies.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <label className="form-label" style={{ marginBottom: 8 }}>Animais cadastrados por voce:</label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {customSpecies.map(s => (
+                      <div key={s.species} style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '8px 12px', background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border-light)'
+                      }}>
+                        <div>
+                          <span style={{ fontWeight: 600, fontSize: 13 }}>{SPECIES_EMOJI[s.species] || '🐾'} {s.species}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>
+                            ({s.breeds.join(', ')})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCustomSpecies(s.species)}
+                          style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 4 }}
+                          title="Remover animal"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowNewAnimalModal(false)}>Fechar</button>
+                <button type="submit" className="btn btn-primary">
+                  <PlusCircle size={16} /> Cadastrar Animal
+                </button>
               </div>
             </form>
           </div>
