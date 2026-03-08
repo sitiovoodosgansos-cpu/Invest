@@ -1,8 +1,11 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { db } from '../firebase';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 
 const AppContext = createContext();
 
 const STORAGE_KEY = 'sitio_voo_dos_gansos_data';
+const FIRESTORE_DOC = doc(db, 'config', 'appData');
 
 const defaultData = {
   investors: [],
@@ -25,18 +28,57 @@ export const BIRD_SPECIES = [
 ];
 
 export function AppProvider({ children }) {
-  const [data, setData] = useState(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? { ...defaultData, ...JSON.parse(stored) } : defaultData;
-    } catch {
-      return defaultData;
-    }
-  });
+  const [data, setData] = useState(defaultData);
+  const [loading, setLoading] = useState(true);
+  const isFromFirestore = useRef(false);
 
+  // Listen to Firestore in real-time
   useEffect(() => {
+    const unsubscribe = onSnapshot(FIRESTORE_DOC, (snapshot) => {
+      if (snapshot.exists()) {
+        isFromFirestore.current = true;
+        setData({ ...defaultData, ...snapshot.data() });
+      } else {
+        // First time: try to migrate from localStorage
+        try {
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) {
+            const parsed = { ...defaultData, ...JSON.parse(stored) };
+            setDoc(FIRESTORE_DOC, parsed);
+            isFromFirestore.current = true;
+            setData(parsed);
+          }
+        } catch {
+          // ignore
+        }
+      }
+      setLoading(false);
+    }, (error) => {
+      console.error('Firestore error:', error);
+      // Fallback to localStorage if Firestore fails
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        setData(stored ? { ...defaultData, ...JSON.parse(stored) } : defaultData);
+      } catch {
+        setData(defaultData);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Save to Firestore when data changes (skip if change came from Firestore itself)
+  useEffect(() => {
+    if (loading) return;
+    if (isFromFirestore.current) {
+      isFromFirestore.current = false;
+      return;
+    }
+    // Save to both Firestore and localStorage (backup)
+    setDoc(FIRESTORE_DOC, data).catch(err => console.error('Firestore save error:', err));
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [data]);
+  }, [data, loading]);
 
   // Investors
   const addInvestor = (investor) => {
@@ -170,6 +212,7 @@ export function AppProvider({ children }) {
 
   const value = {
     ...data,
+    loading,
     addInvestor, updateInvestor, deleteInvestor,
     addBird, updateBird, deleteBird,
     addSales, clearSales, deleteSale, updateSale,
