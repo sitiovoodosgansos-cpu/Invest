@@ -1,5 +1,5 @@
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import { formatCurrency, formatDate, isEggProduct, getMonthsDifference, calculateCompoundInterest } from './helpers';
 
 export function exportInvestorReport(investor, birds, sales, financialInvestments, distribution, periodLabel) {
@@ -51,7 +51,7 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
       formatCurrency(b.investmentValue || 0),
     ]);
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: y,
       head: [['Especie / Raca', 'Quantidade', 'Valor Investido']],
       body: birdRows,
@@ -85,7 +85,7 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
       ];
     });
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: y,
       head: [['Data', 'Valor Aportado', 'Periodo', 'Valor Atual', 'Rendimento']],
       body: finRows,
@@ -117,7 +117,7 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
       formatCurrency(item.profit),
     ]);
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: y,
       head: [['Data', 'Item', 'Tipo', 'Valor Venda', 'Taxa', 'Lucro']],
       body: saleRows,
