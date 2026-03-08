@@ -5,16 +5,22 @@ import {
   isEggProduct, getEggProfitRate, getBirdProfitRate, filterValidTransactions
 } from '../utils/helpers';
 import { parseCSV, readFileAsText } from '../utils/csvParser';
-import { parsePDFFile } from '../utils/pdfParser';
+import { parseWixOrderText } from '../utils/pdfParser';
 import {
-  Upload, FileSpreadsheet, Trash2, CheckCircle, AlertCircle, ShoppingCart, Filter, FileText
+  Upload, Trash2, CheckCircle, AlertCircle, ShoppingCart,
+  FileText, ClipboardPaste, PlusCircle, X
 } from 'lucide-react';
+
+const EMPTY_MANUAL_ITEM = { itemDescription: '', quantity: 1, price: '' };
 
 export default function Sales() {
   const { investors, birds, sales, addSales, clearSales } = useApp();
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [filterType, setFilterType] = useState('all');
+  const [importTab, setImportTab] = useState('file'); // file | paste | manual
+  const [pasteText, setPasteText] = useState('');
+  const [manualOrder, setManualOrder] = useState({ orderNumber: '', buyerName: '', date: '', items: [{ ...EMPTY_MANUAL_ITEM }] });
   const fileInputRef = useRef(null);
 
   const distribution = useMemo(
@@ -26,7 +32,6 @@ export default function Sales() {
 
   // Process parsed rows (from CSV or PDF) into sales with profit distribution
   const processAndAddSales = (parsed) => {
-    // Filter out rejected/refunded
     const valid = parsed.filter(row => {
       const status = (row.transactionStatus || '').toUpperCase();
       return !status.includes('RECUSAD') && !status.includes('REEMBOLSAD');
@@ -34,14 +39,12 @@ export default function Sales() {
 
     const rejected = parsed.length - valid.length;
 
-    // Process each item and distribute profit
     const processedSales = valid.map(row => {
       const description = row.itemDescription || row.item || '';
       const totalValue = parseFloat(row.totalValue || row.price || 0);
       const isEgg = isEggProduct(description);
       const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
 
-      // Try to match to a bird
       let matchedBirdId = null;
       let matchedInvestorId = null;
       let matchedBreed = null;
@@ -54,7 +57,6 @@ export default function Sales() {
           matchedBreed = bird.breed;
           break;
         }
-        // Try partial match
         const words = bird.breed.toUpperCase().split(' ');
         if (words.length > 1 && words.every(w => description.toUpperCase().includes(w))) {
           matchedBirdId = bird.id;
@@ -94,6 +96,7 @@ export default function Sales() {
     };
   };
 
+  // FILE UPLOAD
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -102,27 +105,10 @@ export default function Sales() {
     setImportResult(null);
 
     try {
-      const isPDF = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
-
-      let parsed;
-      if (isPDF) {
-        const pdfData = await parsePDFFile(file);
-        if (!pdfData.items || pdfData.items.length === 0) {
-          throw new Error('Nenhum item encontrado no PDF. Verifique se e um recibo de pedido do Wix.');
-        }
-        parsed = pdfData.items;
-      } else {
-        const text = await readFileAsText(file);
-        parsed = await parseCSV(text);
-      }
-
+      const text = await readFileAsText(file);
+      const parsed = await parseCSV(text);
       const result = processAndAddSales(parsed);
-
-      if (isPDF) {
-        // Add PDF-specific info to result
-        result.source = 'PDF';
-      }
-
+      result.source = 'CSV';
       setImportResult(result);
     } catch (err) {
       setImportResult({ success: false, error: err.message });
@@ -130,6 +116,86 @@ export default function Sales() {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  // PASTE TEXT
+  const handlePasteImport = () => {
+    if (!pasteText.trim()) return;
+
+    setImporting(true);
+    setImportResult(null);
+
+    try {
+      const pdfData = parseWixOrderText(pasteText);
+      if (!pdfData.items || pdfData.items.length === 0) {
+        throw new Error('Nenhum item encontrado no texto colado. Verifique o formato do recibo.');
+      }
+      const result = processAndAddSales(pdfData.items);
+      result.source = 'Texto';
+      result.orderNumber = pdfData.orderNumber;
+      result.buyerName = pdfData.buyerName;
+      setImportResult(result);
+      setPasteText('');
+    } catch (err) {
+      setImportResult({ success: false, error: err.message });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // MANUAL ENTRY
+  const addManualItem = () => {
+    setManualOrder(prev => ({
+      ...prev,
+      items: [...prev.items, { ...EMPTY_MANUAL_ITEM }],
+    }));
+  };
+
+  const removeManualItem = (index) => {
+    setManualOrder(prev => ({
+      ...prev,
+      items: prev.items.filter((_, i) => i !== index),
+    }));
+  };
+
+  const updateManualItem = (index, field, value) => {
+    setManualOrder(prev => ({
+      ...prev,
+      items: prev.items.map((item, i) => i === index ? { ...item, [field]: value } : item),
+    }));
+  };
+
+  const handleManualSubmit = () => {
+    const validItems = manualOrder.items.filter(item =>
+      item.itemDescription.trim() && parseFloat(item.price) > 0
+    );
+
+    if (validItems.length === 0) {
+      setImportResult({ success: false, error: 'Adicione pelo menos um item com descricao e preco.' });
+      return;
+    }
+
+    setImportResult(null);
+
+    const parsed = validItems.map(item => {
+      const qty = parseInt(item.quantity, 10) || 1;
+      const unitPrice = parseFloat(item.price) || 0;
+      return {
+        orderNumber: manualOrder.orderNumber,
+        buyerName: manualOrder.buyerName,
+        date: manualOrder.date || new Date().toISOString().slice(0, 10),
+        itemDescription: item.itemDescription.trim(),
+        price: unitPrice,
+        quantity: qty,
+        totalValue: unitPrice * qty,
+        transactionStatus: 'Pago',
+      };
+    });
+
+    const result = processAndAddSales(parsed);
+    result.source = 'Manual';
+    setImportResult(result);
+    setManualOrder({ orderNumber: '', buyerName: '', date: '', items: [{ ...EMPTY_MANUAL_ITEM }] });
   };
 
   const filteredSales = useMemo(() => {
@@ -147,10 +213,10 @@ export default function Sales() {
     <div className="animate-in">
       <div className="page-header">
         <h2>Vendas</h2>
-        <p>Importe relatorios de vendas do Wix (CSV ou PDF) e distribua lucros automaticamente</p>
+        <p>Importe vendas do Wix (CSV, texto colado ou manual) e distribua lucros</p>
       </div>
 
-      {/* Upload Area */}
+      {/* Import Area */}
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="card-header">
           <span className="card-title">Importar Vendas</span>
@@ -163,29 +229,185 @@ export default function Sales() {
           )}
         </div>
 
-        <div
-          className="upload-area"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Upload size={40} />
-          <p>
-            <span>Clique para selecionar</span> ou arraste o arquivo CSV ou PDF do Wix
-          </p>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-            Formatos aceitos: CSV (.csv) ou PDF (.pdf) de pedidos do Wix Store
-          </p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.txt,.pdf"
-            style={{ display: 'none' }}
-            onChange={handleFileUpload}
-          />
+        {/* Import Method Tabs */}
+        <div className="tabs" style={{ marginBottom: 16 }}>
+          <button className={`tab ${importTab === 'file' ? 'active' : ''}`} onClick={() => setImportTab('file')}>
+            <Upload size={14} /> Arquivo CSV
+          </button>
+          <button className={`tab ${importTab === 'paste' ? 'active' : ''}`} onClick={() => setImportTab('paste')}>
+            <ClipboardPaste size={14} /> Colar Texto
+          </button>
+          <button className={`tab ${importTab === 'manual' ? 'active' : ''}`} onClick={() => setImportTab('manual')}>
+            <PlusCircle size={14} /> Manual
+          </button>
         </div>
+
+        {/* FILE TAB */}
+        {importTab === 'file' && (
+          <div
+            className="upload-area"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload size={40} />
+            <p>
+              <span>Clique para selecionar</span> ou arraste o arquivo CSV do Wix
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+              Formato aceito: CSV (.csv) exportado do Wix Store
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.txt"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+            />
+          </div>
+        )}
+
+        {/* PASTE TAB */}
+        {importTab === 'paste' && (
+          <div>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+              Cole o conteudo copiado do PDF do pedido Wix. O sistema detecta automaticamente os itens, valores e quantidades.
+            </p>
+            <textarea
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              placeholder={`Exemplo:\nPedido 10249 (8 itens) Alex Bento, alex@email.com\nFeito em 2 de mar. de 2026, 22:09\nOVO - Sedosa Splash R$ 24,00 x2 R$ 48,00\nOVO - Polonesa Dourada R$ 20,00 x2 R$ 40,00\n...`}
+              style={{
+                width: '100%',
+                minHeight: 180,
+                padding: 12,
+                borderRadius: 'var(--radius-sm)',
+                border: '2px dashed var(--border)',
+                background: 'var(--bg-secondary)',
+                color: 'var(--text)',
+                fontFamily: 'monospace',
+                fontSize: 13,
+                resize: 'vertical',
+                boxSizing: 'border-box',
+              }}
+            />
+            <button
+              className="btn btn-primary"
+              style={{ marginTop: 12 }}
+              onClick={handlePasteImport}
+              disabled={!pasteText.trim() || importing}
+            >
+              <FileText size={16} /> Processar Texto
+            </button>
+          </div>
+        )}
+
+        {/* MANUAL TAB */}
+        {importTab === 'manual' && (
+          <div>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+              Insira os dados do pedido manualmente.
+            </p>
+
+            {/* Order Info */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>N. Pedido</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Ex: 10249"
+                  value={manualOrder.orderNumber}
+                  onChange={(e) => setManualOrder(prev => ({ ...prev, orderNumber: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Comprador</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Nome do comprador"
+                  value={manualOrder.buyerName}
+                  onChange={(e) => setManualOrder(prev => ({ ...prev, buyerName: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Data</label>
+                <input
+                  type="date"
+                  className="input"
+                  value={manualOrder.date}
+                  onChange={(e) => setManualOrder(prev => ({ ...prev, date: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            {/* Items */}
+            <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>Itens do Pedido</label>
+            {manualOrder.items.map((item, idx) => (
+              <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Ex: OVO - Brahma Light"
+                  value={item.itemDescription}
+                  onChange={(e) => updateManualItem(idx, 'itemDescription', e.target.value)}
+                  style={{ flex: 3 }}
+                />
+                <input
+                  type="number"
+                  className="input"
+                  placeholder="Qtd"
+                  min="1"
+                  value={item.quantity}
+                  onChange={(e) => updateManualItem(idx, 'quantity', e.target.value)}
+                  style={{ flex: 1, minWidth: 60 }}
+                />
+                <div style={{ position: 'relative', flex: 2, minWidth: 100 }}>
+                  <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--text-muted)' }}>R$</span>
+                  <input
+                    type="number"
+                    className="input"
+                    placeholder="0,00"
+                    step="0.01"
+                    min="0"
+                    value={item.price}
+                    onChange={(e) => updateManualItem(idx, 'price', e.target.value)}
+                    style={{ paddingLeft: 32 }}
+                  />
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 600, minWidth: 80, textAlign: 'right', color: 'var(--text-muted)' }}>
+                  = {formatCurrency((parseFloat(item.price) || 0) * (parseInt(item.quantity, 10) || 1))}
+                </span>
+                {manualOrder.items.length > 1 && (
+                  <button
+                    className="btn btn-sm btn-secondary"
+                    style={{ padding: '4px 6px', color: 'var(--danger)' }}
+                    onClick={() => removeManualItem(idx)}
+                    title="Remover item"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+
+            <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+              <button className="btn btn-secondary" onClick={addManualItem}>
+                <PlusCircle size={14} /> Adicionar Item
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleManualSubmit}
+                disabled={importing}
+              >
+                <CheckCircle size={14} /> Registrar Venda
+              </button>
+            </div>
+          </div>
+        )}
 
         {importing && (
           <div style={{ textAlign: 'center', padding: 20, color: 'var(--primary)' }}>
-            Processando arquivo...
+            Processando...
           </div>
         )}
 
@@ -201,15 +423,16 @@ export default function Sales() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <CheckCircle size={20} color="var(--success)" />
                   <strong style={{ color: 'var(--success)' }}>
-                    Importacao concluida{importResult.source === 'PDF' ? ' (PDF)' : ''}!
+                    Importacao concluida ({importResult.source})!
                   </strong>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, fontSize: 13 }}>
-                  <div><strong>{importResult.total}</strong> itens no arquivo</div>
+                  <div><strong>{importResult.total}</strong> itens no pedido</div>
                   <div><strong>{importResult.rejected}</strong> recusados/reembolsados</div>
                   <div><strong>{importResult.valid}</strong> vendas validas</div>
                   <div><strong>{importResult.matched}</strong> vinculadas</div>
                   <div><strong>{importResult.unmatched}</strong> sem vinculo</div>
+                  <div><strong>{formatCurrency(importResult.totalValue)}</strong> valor total</div>
                   <div><strong>{formatCurrency(importResult.totalProfit)}</strong> lucro distribuido</div>
                 </div>
               </>
@@ -284,8 +507,10 @@ export default function Sales() {
               <thead>
                 <tr>
                   <th>Data</th>
+                  <th>Pedido</th>
                   <th>Item</th>
                   <th>Tipo</th>
+                  <th>Qtd</th>
                   <th>Valor</th>
                   <th>Taxa</th>
                   <th>Lucro</th>
@@ -296,6 +521,7 @@ export default function Sales() {
                 {filteredSales.slice(0, 100).map((sale, idx) => (
                   <tr key={sale.id || idx}>
                     <td>{formatDate(sale.date)}</td>
+                    <td style={{ fontSize: 12 }}>{sale.orderNumber || '-'}</td>
                     <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {sale.itemDescription || sale.item || '-'}
                     </td>
@@ -304,6 +530,7 @@ export default function Sales() {
                         {sale.isEgg ? 'Ovo' : 'Ave'}
                       </span>
                     </td>
+                    <td>{sale.quantity || 1}</td>
                     <td>{formatCurrency(sale.totalValue)}</td>
                     <td>{((sale.profitRate || (sale.isEgg ? 0.10 : 0.064)) * 100).toFixed(1)}%</td>
                     <td style={{ color: 'var(--success)', fontWeight: 600 }}>
@@ -333,7 +560,7 @@ export default function Sales() {
         <div className="empty-state">
           <ShoppingCart size={48} />
           <h3>Nenhuma venda importada</h3>
-          <p>Importe um arquivo CSV do Wix para distribuir os lucros</p>
+          <p>Use as abas acima para importar CSV, colar texto de PDF ou inserir manualmente</p>
         </div>
       )}
     </div>
