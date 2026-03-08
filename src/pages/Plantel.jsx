@@ -72,6 +72,12 @@ export default function Plantel() {
     if (!species || breeds.length === 0) return;
 
     addCustomSpecies({ species, breeds });
+
+    // Auto-select the new species if the plantel modal is open
+    if (showModal) {
+      setForm(prev => ({ ...prev, species, breed: '' }));
+    }
+
     setNewAnimalForm({ species: '', breeds: '' });
     setShowNewAnimalModal(false);
   };

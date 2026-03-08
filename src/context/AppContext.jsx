@@ -30,13 +30,17 @@ export const BIRD_SPECIES = [
 export function AppProvider({ children }) {
   const [data, setData] = useState(defaultData);
   const [loading, setLoading] = useState(true);
-  const isFromFirestore = useRef(false);
+  const skipNextFirestore = useRef(0);
 
   // Listen to Firestore in real-time
   useEffect(() => {
     const unsubscribe = onSnapshot(FIRESTORE_DOC, (snapshot) => {
       if (snapshot.exists()) {
-        isFromFirestore.current = true;
+        if (skipNextFirestore.current > 0) {
+          skipNextFirestore.current--;
+          setLoading(false);
+          return;
+        }
         setData({ ...defaultData, ...snapshot.data() });
       } else {
         // First time: try to migrate from localStorage
@@ -44,8 +48,8 @@ export function AppProvider({ children }) {
           const stored = localStorage.getItem(STORAGE_KEY);
           if (stored) {
             const parsed = { ...defaultData, ...JSON.parse(stored) };
+            skipNextFirestore.current++;
             setDoc(FIRESTORE_DOC, parsed);
-            isFromFirestore.current = true;
             setData(parsed);
           }
         } catch {
@@ -68,15 +72,20 @@ export function AppProvider({ children }) {
     return () => unsubscribe();
   }, []);
 
-  // Save to Firestore when data changes (skip if change came from Firestore itself)
+  // Save to Firestore when data changes
+  const isFirstRender = useRef(true);
   useEffect(() => {
     if (loading) return;
-    if (isFromFirestore.current) {
-      isFromFirestore.current = false;
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
       return;
     }
     // Save to both Firestore and localStorage (backup)
-    setDoc(FIRESTORE_DOC, data).catch(err => console.error('Firestore save error:', err));
+    skipNextFirestore.current++;
+    setDoc(FIRESTORE_DOC, data).catch(err => {
+      skipNextFirestore.current = Math.max(0, skipNextFirestore.current - 1);
+      console.error('Firestore save error:', err);
+    });
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data, loading]);
 
