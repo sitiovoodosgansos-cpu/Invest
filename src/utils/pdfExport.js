@@ -2,24 +2,26 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { formatCurrency, formatDate, isEggProduct, getMonthsDifference, calculateCompoundInterest } from './helpers';
 
-export function exportInvestorReport(investor, birds, sales, financialInvestments, distribution) {
+export function exportInvestorReport(investor, birds, sales, financialInvestments, distribution, periodLabel) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
 
   // Header
   doc.setFillColor(108, 43, 217);
-  doc.rect(0, 0, pageWidth, 40, 'F');
+  doc.rect(0, 0, pageWidth, 45, 'F');
 
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.text('Sitio Voo dos Gansos', 14, 18);
+  doc.text('Sitio Voo dos Gansos', 14, 16);
   doc.setFontSize(12);
   doc.setFont('helvetica', 'normal');
-  doc.text('Relatorio de Investimentos', 14, 28);
-  doc.text(formatDate(new Date().toISOString()), pageWidth - 14, 28, { align: 'right' });
+  doc.text('Relatorio de Investimentos', 14, 26);
+  doc.setFontSize(10);
+  doc.text(`Periodo: ${periodLabel || 'Todos os periodos'}`, 14, 35);
+  doc.text(formatDate(new Date().toISOString()), pageWidth - 14, 35, { align: 'right' });
 
-  let y = 52;
+  let y = 57;
 
   // Investor info
   doc.setTextColor(30, 27, 75);
@@ -159,5 +161,6 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
     );
   }
 
-  doc.save(`Relatorio_${investor.name.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`);
+  const periodSuffix = periodLabel ? `_${periodLabel.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+  doc.save(`Relatorio_${investor.name.replace(/\s+/g, '_')}${periodSuffix}_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
