@@ -1,14 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatCurrency, getInitials, calculateProfitDistribution } from '../utils/helpers';
-import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users } from 'lucide-react';
+import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff } from 'lucide-react';
 
 export default function Investors() {
   const { investors, birds, sales, addInvestor, updateInvestor, deleteInvestor } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState('');
-  const [form, setForm] = useState({ name: '', email: '', phone: '', document: '' });
+  const [form, setForm] = useState({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
+  const [showPassword, setShowPassword] = useState(false);
 
   const distribution = useMemo(
     () => calculateProfitDistribution(sales, birds),
@@ -22,13 +23,14 @@ export default function Investors() {
     } else {
       addInvestor(form);
     }
-    setForm({ name: '', email: '', phone: '', document: '' });
+    setForm({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
     setEditingId(null);
     setShowModal(false);
+    setShowPassword(false);
   };
 
   const handleEdit = (investor) => {
-    setForm({ name: investor.name, email: investor.email || '', phone: investor.phone || '', document: investor.document || '' });
+    setForm({ name: investor.name, email: investor.email || '', phone: investor.phone || '', document: investor.document || '', loginUsername: investor.loginUsername || '', loginPassword: investor.loginPassword || '' });
     setEditingId(investor.id);
     setShowModal(true);
   };
@@ -61,7 +63,7 @@ export default function Investors() {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-        <button className="btn btn-primary" onClick={() => { setForm({ name: '', email: '', phone: '', document: '' }); setEditingId(null); setShowModal(true); }}>
+        <button className="btn btn-primary" onClick={() => { setForm({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' }); setEditingId(null); setShowModal(true); setShowPassword(false); }}>
           <UserPlus size={16} /> Novo Investidor
         </button>
       </div>
@@ -101,6 +103,11 @@ export default function Investors() {
               {investor.phone && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
                   <Phone size={12} /> {investor.phone}
+                </div>
+              )}
+              {investor.loginUsername && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--primary)', marginBottom: 4 }}>
+                  <Key size={12} /> Login: {investor.loginUsername}
                 </div>
               )}
 
@@ -157,6 +164,30 @@ export default function Investors() {
               <div className="form-group">
                 <label className="form-label">CPF/CNPJ</label>
                 <input className="form-input" value={form.document} onChange={e => setForm({ ...form, document: e.target.value })} placeholder="000.000.000-00" />
+              </div>
+              <div style={{ padding: '12px 16px', background: 'var(--primary-bg)', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <Key size={16} color="var(--primary)" />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)' }}>Acesso do Investidor</span>
+                </div>
+                <div className="form-row">
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Login</label>
+                    <input className="form-input" value={form.loginUsername} onChange={e => setForm({ ...form, loginUsername: e.target.value })} placeholder="usuario.login" />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Senha</label>
+                    <div style={{ position: 'relative' }}>
+                      <input className="form-input" type={showPassword ? 'text' : 'password'} value={form.loginPassword} onChange={e => setForm({ ...form, loginPassword: e.target.value })} placeholder="Senha de acesso" style={{ paddingRight: 40 }} />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4 }}>
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 8 }}>
+                  O investidor usara esses dados para acessar o painel e acompanhar seus investimentos.
+                </p>
               </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>

@@ -1,18 +1,22 @@
 import React, { useState } from 'react';
 import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import Dashboard from './pages/Dashboard';
 import Investors from './pages/Investors';
 import Plantel from './pages/Plantel';
 import Sales from './pages/Sales';
 import Financial from './pages/Financial';
 import Reports from './pages/Reports';
+import Login from './pages/Login';
+import InvestorPortal from './pages/InvestorPortal';
 import {
-  LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X
+  LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut
 } from 'lucide-react';
 
-function AppLayout() {
+function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { logout, currentUser } = useAuth();
 
   const navItems = [
     { to: '/dashboard', icon: <LayoutDashboard />, label: 'Dashboard' },
@@ -58,6 +62,18 @@ function AppLayout() {
         </nav>
 
         <div style={{ padding: '12px', borderTop: '1px solid var(--border)', marginTop: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>
+              {currentUser?.username || 'Admin'}
+            </span>
+            <button
+              className="btn btn-sm btn-secondary"
+              style={{ padding: '4px 8px', fontSize: 11 }}
+              onClick={logout}
+            >
+              <LogOut size={12} /> Sair
+            </button>
+          </div>
           <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
             v1.0 - Sítio Voo dos Gansos
           </p>
@@ -79,12 +95,32 @@ function AppLayout() {
   );
 }
 
+function AppRouter() {
+  const { currentUser, isAdmin, isInvestor } = useAuth();
+
+  if (!currentUser) {
+    return <Login />;
+  }
+
+  if (isInvestor) {
+    return <InvestorPortal />;
+  }
+
+  if (isAdmin) {
+    return <AdminLayout />;
+  }
+
+  return <Login />;
+}
+
 export default function App() {
   return (
     <AppProvider>
-      <HashRouter>
-        <AppLayout />
-      </HashRouter>
+      <AuthProvider>
+        <HashRouter>
+          <AppRouter />
+        </HashRouter>
+      </AuthProvider>
     </AppProvider>
   );
 }
