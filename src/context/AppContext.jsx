@@ -9,6 +9,7 @@ const defaultData = {
   birds: [],
   sales: [],
   financialInvestments: [],
+  customSpecies: [],
 };
 
 // Sample bird species/breeds
@@ -104,6 +105,34 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, sales: [] }));
   };
 
+  // Custom Species
+  const addCustomSpecies = (speciesData) => {
+    setData(prev => {
+      const existing = prev.customSpecies.find(s => s.species === speciesData.species);
+      if (existing) {
+        // Add new breeds to existing species
+        const newBreeds = speciesData.breeds.filter(b => !existing.breeds.includes(b));
+        if (newBreeds.length === 0) return prev;
+        return {
+          ...prev,
+          customSpecies: prev.customSpecies.map(s =>
+            s.species === speciesData.species
+              ? { ...s, breeds: [...s.breeds, ...newBreeds] }
+              : s
+          ),
+        };
+      }
+      return { ...prev, customSpecies: [...prev.customSpecies, speciesData] };
+    });
+  };
+
+  const deleteCustomSpecies = (speciesName) => {
+    setData(prev => ({
+      ...prev,
+      customSpecies: prev.customSpecies.filter(s => s.species !== speciesName),
+    }));
+  };
+
   // Financial Investments
   const addFinancialInvestment = (investment) => {
     const newInv = {
@@ -131,6 +160,7 @@ export function AppProvider({ children }) {
     addBird, updateBird, deleteBird,
     addSales, clearSales,
     addFinancialInvestment, deleteFinancialInvestment,
+    addCustomSpecies, deleteCustomSpecies,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
