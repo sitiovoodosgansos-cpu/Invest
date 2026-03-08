@@ -5,8 +5,9 @@ import {
   isEggProduct, getEggProfitRate, getBirdProfitRate, filterValidTransactions
 } from '../utils/helpers';
 import { parseCSV, readFileAsText } from '../utils/csvParser';
+import { parsePDFFile } from '../utils/pdfParser';
 import {
-  Upload, FileSpreadsheet, Trash2, CheckCircle, AlertCircle, ShoppingCart, Filter
+  Upload, FileSpreadsheet, Trash2, CheckCircle, AlertCircle, ShoppingCart, Filter, FileText
 } from 'lucide-react';
 
 export default function Sales() {
@@ -23,6 +24,76 @@ export default function Sales() {
 
   const validSales = useMemo(() => filterValidTransactions(sales), [sales]);
 
+  // Process parsed rows (from CSV or PDF) into sales with profit distribution
+  const processAndAddSales = (parsed) => {
+    // Filter out rejected/refunded
+    const valid = parsed.filter(row => {
+      const status = (row.transactionStatus || '').toUpperCase();
+      return !status.includes('RECUSAD') && !status.includes('REEMBOLSAD');
+    });
+
+    const rejected = parsed.length - valid.length;
+
+    // Process each item and distribute profit
+    const processedSales = valid.map(row => {
+      const description = row.itemDescription || row.item || '';
+      const totalValue = parseFloat(row.totalValue || row.price || 0);
+      const isEgg = isEggProduct(description);
+      const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+
+      // Try to match to a bird
+      let matchedBirdId = null;
+      let matchedInvestorId = null;
+      let matchedBreed = null;
+
+      for (const bird of birds) {
+        const breedUpper = bird.breed.toUpperCase();
+        if (description.toUpperCase().includes(breedUpper)) {
+          matchedBirdId = bird.id;
+          matchedInvestorId = bird.investorId;
+          matchedBreed = bird.breed;
+          break;
+        }
+        // Try partial match
+        const words = bird.breed.toUpperCase().split(' ');
+        if (words.length > 1 && words.every(w => description.toUpperCase().includes(w))) {
+          matchedBirdId = bird.id;
+          matchedInvestorId = bird.investorId;
+          matchedBreed = bird.breed;
+          break;
+        }
+      }
+
+      return {
+        ...row,
+        itemDescription: description,
+        totalValue,
+        isEgg,
+        profitRate: rate,
+        profit: totalValue * rate,
+        matchedBirdId,
+        matchedInvestorId,
+        matchedBreed,
+      };
+    });
+
+    addSales(processedSales);
+
+    const matched = processedSales.filter(s => s.matchedInvestorId).length;
+    const unmatched = processedSales.length - matched;
+
+    return {
+      success: true,
+      total: parsed.length,
+      valid: valid.length,
+      rejected,
+      matched,
+      unmatched,
+      totalValue: processedSales.reduce((s, p) => s + p.totalValue, 0),
+      totalProfit: processedSales.filter(s => s.matchedInvestorId).reduce((s, p) => s + p.profit, 0),
+    };
+  };
+
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -31,75 +102,28 @@ export default function Sales() {
     setImportResult(null);
 
     try {
-      const text = await readFileAsText(file);
-      const parsed = await parseCSV(text);
+      const isPDF = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
 
-      // Filter out rejected/refunded
-      const valid = parsed.filter(row => {
-        const status = (row.transactionStatus || '').toUpperCase();
-        return !status.includes('RECUSAD') && !status.includes('REEMBOLSAD');
-      });
-
-      const rejected = parsed.length - valid.length;
-
-      // Process each item and distribute profit
-      const processedSales = valid.map(row => {
-        const description = row.itemDescription || row.item || '';
-        const totalValue = parseFloat(row.totalValue || row.price || 0);
-        const isEgg = isEggProduct(description);
-        const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
-
-        // Try to match to a bird
-        let matchedBirdId = null;
-        let matchedInvestorId = null;
-        let matchedBreed = null;
-
-        for (const bird of birds) {
-          const breedUpper = bird.breed.toUpperCase();
-          if (description.toUpperCase().includes(breedUpper)) {
-            matchedBirdId = bird.id;
-            matchedInvestorId = bird.investorId;
-            matchedBreed = bird.breed;
-            break;
-          }
-          // Try partial match
-          const words = bird.breed.toUpperCase().split(' ');
-          if (words.length > 1 && words.every(w => description.toUpperCase().includes(w))) {
-            matchedBirdId = bird.id;
-            matchedInvestorId = bird.investorId;
-            matchedBreed = bird.breed;
-            break;
-          }
+      let parsed;
+      if (isPDF) {
+        const pdfData = await parsePDFFile(file);
+        if (!pdfData.items || pdfData.items.length === 0) {
+          throw new Error('Nenhum item encontrado no PDF. Verifique se e um recibo de pedido do Wix.');
         }
+        parsed = pdfData.items;
+      } else {
+        const text = await readFileAsText(file);
+        parsed = await parseCSV(text);
+      }
 
-        return {
-          ...row,
-          itemDescription: description,
-          totalValue,
-          isEgg,
-          profitRate: rate,
-          profit: totalValue * rate,
-          matchedBirdId,
-          matchedInvestorId,
-          matchedBreed,
-        };
-      });
+      const result = processAndAddSales(parsed);
 
-      addSales(processedSales);
+      if (isPDF) {
+        // Add PDF-specific info to result
+        result.source = 'PDF';
+      }
 
-      const matched = processedSales.filter(s => s.matchedInvestorId).length;
-      const unmatched = processedSales.length - matched;
-
-      setImportResult({
-        success: true,
-        total: parsed.length,
-        valid: valid.length,
-        rejected,
-        matched,
-        unmatched,
-        totalValue: processedSales.reduce((s, p) => s + p.totalValue, 0),
-        totalProfit: processedSales.filter(s => s.matchedInvestorId).reduce((s, p) => s + p.profit, 0),
-      });
+      setImportResult(result);
     } catch (err) {
       setImportResult({ success: false, error: err.message });
     } finally {
@@ -123,7 +147,7 @@ export default function Sales() {
     <div className="animate-in">
       <div className="page-header">
         <h2>Vendas</h2>
-        <p>Importe relatorios de vendas do Wix e distribua lucros automaticamente</p>
+        <p>Importe relatorios de vendas do Wix (CSV ou PDF) e distribua lucros automaticamente</p>
       </div>
 
       {/* Upload Area */}
@@ -145,15 +169,15 @@ export default function Sales() {
         >
           <Upload size={40} />
           <p>
-            <span>Clique para selecionar</span> ou arraste o arquivo CSV/Excel do Wix
+            <span>Clique para selecionar</span> ou arraste o arquivo CSV ou PDF do Wix
           </p>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-            Formatos aceitos: CSV (.csv) exportado do Wix Store
+            Formatos aceitos: CSV (.csv) ou PDF (.pdf) de pedidos do Wix Store
           </p>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.txt"
+            accept=".csv,.txt,.pdf"
             style={{ display: 'none' }}
             onChange={handleFileUpload}
           />
@@ -176,7 +200,9 @@ export default function Sales() {
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                   <CheckCircle size={20} color="var(--success)" />
-                  <strong style={{ color: 'var(--success)' }}>Importacao concluida!</strong>
+                  <strong style={{ color: 'var(--success)' }}>
+                    Importacao concluida{importResult.source === 'PDF' ? ' (PDF)' : ''}!
+                  </strong>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, fontSize: 13 }}>
                   <div><strong>{importResult.total}</strong> itens no arquivo</div>
