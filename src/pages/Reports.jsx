@@ -151,8 +151,13 @@ export default function Reports() {
 
   const handleExportPDF = () => {
     if (!investor) return;
-    const periodLabel = dateRange ? dateRange.label : 'Todos os periodos';
-    exportInvestorReport(investor, birds, sales, financialInvestments, filteredDist, periodLabel);
+    try {
+      const periodLabel = dateRange ? dateRange.label : 'Todos os periodos';
+      exportInvestorReport(investor, birds, sales, financialInvestments, filteredDist, periodLabel);
+    } catch (err) {
+      console.error('Erro ao exportar PDF:', err);
+      alert('Erro ao gerar o PDF. Tente novamente.');
+    }
   };
 
   const monthOptions = useMemo(() => getMonthOptions(), []);
