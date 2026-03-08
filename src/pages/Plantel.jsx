@@ -73,13 +73,11 @@ export default function Plantel() {
 
     addCustomSpecies({ species, breeds });
 
-    // Auto-select the new species if the plantel modal is open
-    if (showModal) {
-      setForm(prev => ({ ...prev, species, breed: '' }));
-    }
+    // Auto-select the new species in the plantel form
+    setForm(prev => ({ ...prev, species, breed: '' }));
 
     setNewAnimalForm({ species: '', breeds: '' });
-    setShowNewAnimalModal(false);
+    // Keep the modal open so user can see confirmation and add more if needed
   };
 
   const handleDeleteCustomSpecies = (speciesName) => {

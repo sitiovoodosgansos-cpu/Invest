@@ -30,14 +30,16 @@ export const BIRD_SPECIES = [
 export function AppProvider({ children }) {
   const [data, setData] = useState(defaultData);
   const [loading, setLoading] = useState(true);
-  const skipNextFirestore = useRef(0);
+  const lastLocalWriteTime = useRef(0);
 
   // Listen to Firestore in real-time
   useEffect(() => {
     const unsubscribe = onSnapshot(FIRESTORE_DOC, (snapshot) => {
       if (snapshot.exists()) {
-        if (skipNextFirestore.current > 0) {
-          skipNextFirestore.current--;
+        // Ignore Firestore snapshots that arrive shortly after a local write
+        // to prevent onSnapshot (local cache + server confirm) from overwriting local state
+        const timeSinceWrite = Date.now() - lastLocalWriteTime.current;
+        if (timeSinceWrite < 3000) {
           setLoading(false);
           return;
         }
@@ -48,7 +50,7 @@ export function AppProvider({ children }) {
           const stored = localStorage.getItem(STORAGE_KEY);
           if (stored) {
             const parsed = { ...defaultData, ...JSON.parse(stored) };
-            skipNextFirestore.current++;
+            lastLocalWriteTime.current = Date.now();
             setDoc(FIRESTORE_DOC, parsed);
             setData(parsed);
           }
@@ -81,9 +83,8 @@ export function AppProvider({ children }) {
       return;
     }
     // Save to both Firestore and localStorage (backup)
-    skipNextFirestore.current++;
+    lastLocalWriteTime.current = Date.now();
     setDoc(FIRESTORE_DOC, data).catch(err => {
-      skipNextFirestore.current = Math.max(0, skipNextFirestore.current - 1);
       console.error('Firestore save error:', err);
     });
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
