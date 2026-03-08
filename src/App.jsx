@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { useApp } from './context/AppContext';
 import { AppProvider } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Dashboard from './pages/Dashboard';
@@ -96,7 +97,18 @@ function AdminLayout() {
 }
 
 function AppRouter() {
-  const { currentUser, isAdmin, isInvestor } = useAuth();
+  const { currentUser, isAdmin, isInvestor, adminLoading } = useAuth();
+  const { loading } = useApp();
+
+  if (loading || adminLoading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: 12 }}>
+        <div style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Carregando...</p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return <Login />;
