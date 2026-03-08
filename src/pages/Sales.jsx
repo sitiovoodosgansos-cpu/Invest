@@ -8,19 +8,20 @@ import { parseCSV, readFileAsText } from '../utils/csvParser';
 import { parseWixOrderText } from '../utils/pdfParser';
 import {
   Upload, Trash2, CheckCircle, AlertCircle, ShoppingCart,
-  FileText, ClipboardPaste, PlusCircle, X
+  FileText, ClipboardPaste, PlusCircle, X, Edit2, Save
 } from 'lucide-react';
 
 const EMPTY_MANUAL_ITEM = { itemDescription: '', quantity: 1, price: '' };
 
 export default function Sales() {
-  const { investors, birds, sales, addSales, clearSales } = useApp();
+  const { investors, birds, sales, addSales, clearSales, deleteSale, updateSale } = useApp();
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [filterType, setFilterType] = useState('all');
   const [importTab, setImportTab] = useState('file'); // file | paste | manual
   const [pasteText, setPasteText] = useState('');
   const [manualOrder, setManualOrder] = useState({ orderNumber: '', buyerName: '', date: '', items: [{ ...EMPTY_MANUAL_ITEM }] });
+  const [editingSale, setEditingSale] = useState(null);
   const fileInputRef = useRef(null);
 
   const distribution = useMemo(
@@ -208,6 +209,66 @@ export default function Sales() {
   }, [validSales, filterType]);
 
   const getInvestorName = (id) => investors.find(i => i.id === id)?.name || '-';
+
+  const handleDeleteSale = (sale) => {
+    if (window.confirm(`Excluir venda "${sale.itemDescription || sale.item || 'sem descricao'}"?`)) {
+      deleteSale(sale.id);
+    }
+  };
+
+  const handleStartEdit = (sale) => {
+    setEditingSale({
+      id: sale.id,
+      itemDescription: sale.itemDescription || sale.item || '',
+      quantity: sale.quantity || 1,
+      totalValue: sale.totalValue || 0,
+      date: sale.date ? sale.date.slice(0, 10) : '',
+      orderNumber: sale.orderNumber || '',
+    });
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingSale) return;
+    const description = editingSale.itemDescription;
+    const totalValue = parseFloat(editingSale.totalValue) || 0;
+    const isEgg = isEggProduct(description);
+    const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+
+    let matchedBirdId = null;
+    let matchedInvestorId = null;
+    let matchedBreed = null;
+    for (const bird of birds) {
+      const breedUpper = bird.breed.toUpperCase();
+      if (description.toUpperCase().includes(breedUpper)) {
+        matchedBirdId = bird.id;
+        matchedInvestorId = bird.investorId;
+        matchedBreed = bird.breed;
+        break;
+      }
+      const words = bird.breed.toUpperCase().split(' ');
+      if (words.length > 1 && words.every(w => description.toUpperCase().includes(w))) {
+        matchedBirdId = bird.id;
+        matchedInvestorId = bird.investorId;
+        matchedBreed = bird.breed;
+        break;
+      }
+    }
+
+    updateSale(editingSale.id, {
+      itemDescription: description,
+      quantity: parseInt(editingSale.quantity, 10) || 1,
+      totalValue,
+      date: editingSale.date,
+      orderNumber: editingSale.orderNumber,
+      isEgg,
+      profitRate: rate,
+      profit: totalValue * rate,
+      matchedBirdId,
+      matchedInvestorId,
+      matchedBreed,
+    });
+    setEditingSale(null);
+  };
 
   return (
     <div className="animate-in">
@@ -515,6 +576,7 @@ export default function Sales() {
                   <th>Taxa</th>
                   <th>Lucro</th>
                   <th>Investidor</th>
+                  <th style={{ width: 80, textAlign: 'center' }}>Acoes</th>
                 </tr>
               </thead>
               <tbody>
@@ -543,6 +605,26 @@ export default function Sales() {
                         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nao vinculada</span>
                       )}
                     </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                        <button
+                          className="btn btn-sm btn-secondary"
+                          style={{ padding: '4px 6px' }}
+                          title="Editar venda"
+                          onClick={() => handleStartEdit(sale)}
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                        <button
+                          className="btn btn-sm btn-secondary"
+                          style={{ padding: '4px 6px', color: 'var(--danger)' }}
+                          title="Excluir venda"
+                          onClick={() => handleDeleteSale(sale)}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -561,6 +643,91 @@ export default function Sales() {
           <ShoppingCart size={48} />
           <h3>Nenhuma venda importada</h3>
           <p>Use as abas acima para importar CSV, colar texto de PDF ou inserir manualmente</p>
+        </div>
+      )}
+
+      {/* Edit Sale Modal */}
+      {editingSale && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={() => setEditingSale(null)}>
+          <div style={{
+            background: 'var(--bg)', borderRadius: 'var(--radius)', padding: 24,
+            width: '100%', maxWidth: 480, margin: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0 }}>Editar Venda</h3>
+              <button className="btn btn-sm btn-secondary" onClick={() => setEditingSale(null)} style={{ padding: '4px 6px' }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Descricao do Item</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={editingSale.itemDescription}
+                  onChange={e => setEditingSale(prev => ({ ...prev, itemDescription: e.target.value }))}
+                />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Data</label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={editingSale.date}
+                    onChange={e => setEditingSale(prev => ({ ...prev, date: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>N. Pedido</label>
+                  <input
+                    type="text"
+                    className="input"
+                    value={editingSale.orderNumber}
+                    onChange={e => setEditingSale(prev => ({ ...prev, orderNumber: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Quantidade</label>
+                  <input
+                    type="number"
+                    className="input"
+                    min="1"
+                    value={editingSale.quantity}
+                    onChange={e => setEditingSale(prev => ({ ...prev, quantity: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor Total (R$)</label>
+                  <input
+                    type="number"
+                    className="input"
+                    step="0.01"
+                    min="0"
+                    value={editingSale.totalValue}
+                    onChange={e => setEditingSale(prev => ({ ...prev, totalValue: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                Tipo detectado: <strong>{isEggProduct(editingSale.itemDescription) ? 'Ovo (10%)' : 'Ave (6,4%)'}</strong> — O vinculo com investidor sera recalculado ao salvar.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, marginTop: 20, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={() => setEditingSale(null)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleSaveEdit}>
+                <Save size={14} /> Salvar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -105,6 +105,20 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, sales: [] }));
   };
 
+  const deleteSale = (id) => {
+    setData(prev => ({
+      ...prev,
+      sales: prev.sales.filter(s => s.id !== id),
+    }));
+  };
+
+  const updateSale = (id, updates) => {
+    setData(prev => ({
+      ...prev,
+      sales: prev.sales.map(s => s.id === id ? { ...s, ...updates } : s),
+    }));
+  };
+
   // Custom Species
   const addCustomSpecies = (speciesData) => {
     setData(prev => {
@@ -158,7 +172,7 @@ export function AppProvider({ children }) {
     ...data,
     addInvestor, updateInvestor, deleteInvestor,
     addBird, updateBird, deleteBird,
-    addSales, clearSales,
+    addSales, clearSales, deleteSale, updateSale,
     addFinancialInvestment, deleteFinancialInvestment,
     addCustomSpecies, deleteCustomSpecies,
   };
