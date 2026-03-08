@@ -174,19 +174,29 @@ export function AppProvider({ children }) {
   // Custom Species
   const addCustomSpecies = (speciesData) => {
     setData(prev => {
-      const existing = prev.customSpecies.find(s => s.species === speciesData.species);
+      // Check if species already exists in custom list (case-insensitive)
+      const existing = prev.customSpecies.find(s => s.species.toLowerCase() === speciesData.species.toLowerCase());
       if (existing) {
-        // Add new breeds to existing species
+        // Add new breeds to existing custom species
         const newBreeds = speciesData.breeds.filter(b => !existing.breeds.includes(b));
         if (newBreeds.length === 0) return prev;
         return {
           ...prev,
           customSpecies: prev.customSpecies.map(s =>
-            s.species === speciesData.species
+            s.species.toLowerCase() === speciesData.species.toLowerCase()
               ? { ...s, breeds: [...s.breeds, ...newBreeds] }
               : s
           ),
         };
+      }
+      // Check if species exists in built-in list (case-insensitive)
+      const builtIn = BIRD_SPECIES.find(s => s.species.toLowerCase() === speciesData.species.toLowerCase());
+      if (builtIn) {
+        // Only store breeds that aren't already in the built-in list
+        const newBreeds = speciesData.breeds.filter(b => !builtIn.breeds.includes(b));
+        if (newBreeds.length === 0) return prev;
+        // Use the built-in species name (correct casing) for consistency
+        return { ...prev, customSpecies: [...prev.customSpecies, { species: builtIn.species, breeds: newBreeds }] };
       }
       return { ...prev, customSpecies: [...prev.customSpecies, speciesData] };
     });
