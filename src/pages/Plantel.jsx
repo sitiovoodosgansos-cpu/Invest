@@ -25,8 +25,22 @@ export default function Plantel() {
   // New animal form
   const [newAnimalForm, setNewAnimalForm] = useState({ species: '', breeds: '' });
 
-  // Merge built-in + custom species
-  const allSpecies = [...BIRD_SPECIES, ...(customSpecies || [])];
+  // Merge built-in + custom species (combine breeds when species name matches)
+  const allSpecies = (() => {
+    const merged = BIRD_SPECIES.map(s => {
+      const custom = (customSpecies || []).find(c => c.species.toLowerCase() === s.species.toLowerCase());
+      if (custom) {
+        const extraBreeds = custom.breeds.filter(b => !s.breeds.includes(b));
+        return extraBreeds.length > 0 ? { ...s, breeds: [...s.breeds, ...extraBreeds] } : s;
+      }
+      return s;
+    });
+    // Add custom species that don't match any built-in
+    const extras = (customSpecies || []).filter(
+      c => !BIRD_SPECIES.some(s => s.species.toLowerCase() === c.species.toLowerCase())
+    );
+    return [...merged, ...extras];
+  })();
   const selectedSpeciesData = allSpecies.find(s => s.species === form.species);
 
   const handleSubmit = (e) => {
