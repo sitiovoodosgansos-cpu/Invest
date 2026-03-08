@@ -1,6 +1,6 @@
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { formatCurrency, formatDate, isEggProduct, getMonthsDifference, calculateCompoundInterest } from './helpers';
+import { formatCurrency, formatDate, getMonthsDifference, calculateCompoundInterest } from './helpers';
 
 export function exportInvestorReport(investor, birds, sales, financialInvestments, distribution, periodLabel) {
   const doc = new jsPDF();
@@ -161,6 +161,16 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
     );
   }
 
+  // Download using blob + anchor for maximum browser compatibility
   const periodSuffix = periodLabel ? `_${periodLabel.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
-  doc.save(`Relatorio_${investor.name.replace(/\s+/g, '_')}${periodSuffix}_${new Date().toISOString().slice(0, 10)}.pdf`);
+  const fileName = `Relatorio_${investor.name.replace(/\s+/g, '_')}${periodSuffix}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
