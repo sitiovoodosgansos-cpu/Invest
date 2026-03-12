@@ -69,10 +69,12 @@ export function AuthProvider({ children }) {
   };
 
   const login = (username, password, investors) => {
+    const u = username.trim();
+    const p = password.trim();
     const admin = getAdmin();
 
     // Check admin credentials
-    if (admin && admin.username === username && admin.password === password) {
+    if (admin && admin.username === u && admin.password === p) {
       const user = { ...admin, role: 'admin' };
       setCurrentUser(user);
       sessionStorage.setItem(AUTH_KEY, JSON.stringify(user));
@@ -81,13 +83,18 @@ export function AuthProvider({ children }) {
 
     // Check investor credentials
     const investor = investors.find(
-      i => i.loginUsername === username && i.loginPassword === password
+      i => i.loginUsername?.trim() === u && i.loginPassword?.trim() === p
     );
     if (investor) {
       const user = { role: 'investor', investorId: investor.id, name: investor.name };
       setCurrentUser(user);
       sessionStorage.setItem(AUTH_KEY, JSON.stringify(user));
       return { success: true, user };
+    }
+
+    // More specific error when data might not have loaded
+    if (!investors || investors.length === 0) {
+      return { success: false, error: 'Dados ainda carregando. Aguarde e tente novamente.' };
     }
 
     return { success: false, error: 'Usuario ou senha incorretos' };
