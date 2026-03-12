@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { useApp } from './context/AppContext';
-import { AppProvider } from './context/AppContext';
+import { useApp, AppProvider } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Dashboard from './pages/Dashboard';
 import Investors from './pages/Investors';
@@ -10,6 +9,7 @@ import Sales from './pages/Sales';
 import Financial from './pages/Financial';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
+import PendingApproval from './pages/PendingApproval';
 import InvestorPortal from './pages/InvestorPortal';
 import {
   LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut
@@ -65,7 +65,7 @@ function AdminLayout() {
         <div style={{ padding: '12px', borderTop: '1px solid var(--border)', marginTop: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>
-              {currentUser?.username || 'Admin'}
+              {currentUser?.displayName || currentUser?.email || 'Admin'}
             </span>
             <button
               className="btn btn-sm btn-secondary"
@@ -97,10 +97,10 @@ function AdminLayout() {
 }
 
 function AppRouter() {
-  const { currentUser, isAdmin, isInvestor, adminLoading } = useAuth();
-  const { loading } = useApp();
+  const { currentUser, isAdmin, isInvestor, isPending, loading } = useAuth();
+  const { loading: dataLoading } = useApp();
 
-  if (loading || adminLoading) {
+  if (loading || dataLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: 12 }}>
         <div style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
@@ -110,18 +110,10 @@ function AppRouter() {
     );
   }
 
-  if (!currentUser) {
-    return <Login />;
-  }
-
-  if (isInvestor) {
-    return <InvestorPortal />;
-  }
-
-  if (isAdmin) {
-    return <AdminLayout />;
-  }
-
+  if (!currentUser) return <Login />;
+  if (isPending) return <PendingApproval />;
+  if (isInvestor) return <InvestorPortal />;
+  if (isAdmin) return <AdminLayout />;
   return <Login />;
 }
 
