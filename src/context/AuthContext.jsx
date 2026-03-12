@@ -4,9 +4,13 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
   signOut,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, onSnapshot, collection, getDocs } from 'firebase/firestore';
+
+const googleProvider = new GoogleAuthProvider();
 
 const AuthContext = createContext();
 
@@ -75,6 +79,32 @@ export function AuthProvider({ children }) {
     });
   };
 
+  const loginWithGoogle = async () => {
+    const result = await signInWithPopup(auth, googleProvider);
+    const user = result.user;
+
+    // Check if user profile already exists
+    const userRef = doc(db, 'users', user.uid);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+      // New user via Google - create profile
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const isFirstUser = usersSnap.empty;
+
+      await setDoc(userRef, {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName || user.email,
+        role: isFirstUser ? 'admin' : 'investor',
+        approved: isFirstUser ? true : false,
+        investorId: null,
+        createdAt: new Date().toISOString(),
+        approvedAt: isFirstUser ? new Date().toISOString() : null,
+      });
+    }
+  };
+
   const logout = () => signOut(auth);
 
   const isAdmin = currentUser?.role === 'admin' && currentUser?.approved;
@@ -84,7 +114,7 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{
       currentUser, loading, isAdmin, isInvestor, isPending,
-      login, register, logout,
+      login, register, loginWithGoogle, logout,
     }}>
       {children}
     </AuthContext.Provider>
