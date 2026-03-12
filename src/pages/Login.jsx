@@ -6,12 +6,12 @@ import { Bird, LogIn, UserPlus, Eye, EyeOff } from 'lucide-react';
 export default function Login() {
   const { adminExists, login, setupAdmin } = useAuth();
   const { investors } = useApp();
-  const [isSetup, setIsSetup] = useState(!adminExists);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const isSetup = !adminExists;
 
   const handleLogin = (e) => {
     e.preventDefault();

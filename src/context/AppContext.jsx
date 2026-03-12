@@ -200,6 +200,10 @@ export function AppProvider({ children }) {
     }));
   };
 
+  const clearAllSpecies = () => {
+    setData(prev => ({ ...prev, customSpecies: [] }));
+  };
+
   // Financial Investments
   const addFinancialInvestment = (investment) => {
     const newInv = {
@@ -228,7 +232,7 @@ export function AppProvider({ children }) {
     addBird, updateBird, deleteBird,
     addSales, clearSales, deleteSale, updateSale,
     addFinancialInvestment, deleteFinancialInvestment,
-    addCustomSpecies, deleteCustomSpecies,
+    addCustomSpecies, deleteCustomSpecies, clearAllSpecies,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
