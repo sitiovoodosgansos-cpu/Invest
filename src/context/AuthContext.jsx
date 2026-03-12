@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { db } from '../firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
@@ -22,52 +22,77 @@ export function AuthProvider({ children }) {
   const [adminLoading, setAdminLoading] = useState(true);
   const [adminLoadFailed, setAdminLoadFailed] = useState(false);
 
-  // Load admin from Firestore on startup
-  useEffect(() => {
-    const loadAdmin = async () => {
-      let loaded = false;
+  // Function to load admin from Firestore (reusable)
+  const loadAdminFromFirestore = useCallback(async () => {
+    try {
+      const snapshot = await getDoc(FIRESTORE_ADMIN_DOC);
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setAdminData(data);
+        // Cache in localStorage as backup
+        localStorage.setItem(ADMIN_KEY, JSON.stringify(data));
+        setAdminLoadFailed(false);
+        return data;
+      }
+      // No admin doc exists in Firestore
+      return null;
+    } catch (error) {
+      console.error('Firestore admin load error:', error);
+      // Try localStorage fallback
       try {
-        const snapshot = await getDoc(FIRESTORE_ADMIN_DOC);
-        if (snapshot.exists()) {
-          setAdminData(snapshot.data());
-          loaded = true;
-        } else {
-          // Try to migrate from localStorage
-          const stored = localStorage.getItem(ADMIN_KEY);
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            await setDoc(FIRESTORE_ADMIN_DOC, parsed);
-            setAdminData(parsed);
-            loaded = true;
-          }
+        const stored = localStorage.getItem(ADMIN_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setAdminData(parsed);
+          setAdminLoadFailed(false);
+          return parsed;
         }
-      } catch (error) {
-        console.error('Firestore admin load error:', error);
-        // Fallback to localStorage
+      } catch {
+        // ignore
+      }
+      return null;
+    }
+  }, []);
+
+  // Load admin on startup
+  useEffect(() => {
+    const init = async () => {
+      const result = await loadAdminFromFirestore();
+      if (!result) {
+        // Check localStorage as last resort
         try {
           const stored = localStorage.getItem(ADMIN_KEY);
           if (stored) {
-            setAdminData(JSON.parse(stored));
-            loaded = true;
+            const parsed = JSON.parse(stored);
+            setAdminData(parsed);
+          } else {
+            // No admin anywhere - could be first access or Firestore failed
+            // Try one more time to confirm
+            try {
+              const snapshot = await getDoc(FIRESTORE_ADMIN_DOC);
+              if (!snapshot.exists()) {
+                // Truly no admin - first time setup
+                setAdminLoadFailed(false);
+              } else {
+                setAdminData(snapshot.data());
+              }
+            } catch {
+              setAdminLoadFailed(true);
+            }
           }
         } catch {
-          // ignore
-        }
-        // If we couldn't load from anywhere, assume admin exists on another device
-        if (!loaded) {
           setAdminLoadFailed(true);
         }
       }
       setAdminLoading(false);
     };
-    loadAdmin();
-  }, []);
+    init();
+  }, [loadAdminFromFirestore]);
 
   const getAdmin = () => adminData;
 
   const setupAdmin = async (username, password) => {
     const admin = { username, password, role: 'admin' };
-    // Save to Firestore and localStorage (backup)
     try {
       await setDoc(FIRESTORE_ADMIN_DOC, admin);
     } catch (error) {
@@ -79,8 +104,24 @@ export function AuthProvider({ children }) {
     sessionStorage.setItem(AUTH_KEY, JSON.stringify(admin));
   };
 
-  const login = (username, password, investors) => {
-    const admin = getAdmin();
+  const login = async (username, password, investors) => {
+    let admin = getAdmin();
+
+    // If admin data is not loaded, try to fetch it from Firestore now
+    if (!admin && adminLoadFailed) {
+      try {
+        const snapshot = await getDoc(FIRESTORE_ADMIN_DOC);
+        if (snapshot.exists()) {
+          admin = snapshot.data();
+          setAdminData(admin);
+          localStorage.setItem(ADMIN_KEY, JSON.stringify(admin));
+          setAdminLoadFailed(false);
+        }
+      } catch (error) {
+        console.error('Firestore retry failed:', error);
+        return { success: false, error: 'Sem conexao com o servidor. Verifique sua internet e tente novamente.' };
+      }
+    }
 
     // Check admin credentials
     if (admin && admin.username === username && admin.password === password) {
@@ -101,6 +142,11 @@ export function AuthProvider({ children }) {
       return { success: true, user };
     }
 
+    // Provide a more specific error when we couldn't load admin data
+    if (!admin && adminLoadFailed) {
+      return { success: false, error: 'Nao foi possivel conectar ao servidor. Tente novamente.' };
+    }
+
     return { success: false, error: 'Usuario ou senha incorretos' };
   };
 
@@ -111,7 +157,6 @@ export function AuthProvider({ children }) {
 
   const isAdmin = currentUser?.role === 'admin';
   const isInvestor = currentUser?.role === 'investor';
-  // If Firestore failed and no localStorage, assume admin exists (investor accessing from another device)
   const adminExists = !!adminData || adminLoadFailed;
 
   return (
