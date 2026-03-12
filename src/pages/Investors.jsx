@@ -1,35 +1,20 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { useAuth } from '../context/AuthContext';
-import { db } from '../firebase';
-import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { formatCurrency, getInitials, calculateProfitDistribution } from '../utils/helpers';
-import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, UserCheck, X as XIcon } from 'lucide-react';
+import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff } from 'lucide-react';
 
 export default function Investors() {
   const { investors, birds, sales, addInvestor, updateInvestor, deleteInvestor } = useApp();
-  const { currentUser } = useAuth();
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState('');
-  const [form, setForm] = useState({ name: '', email: '', phone: '', document: '' });
-  const [pendingUsers, setPendingUsers] = useState([]);
-  const [approveModal, setApproveModal] = useState(null); // pending user being approved
-  const [selectedInvestorId, setSelectedInvestorId] = useState('');
+  const [form, setForm] = useState({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
+  const [showPassword, setShowPassword] = useState(false);
 
   const distribution = useMemo(
     () => calculateProfitDistribution(sales, birds),
     [sales, birds]
   );
-
-  // Listen for pending users
-  useEffect(() => {
-    const q = query(collection(db, 'users'), where('approved', '==', false));
-    const unsub = onSnapshot(q, (snap) => {
-      setPendingUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-    return () => unsub();
-  }, []);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -38,13 +23,14 @@ export default function Investors() {
     } else {
       addInvestor(form);
     }
-    setForm({ name: '', email: '', phone: '', document: '' });
+    setForm({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
     setEditingId(null);
     setShowModal(false);
+    setShowPassword(false);
   };
 
   const handleEdit = (investor) => {
-    setForm({ name: investor.name, email: investor.email || '', phone: investor.phone || '', document: investor.document || '' });
+    setForm({ name: investor.name, email: investor.email || '', phone: investor.phone || '', document: investor.document || '', loginUsername: investor.loginUsername || '', loginPassword: investor.loginPassword || '' });
     setEditingId(investor.id);
     setShowModal(true);
   };
@@ -55,62 +41,9 @@ export default function Investors() {
     }
   };
 
-  const handleApprove = async () => {
-    if (!approveModal || !selectedInvestorId) return;
-    try {
-      await updateDoc(doc(db, 'users', approveModal.uid), {
-        approved: true,
-        investorId: selectedInvestorId,
-        approvedAt: new Date().toISOString(),
-        approvedBy: currentUser.uid,
-      });
-      setApproveModal(null);
-      setSelectedInvestorId('');
-    } catch (err) {
-      console.error('Approve error:', err);
-    }
-  };
-
-  const handleApproveNewInvestor = async () => {
-    if (!approveModal) return;
-    // Create a new investor record and link it
-    const newInvestor = addInvestor({
-      name: approveModal.displayName,
-      email: approveModal.email,
-      phone: '',
-      document: '',
-    });
-    try {
-      await updateDoc(doc(db, 'users', approveModal.uid), {
-        approved: true,
-        investorId: newInvestor.id,
-        approvedAt: new Date().toISOString(),
-        approvedBy: currentUser.uid,
-      });
-      setApproveModal(null);
-      setSelectedInvestorId('');
-    } catch (err) {
-      console.error('Approve error:', err);
-    }
-  };
-
-  const handleReject = async (user) => {
-    if (!window.confirm(`Rejeitar a conta de ${user.displayName || user.email}?`)) return;
-    try {
-      await updateDoc(doc(db, 'users', user.uid), {
-        rejected: true,
-        approved: false,
-      });
-    } catch (err) {
-      console.error('Reject error:', err);
-    }
-  };
-
   const filtered = investors.filter(i =>
     i.name.toLowerCase().includes(search.toLowerCase())
   );
-
-  const activePending = pendingUsers.filter(u => !u.rejected);
 
   return (
     <div className="animate-in">
@@ -118,46 +51,6 @@ export default function Investors() {
         <h2>Investidores</h2>
         <p>Gerencie os investidores do Sitio Voo dos Gansos</p>
       </div>
-
-      {/* Pending Users Section */}
-      {activePending.length > 0 && (
-        <div className="card" style={{ marginBottom: 24, border: '2px solid var(--warning-border, #ffc107)' }}>
-          <div className="card-header" style={{ background: 'var(--warning-bg, #fff3cd)' }}>
-            <span className="card-title" style={{ color: 'var(--warning-text, #856404)' }}>
-              <UserCheck size={18} style={{ verticalAlign: 'middle', marginRight: 8 }} />
-              Usuarios Pendentes ({activePending.length})
-            </span>
-          </div>
-          <div style={{ padding: 16 }}>
-            {activePending.map(user => (
-              <div key={user.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
-                <div>
-                  <strong>{user.displayName || 'Sem nome'}</strong>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{user.email}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    Registrado em {new Date(user.createdAt).toLocaleDateString('pt-BR')}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => { setApproveModal(user); setSelectedInvestorId(''); }}
-                  >
-                    <UserCheck size={14} /> Aprovar
-                  </button>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => handleReject(user)}
-                    style={{ color: 'var(--danger, #dc3545)' }}
-                  >
-                    Rejeitar
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="filter-bar">
         <div style={{ position: 'relative', flex: 1, maxWidth: 300 }}>
@@ -170,7 +63,7 @@ export default function Investors() {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-        <button className="btn btn-primary" onClick={() => { setForm({ name: '', email: '', phone: '', document: '' }); setEditingId(null); setShowModal(true); }}>
+        <button className="btn btn-primary" onClick={() => { setForm({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' }); setEditingId(null); setShowModal(true); setShowPassword(false); }}>
           <UserPlus size={16} /> Novo Investidor
         </button>
       </div>
@@ -212,6 +105,11 @@ export default function Investors() {
                   <Phone size={12} /> {investor.phone}
                 </div>
               )}
+              {investor.loginUsername && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--primary)', marginBottom: 4 }}>
+                  <Key size={12} /> Login: {investor.loginUsername}
+                </div>
+              )}
 
               <div className="investor-stats">
                 <div>
@@ -244,7 +142,6 @@ export default function Investors() {
         </div>
       )}
 
-      {/* Add/Edit Investor Modal */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -268,60 +165,35 @@ export default function Investors() {
                 <label className="form-label">CPF/CNPJ</label>
                 <input className="form-input" value={form.document} onChange={e => setForm({ ...form, document: e.target.value })} placeholder="000.000.000-00" />
               </div>
+              <div style={{ padding: '12px 16px', background: 'var(--primary-bg)', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <Key size={16} color="var(--primary)" />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)' }}>Acesso do Investidor</span>
+                </div>
+                <div className="form-row">
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Login</label>
+                    <input className="form-input" value={form.loginUsername} onChange={e => setForm({ ...form, loginUsername: e.target.value })} placeholder="usuario.login" />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Senha</label>
+                    <div style={{ position: 'relative' }}>
+                      <input className="form-input" type={showPassword ? 'text' : 'password'} value={form.loginPassword} onChange={e => setForm({ ...form, loginPassword: e.target.value })} placeholder="Senha de acesso" style={{ paddingRight: 40 }} />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4 }}>
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 8 }}>
+                  O investidor usara esses dados para acessar o painel e acompanhar seus investimentos.
+                </p>
+              </div>
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
                 <button type="submit" className="btn btn-primary">{editingId ? 'Salvar' : 'Cadastrar'}</button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* Approve User Modal */}
-      {approveModal && (
-        <div className="modal-overlay" onClick={() => setApproveModal(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3 className="modal-title">Aprovar Usuario</h3>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Aprovar <strong>{approveModal.displayName}</strong> ({approveModal.email}) como investidor.
-            </p>
-
-            <div className="form-group">
-              <label className="form-label">Vincular a investidor existente</label>
-              <select
-                className="form-input"
-                value={selectedInvestorId}
-                onChange={e => setSelectedInvestorId(e.target.value)}
-              >
-                <option value="">Selecione um investidor...</option>
-                {investors.map(inv => (
-                  <option key={inv.id} value={inv.id}>{inv.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="modal-actions" style={{ flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setApproveModal(null)}>Cancelar</button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ flex: 1 }}
-                  disabled={!selectedInvestorId}
-                  onClick={handleApprove}
-                >
-                  Vincular e Aprovar
-                </button>
-              </div>
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={{ width: '100%', background: 'var(--success)', borderColor: 'var(--success)' }}
-                onClick={handleApproveNewInvestor}
-              >
-                <UserPlus size={14} /> Criar Novo Investidor e Aprovar
-              </button>
-            </div>
           </div>
         </div>
       )}
