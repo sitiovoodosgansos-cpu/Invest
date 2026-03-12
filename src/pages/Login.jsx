@@ -6,12 +6,16 @@ import { Bird, LogIn, UserPlus, Eye, EyeOff } from 'lucide-react';
 export default function Login() {
   const { adminExists, login, setupAdmin } = useAuth();
   const { investors } = useApp();
-  const [isSetup, setIsSetup] = useState(!adminExists);
+  // Always show login form by default - never show setup automatically
+  const [showSetup, setShowSetup] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Only allow setup if admin doesn't exist AND user explicitly requested it
+  const isSetup = showSetup && !adminExists;
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -55,7 +59,7 @@ export default function Login() {
           <div className="login-error">{error}</div>
         )}
 
-        {isSetup && !adminExists ? (
+        {isSetup ? (
           <form onSubmit={handleSetup}>
             <div className="form-group">
               <label className="form-label">Usuario Administrador</label>
@@ -96,6 +100,11 @@ export default function Login() {
             <button type="submit" className="btn btn-primary login-btn">
               <UserPlus size={18} /> Criar Conta Admin
             </button>
+            <p style={{ textAlign: 'center', marginTop: 12, fontSize: 13 }}>
+              <button type="button" onClick={() => { setShowSetup(false); setError(''); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', textDecoration: 'underline', fontSize: 13 }}>
+                Ja tenho conta, fazer login
+              </button>
+            </p>
           </form>
         ) : (
           <form onSubmit={handleLogin}>
