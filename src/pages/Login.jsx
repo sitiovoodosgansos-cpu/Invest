@@ -27,12 +27,21 @@ export default function Login() {
     setScreen(s);
   };
 
-  const handleLogin = (e) => {
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
-    const result = login(username, password, investors);
-    if (!result.success) {
-      setError(result.error);
+    setLoginLoading(true);
+    try {
+      const result = await login(username, password, investors);
+      if (!result.success) {
+        setError(result.error);
+      }
+    } catch {
+      setError('Erro ao conectar. Tente novamente.');
+    } finally {
+      setLoginLoading(false);
     }
   };
 
@@ -120,8 +129,8 @@ export default function Login() {
                 </button>
               </div>
             </div>
-            <button type="submit" className="btn btn-primary login-btn">
-              <LogIn size={18} /> Entrar
+            <button type="submit" className="btn btn-primary login-btn" disabled={loginLoading}>
+              <LogIn size={18} /> {loginLoading ? 'Conectando...' : 'Entrar'}
             </button>
             <p style={{ textAlign: 'center', marginTop: 12 }}>
               <button type="button" onClick={() => goTo('welcome')} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
