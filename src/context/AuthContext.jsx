@@ -97,7 +97,18 @@ export function AuthProvider({ children }) {
       return { success: false, error: 'Dados ainda carregando. Aguarde e tente novamente.' };
     }
 
-    return { success: false, error: 'Usuario ou senha incorretos' };
+    // Debug: show available logins (first 2 chars only) to help diagnose
+    const availableLogins = investors
+      .filter(i => i.loginUsername)
+      .map(i => i.loginUsername.trim().substring(0, 3) + '...')
+      .join(', ');
+
+    return {
+      success: false,
+      error: availableLogins
+        ? `Usuario ou senha incorretos. Logins disponiveis: ${availableLogins}`
+        : `Usuario ou senha incorretos. Nenhum investidor tem login configurado (${investors.length} investidores encontrados).`
+    };
   };
 
   const logout = () => {
