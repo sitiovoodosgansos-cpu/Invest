@@ -21,11 +21,13 @@ export const BIRD_SPECIES = [];
 export function AppProvider({ children }) {
   const [data, setData] = useState(defaultData);
   const [loading, setLoading] = useState(true);
+  const [firestoreError, setFirestoreError] = useState(null);
   const lastLocalWriteTime = useRef(0);
 
   // Listen to Firestore in real-time
   useEffect(() => {
     const unsubscribe = onSnapshot(FIRESTORE_DOC, (snapshot) => {
+      setFirestoreError(null);
       if (snapshot.exists()) {
         // Ignore Firestore snapshots that arrive shortly after a local write
         // to prevent onSnapshot (local cache + server confirm) from overwriting local state
@@ -52,6 +54,7 @@ export function AppProvider({ children }) {
       setLoading(false);
     }, (error) => {
       console.error('Firestore error:', error);
+      setFirestoreError(error.code || error.message || 'Erro de conexao');
       // Fallback to localStorage if Firestore fails
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
@@ -224,6 +227,7 @@ export function AppProvider({ children }) {
   const value = {
     ...data,
     loading,
+    firestoreError,
     addInvestor, updateInvestor, deleteInvestor,
     addBird, updateBird, deleteBird,
     addSales, clearSales, deleteSale, updateSale,

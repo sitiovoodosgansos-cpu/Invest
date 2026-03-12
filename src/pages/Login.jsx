@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
-import { Bird, LogIn, UserPlus, Eye, EyeOff } from 'lucide-react';
+import { Bird, LogIn, UserPlus, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 
 export default function Login() {
   const { adminExists, login, setupAdmin } = useAuth();
-  const { investors } = useApp();
+  const { investors, firestoreError } = useApp();
   // Always show login form by default - never show setup automatically
   const [showSetup, setShowSetup] = useState(false);
   const [username, setUsername] = useState('');
@@ -20,6 +20,10 @@ export default function Login() {
   const handleLogin = (e) => {
     e.preventDefault();
     setError('');
+    if (firestoreError && (!investors || investors.length === 0)) {
+      setError('Nao foi possivel carregar os dados. Verifique sua conexao ou entre em contato com o administrador.');
+      return;
+    }
     const result = login(username, password, investors);
     if (!result.success) {
       setError(result.error);
@@ -54,6 +58,17 @@ export default function Login() {
           <h1>Sitio Voo dos Gansos</h1>
           <p>{isSetup ? 'Configure o acesso do administrador' : 'Sistema de Investimentos'}</p>
         </div>
+
+        {firestoreError && (
+          <div style={{ padding: '10px 14px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, marginBottom: 12, fontSize: 12, color: '#856404', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <strong>Erro de conexao com o banco de dados.</strong><br />
+              O administrador precisa liberar o acesso no Firebase Console → Firestore → Regras.
+              <br /><span style={{ fontSize: 11, opacity: 0.8 }}>Erro: {firestoreError}</span>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="login-error">{error}</div>
@@ -142,6 +157,10 @@ export default function Login() {
 
         <p className="login-footer">
           v1.0 - Sitio Voo dos Gansos
+          <br />
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+            {firestoreError ? '⚠ Offline' : `✓ ${investors.length} inv.`}
+          </span>
         </p>
       </div>
     </div>
