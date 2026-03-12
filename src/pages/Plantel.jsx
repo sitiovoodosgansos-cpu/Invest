@@ -12,7 +12,7 @@ const SPECIES_EMOJI = {
 };
 
 export default function Plantel() {
-  const { investors, birds, addBird, updateBird, deleteBird, customSpecies, addCustomSpecies, deleteCustomSpecies, clearAllSpecies } = useApp();
+  const { investors, birds, addBird, updateBird, deleteBird, customSpecies, addCustomSpecies, deleteCustomSpecies } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [showNewAnimalModal, setShowNewAnimalModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
