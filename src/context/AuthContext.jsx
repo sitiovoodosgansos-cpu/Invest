@@ -1,111 +1,120 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { db } from '../firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../firebase';
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
+} from 'firebase/auth';
+import { doc, getDoc, setDoc, onSnapshot, collection, getDocs } from 'firebase/firestore';
+
+const googleProvider = new GoogleAuthProvider();
 
 const AuthContext = createContext();
 
-const AUTH_KEY = 'sitio_voo_dos_gansos_auth';
-const ADMIN_KEY = 'sitio_voo_dos_gansos_admin';
-const FIRESTORE_ADMIN_DOC = doc(db, 'config', 'admin');
-
 export function AuthProvider({ children }) {
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const stored = sessionStorage.getItem(AUTH_KEY);
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const [adminData, setAdminData] = useState(null);
-  const [adminLoading, setAdminLoading] = useState(true);
-
-  // Load admin from Firestore on startup
   useEffect(() => {
-    const loadAdmin = async () => {
-      try {
-        const snapshot = await getDoc(FIRESTORE_ADMIN_DOC);
-        if (snapshot.exists()) {
-          setAdminData(snapshot.data());
-        } else {
-          // Try to migrate from localStorage
-          const stored = localStorage.getItem(ADMIN_KEY);
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            await setDoc(FIRESTORE_ADMIN_DOC, parsed);
-            setAdminData(parsed);
-          }
-        }
-      } catch (error) {
-        console.error('Firestore admin load error:', error);
-        // Fallback to localStorage
-        try {
-          const stored = localStorage.getItem(ADMIN_KEY);
-          if (stored) setAdminData(JSON.parse(stored));
-        } catch {
-          // ignore
-        }
+    let unsubProfile = null;
+
+    const unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      // Clean up previous profile listener
+      if (unsubProfile) {
+        unsubProfile();
+        unsubProfile = null;
       }
-      setAdminLoading(false);
+
+      if (firebaseUser) {
+        // Listen to user profile in Firestore
+        const userRef = doc(db, 'users', firebaseUser.uid);
+        unsubProfile = onSnapshot(userRef, (snapshot) => {
+          if (snapshot.exists()) {
+            setCurrentUser({ uid: firebaseUser.uid, email: firebaseUser.email, ...snapshot.data() });
+          } else {
+            // Profile doc doesn't exist yet (shouldn't happen normally)
+            setCurrentUser({ uid: firebaseUser.uid, email: firebaseUser.email, role: 'investor', approved: false });
+          }
+          setLoading(false);
+        }, () => {
+          // Error reading profile
+          setCurrentUser({ uid: firebaseUser.uid, email: firebaseUser.email, role: 'investor', approved: false });
+          setLoading(false);
+        });
+      } else {
+        setCurrentUser(null);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      unsubAuth();
+      if (unsubProfile) unsubProfile();
     };
-    loadAdmin();
   }, []);
 
-  const getAdmin = () => adminData;
-
-  const setupAdmin = async (username, password) => {
-    const admin = { username, password, role: 'admin' };
-    // Save to Firestore and localStorage (backup)
-    try {
-      await setDoc(FIRESTORE_ADMIN_DOC, admin);
-    } catch (error) {
-      console.error('Firestore admin save error:', error);
-    }
-    localStorage.setItem(ADMIN_KEY, JSON.stringify(admin));
-    setAdminData(admin);
-    setCurrentUser(admin);
-    sessionStorage.setItem(AUTH_KEY, JSON.stringify(admin));
+  const login = async (email, password) => {
+    await signInWithEmailAndPassword(auth, email, password);
   };
 
-  const login = (username, password, investors) => {
-    const admin = getAdmin();
+  const register = async (email, password, displayName) => {
+    // Check if this is the first user (becomes admin)
+    const usersSnap = await getDocs(collection(db, 'users'));
+    const isFirstUser = usersSnap.empty;
 
-    // Check admin credentials
-    if (admin && admin.username === username && admin.password === password) {
-      const user = { ...admin, role: 'admin' };
-      setCurrentUser(user);
-      sessionStorage.setItem(AUTH_KEY, JSON.stringify(user));
-      return { success: true, user };
-    }
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
 
-    // Check investor credentials
-    const investor = investors.find(
-      i => i.loginUsername === username && i.loginPassword === password
-    );
-    if (investor) {
-      const user = { role: 'investor', investorId: investor.id, name: investor.name };
-      setCurrentUser(user);
-      sessionStorage.setItem(AUTH_KEY, JSON.stringify(user));
-      return { success: true, user };
-    }
-
-    return { success: false, error: 'Usuario ou senha incorretos' };
+    await setDoc(doc(db, 'users', cred.user.uid), {
+      uid: cred.user.uid,
+      email,
+      displayName,
+      role: isFirstUser ? 'admin' : 'investor',
+      approved: isFirstUser ? true : false,
+      investorId: null,
+      createdAt: new Date().toISOString(),
+      approvedAt: isFirstUser ? new Date().toISOString() : null,
+    });
   };
 
-  const logout = () => {
-    setCurrentUser(null);
-    sessionStorage.removeItem(AUTH_KEY);
+  const loginWithGoogle = async () => {
+    const result = await signInWithPopup(auth, googleProvider);
+    const user = result.user;
+
+    // Check if user profile already exists
+    const userRef = doc(db, 'users', user.uid);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+      // New user via Google - create profile
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const isFirstUser = usersSnap.empty;
+
+      await setDoc(userRef, {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName || user.email,
+        role: isFirstUser ? 'admin' : 'investor',
+        approved: isFirstUser ? true : false,
+        investorId: null,
+        createdAt: new Date().toISOString(),
+        approvedAt: isFirstUser ? new Date().toISOString() : null,
+      });
+    }
   };
 
-  const isAdmin = currentUser?.role === 'admin';
-  const isInvestor = currentUser?.role === 'investor';
-  const adminExists = !!adminData;
+  const logout = () => signOut(auth);
+
+  const isAdmin = currentUser?.role === 'admin' && currentUser?.approved;
+  const isInvestor = currentUser?.role === 'investor' && currentUser?.approved;
+  const isPending = currentUser?.role === 'investor' && !currentUser?.approved;
 
   return (
     <AuthContext.Provider value={{
-      currentUser, isAdmin, isInvestor, adminExists, adminLoading,
-      login, logout, setupAdmin,
+      currentUser, loading, isAdmin, isInvestor, isPending,
+      login, register, loginWithGoogle, logout,
     }}>
       {children}
     </AuthContext.Provider>
