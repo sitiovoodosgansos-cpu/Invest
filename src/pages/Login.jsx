@@ -1,20 +1,31 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
-import { Bird, LogIn, UserPlus, Eye, EyeOff } from 'lucide-react';
+import { Bird, LogIn, UserPlus, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 
 export default function Login() {
   const { adminExists, login, setupAdmin } = useAuth();
   const { investors } = useApp();
-  const [showSetup, setShowSetup] = useState(false);
+  // 'welcome' = initial screen with 2 buttons, 'login' = login form, 'setup' = create admin
+  const [screen, setScreen] = useState('welcome');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Only show setup if admin truly doesn't exist AND user explicitly chose setup
-  const isSetup = showSetup && !adminExists;
+  const resetForm = () => {
+    setUsername('');
+    setPassword('');
+    setConfirmPassword('');
+    setError('');
+    setShowPassword(false);
+  };
+
+  const goTo = (s) => {
+    resetForm();
+    setScreen(s);
+  };
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -51,15 +62,82 @@ export default function Login() {
             <Bird size={28} />
           </div>
           <h1>Sitio Voo dos Gansos</h1>
-          <p>{isSetup ? 'Configure o acesso do administrador' : 'Sistema de Investimentos'}</p>
+          <p>
+            {screen === 'setup' ? 'Configure o acesso do administrador' :
+             screen === 'login' ? 'Entre com suas credenciais' :
+             'Sistema de Investimentos'}
+          </p>
         </div>
 
         {error && (
           <div className="login-error">{error}</div>
         )}
 
-        {isSetup ? (
+        {screen === 'welcome' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <button
+              className="btn btn-primary login-btn"
+              onClick={() => goTo('login')}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+            >
+              <LogIn size={18} /> Entrar
+            </button>
+            <button
+              className="btn btn-secondary login-btn"
+              onClick={() => goTo('setup')}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+            >
+              <UserPlus size={18} /> Novo Usuario
+            </button>
+          </div>
+        )}
+
+        {screen === 'login' && (
+          <form onSubmit={handleLogin}>
+            <div className="form-group">
+              <label className="form-label">Usuario</label>
+              <input
+                className="form-input"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                placeholder="Seu usuario"
+                autoFocus
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Senha</label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  className="form-input"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="Sua senha"
+                  style={{ paddingRight: 40 }}
+                />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}>
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+            <button type="submit" className="btn btn-primary login-btn">
+              <LogIn size={18} /> Entrar
+            </button>
+            <p style={{ textAlign: 'center', marginTop: 12 }}>
+              <button type="button" onClick={() => goTo('welcome')} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <ArrowLeft size={14} /> Voltar
+              </button>
+            </p>
+          </form>
+        )}
+
+        {screen === 'setup' && (
           <form onSubmit={handleSetup}>
+            {adminExists && (
+              <div style={{ background: 'var(--warning-bg, #fff3cd)', color: 'var(--warning-text, #856404)', padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 16, border: '1px solid var(--warning-border, #ffc107)' }}>
+                Ja existe um administrador configurado. Se voce e investidor, clique em "Voltar" e use "Entrar".
+              </div>
+            )}
             <div className="form-group">
               <label className="form-label">Usuario Administrador</label>
               <input
@@ -99,50 +177,11 @@ export default function Login() {
             <button type="submit" className="btn btn-primary login-btn">
               <UserPlus size={18} /> Criar Conta Admin
             </button>
-            <p style={{ textAlign: 'center', marginTop: 12, fontSize: 13 }}>
-              <button type="button" onClick={() => { setShowSetup(false); setError(''); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', textDecoration: 'underline', fontSize: 13 }}>
-                Voltar para login
+            <p style={{ textAlign: 'center', marginTop: 12 }}>
+              <button type="button" onClick={() => goTo('welcome')} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <ArrowLeft size={14} /> Voltar
               </button>
             </p>
-          </form>
-        ) : (
-          <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label className="form-label">Usuario</label>
-              <input
-                className="form-input"
-                value={username}
-                onChange={e => setUsername(e.target.value)}
-                placeholder="Seu usuario"
-                autoFocus
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Senha</label>
-              <div style={{ position: 'relative' }}>
-                <input
-                  className="form-input"
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="Sua senha"
-                  style={{ paddingRight: 40 }}
-                />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4, cursor: 'pointer' }}>
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
-            <button type="submit" className="btn btn-primary login-btn">
-              <LogIn size={18} /> Entrar
-            </button>
-            {!adminExists && (
-              <p style={{ textAlign: 'center', marginTop: 12, fontSize: 13 }}>
-                <button type="button" onClick={() => { setShowSetup(true); setError(''); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', textDecoration: 'underline', fontSize: 13 }}>
-                  Primeiro acesso? Configurar admin
-                </button>
-              </p>
-            )}
           </form>
         )}
 
