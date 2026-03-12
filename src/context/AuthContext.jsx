@@ -20,14 +20,17 @@ export function AuthProvider({ children }) {
 
   const [adminData, setAdminData] = useState(null);
   const [adminLoading, setAdminLoading] = useState(true);
+  const [adminLoadFailed, setAdminLoadFailed] = useState(false);
 
   // Load admin from Firestore on startup
   useEffect(() => {
     const loadAdmin = async () => {
+      let loaded = false;
       try {
         const snapshot = await getDoc(FIRESTORE_ADMIN_DOC);
         if (snapshot.exists()) {
           setAdminData(snapshot.data());
+          loaded = true;
         } else {
           // Try to migrate from localStorage
           const stored = localStorage.getItem(ADMIN_KEY);
@@ -35,6 +38,7 @@ export function AuthProvider({ children }) {
             const parsed = JSON.parse(stored);
             await setDoc(FIRESTORE_ADMIN_DOC, parsed);
             setAdminData(parsed);
+            loaded = true;
           }
         }
       } catch (error) {
@@ -42,9 +46,16 @@ export function AuthProvider({ children }) {
         // Fallback to localStorage
         try {
           const stored = localStorage.getItem(ADMIN_KEY);
-          if (stored) setAdminData(JSON.parse(stored));
+          if (stored) {
+            setAdminData(JSON.parse(stored));
+            loaded = true;
+          }
         } catch {
           // ignore
+        }
+        // If we couldn't load from anywhere, assume admin exists on another device
+        if (!loaded) {
+          setAdminLoadFailed(true);
         }
       }
       setAdminLoading(false);
@@ -100,7 +111,8 @@ export function AuthProvider({ children }) {
 
   const isAdmin = currentUser?.role === 'admin';
   const isInvestor = currentUser?.role === 'investor';
-  const adminExists = !!adminData;
+  // If Firestore failed and no localStorage, assume admin exists (investor accessing from another device)
+  const adminExists = !!adminData || adminLoadFailed;
 
   return (
     <AuthContext.Provider value={{

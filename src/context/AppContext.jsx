@@ -15,17 +15,8 @@ const defaultData = {
   customSpecies: [],
 };
 
-// Sample bird species/breeds
-export const BIRD_SPECIES = [
-  { species: 'Galinha', breeds: ['Brahma Splash', 'Brahma Black', 'Brahma Light', 'Brahma Perdiz', 'Brahma Blue', 'Sebright Dourada', 'Sebright Prata', 'Cochinchina Amarela', 'Cochinchina Preta', 'Orpington Amarela', 'Orpington Blue', 'Sussexs', 'Plymouth Rock', 'Wyandotte Prata', 'Wyandotte Dourada', 'Silkie Branca', 'Silkie Preta', 'Polonesa Dourada', 'Polonesa Prata'] },
-  { species: 'Faisão', breeds: ['Coleira', 'Dourado', 'Lady Amherst', 'Prateado', 'Canário', 'Venerado', 'Elliot'] },
-  { species: 'Pavão', breeds: ['Azul', 'Branco', 'Arlequim', 'Negro', 'Cameo'] },
-  { species: 'Pato', breeds: ['Carolina', 'Mandarim', 'Rouen', 'Muscovy', 'Cayuga', 'Runner Indiano'] },
-  { species: 'Marreco', breeds: ['Mallard', 'Call Duck Branco', 'Call Duck Cinza', 'Rouen'] },
-  { species: 'Peru', breeds: ['Bronze', 'Branco', 'Bourbon Red', 'Narragansett', 'Royal Palm'] },
-  { species: 'Ganso', breeds: ['Toulouse', 'Africano', 'Chinês Branco', 'Chinês Pardo', 'Embden'] },
-  { species: 'Codorna', breeds: ['Chinesa', 'Japonesa', 'Bobwhite', 'Califórnia'] },
-];
+// Default species (empty breeds - user adds breeds manually via the app)
+export const BIRD_SPECIES = [];
 
 export function AppProvider({ children }) {
   const [data, setData] = useState(defaultData);
@@ -209,6 +200,10 @@ export function AppProvider({ children }) {
     }));
   };
 
+  const clearAllSpecies = () => {
+    setData(prev => ({ ...prev, customSpecies: [] }));
+  };
+
   // Financial Investments
   const addFinancialInvestment = (investment) => {
     const newInv = {
@@ -237,7 +232,7 @@ export function AppProvider({ children }) {
     addBird, updateBird, deleteBird,
     addSales, clearSales, deleteSale, updateSale,
     addFinancialInvestment, deleteFinancialInvestment,
-    addCustomSpecies, deleteCustomSpecies,
+    addCustomSpecies, deleteCustomSpecies, clearAllSpecies,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
