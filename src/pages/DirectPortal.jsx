@@ -1,15 +1,22 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
-  getInitials, getMonthsDifference, calculateCompoundInterest
+  getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod
 } from '../utils/helpers';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  AreaChart, Area, Legend, PieChart, Pie, Cell
+} from 'recharts';
 import { Bird, Wallet, TrendingUp, DollarSign } from 'lucide-react';
+
+const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
 export default function DirectPortal() {
   const { token } = useParams();
   const { investors, birds, sales, financialInvestments, loading, firestoreError } = useApp();
+  const [period, setPeriod] = useState('monthly');
 
   const distribution = useMemo(() => calculateProfitDistribution(sales, birds), [sales, birds]);
 
@@ -71,6 +78,32 @@ export default function DirectPortal() {
     return s + calculateCompoundInterest(f.amount, 0.03, months);
   }, 0);
   const totalFinancialProfit = totalFinancialCurrent - totalFinancialInvested;
+
+  // Timeline chart data
+  const timelineData = useMemo(() => {
+    if (!mySales.length) return [];
+    const grouped = groupSalesByPeriod(mySales, period);
+    return Object.entries(grouped)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, items]) => ({
+        period: key,
+        ovos: items.filter(i => i.isEgg).reduce((s, i) => s + i.profit, 0),
+        aves: items.filter(i => !i.isEgg).reduce((s, i) => s + i.profit, 0),
+        total: items.reduce((s, i) => s + i.profit, 0),
+      }));
+  }, [mySales, period]);
+
+  // Breed breakdown chart data
+  const breedData = useMemo(() => {
+    if (!mySales.length) return [];
+    const byBreed = {};
+    mySales.forEach(item => {
+      const breed = item.matchedBird || 'Outros';
+      if (!byBreed[breed]) byBreed[breed] = 0;
+      byBreed[breed] += item.profit;
+    });
+    return Object.entries(byBreed).map(([name, value]) => ({ name, value }));
+  }, [mySales]);
 
   return (
     <div className="investor-portal">
@@ -195,6 +228,80 @@ export default function DirectPortal() {
           </div>
         )}
 
+        {/* Charts */}
+        {mySales.length > 0 && (
+          <div className="grid-2" style={{ marginBottom: 24 }}>
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">Evolucao de Lucros</span>
+                <div className="period-selector">
+                  {['daily', 'weekly', 'monthly', 'yearly'].map(p => (
+                    <button
+                      key={p}
+                      className={`period-btn ${period === p ? 'active' : ''}`}
+                      onClick={() => setPeriod(p)}
+                    >
+                      {{ daily: 'D', weekly: 'S', monthly: 'M', yearly: 'A' }[p]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {timelineData.length > 0 ? (
+                <div className="chart-container">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={timelineData}>
+                      <defs>
+                        <linearGradient id="colorProfitDirect" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#6C2BD9" stopOpacity={0.2} />
+                          <stop offset="95%" stopColor="#6C2BD9" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="period" fontSize={11} />
+                      <YAxis fontSize={11} tickFormatter={v => `R$${v.toFixed(0)}`} />
+                      <Tooltip formatter={v => formatCurrency(v)} />
+                      <Legend />
+                      <Area type="monotone" dataKey="ovos" name="Ovos" stroke="#6C2BD9" fill="url(#colorProfitDirect)" />
+                      <Area type="monotone" dataKey="aves" name="Animais" stroke="#3B82F6" fill="none" strokeDasharray="5 5" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="empty-state"><p>Sem dados de lucro</p></div>
+              )}
+            </div>
+
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">Lucro por Raca</span>
+              </div>
+              {breedData.length > 0 ? (
+                <div className="chart-container">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={breedData}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={90}
+                        dataKey="value"
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {breedData.map((_, i) => (
+                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={v => formatCurrency(v)} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="empty-state"><p>Sem dados de lucro por raca</p></div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Sales / Profit Distribution */}
         {mySales.length > 0 && (
           <div className="card" style={{ marginBottom: 24 }}>
@@ -206,6 +313,7 @@ export default function DirectPortal() {
                 <thead>
                   <tr>
                     <th>Data</th>
+                    <th>Pedido</th>
                     <th>Item</th>
                     <th>Tipo</th>
                     <th>Valor Venda</th>
@@ -217,6 +325,7 @@ export default function DirectPortal() {
                   {mySales.map((item, idx) => (
                     <tr key={idx}>
                       <td>{formatDate(item.date || item.importedAt)}</td>
+                      <td style={{ fontSize: 12 }}>{item.orderNumber || '-'}</td>
                       <td>{item.itemDescription || item.item || '-'}</td>
                       <td>
                         <span className={`badge ${item.isEgg ? 'badge-purple' : 'badge-blue'}`}>
