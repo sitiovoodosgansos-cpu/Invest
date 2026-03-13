@@ -96,14 +96,6 @@ export default function Investors() {
                   <p>{investorBirds.length} especies no plantel</p>
                 </div>
                 <div style={{ display: 'flex', gap: 4 }}>
-                  <button
-                    className="btn-icon"
-                    onClick={() => copyInvestorLink(investor.id)}
-                    title="Copiar link de acesso"
-                    style={{ color: copiedId === investor.id ? 'var(--success)' : undefined }}
-                  >
-                    {copiedId === investor.id ? <Check size={16} /> : <Link size={16} />}
-                  </button>
                   <button className="btn-icon edit" onClick={() => handleEdit(investor)} title="Editar">
                     <Edit size={16} />
                   </button>
@@ -147,6 +139,30 @@ export default function Investors() {
                   <div className="investor-stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(profit)}</div>
                 </div>
               </div>
+
+              <button
+                onClick={() => copyInvestorLink(investor.id)}
+                style={{
+                  width: '100%',
+                  marginTop: 12,
+                  padding: '10px 16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  border: copiedId === investor.id ? '2px solid var(--success)' : '2px dashed var(--primary)',
+                  borderRadius: 'var(--radius-sm)',
+                  background: copiedId === investor.id ? 'var(--success-bg)' : 'var(--primary-bg)',
+                  color: copiedId === investor.id ? 'var(--success)' : 'var(--primary)',
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                }}
+              >
+                {copiedId === investor.id ? <Check size={16} /> : <Link size={16} />}
+                {copiedId === investor.id ? 'Link copiado!' : 'Copiar link do relatorio'}
+              </button>
             </div>
           );
         })}
