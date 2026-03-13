@@ -22,6 +22,8 @@ export default function Sales() {
   const [pasteText, setPasteText] = useState('');
   const [manualOrder, setManualOrder] = useState({ orderNumber: '', buyerName: '', date: '', items: [{ ...EMPTY_MANUAL_ITEM }] });
   const [editingSale, setEditingSale] = useState(null);
+  const [sortField, setSortField] = useState('date'); // date | totalValue | orderNumber
+  const [sortDir, setSortDir] = useState('desc'); // asc | desc
   const fileInputRef = useRef(null);
 
   const distribution = useMemo(
@@ -193,8 +195,35 @@ export default function Sales() {
     if (filterType === 'birds') list = list.filter(s => !s.isEgg);
     if (filterType === 'matched') list = list.filter(s => s.matchedInvestorId);
     if (filterType === 'unmatched') list = list.filter(s => !s.matchedInvestorId);
-    return list;
-  }, [validSales, filterType]);
+
+    // Sort
+    const sorted = [...list].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === 'date') {
+        cmp = (a.date || '').localeCompare(b.date || '');
+      } else if (sortField === 'totalValue') {
+        cmp = (parseFloat(a.totalValue) || 0) - (parseFloat(b.totalValue) || 0);
+      } else if (sortField === 'orderNumber') {
+        cmp = (parseInt(a.orderNumber) || 0) - (parseInt(b.orderNumber) || 0);
+      }
+      return sortDir === 'desc' ? -cmp : cmp;
+    });
+    return sorted;
+  }, [validSales, filterType, sortField, sortDir]);
+
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      setSortDir(prev => prev === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortField(field);
+      setSortDir('desc');
+    }
+  };
+
+  const sortIndicator = (field) => {
+    if (sortField !== field) return '';
+    return sortDir === 'desc' ? ' ▼' : ' ▲';
+  };
 
   const getInvestorName = (id) => investors.find(i => i.id === id)?.name || '-';
 
@@ -558,12 +587,12 @@ export default function Sales() {
             <table>
               <thead>
                 <tr>
-                  <th>Data</th>
-                  <th>Pedido</th>
+                  <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('date')}>Data{sortIndicator('date')}</th>
+                  <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('orderNumber')}>Pedido{sortIndicator('orderNumber')}</th>
                   <th>Item</th>
                   <th>Tipo</th>
                   <th>Qtd</th>
-                  <th>Valor</th>
+                  <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('totalValue')}>Valor{sortIndicator('totalValue')}</th>
                   <th>Taxa</th>
                   <th>Lucro</th>
                   <th>Investidor</th>
