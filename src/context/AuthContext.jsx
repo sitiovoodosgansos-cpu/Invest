@@ -10,8 +10,12 @@ const FIRESTORE_ADMIN_DOC = doc(db, 'config', 'admin');
 
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(() => {
-    // Auto-login como admin para testes
-    return { username: 'Edu', password: 'Gansopardo', role: 'admin' };
+    try {
+      const stored = sessionStorage.getItem(AUTH_KEY);
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
   });
 
   const [adminData, setAdminData] = useState(null);
