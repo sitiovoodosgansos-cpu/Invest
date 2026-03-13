@@ -405,8 +405,8 @@ export default function Reports() {
               </div>
               <div className="stats-grid" style={{ marginBottom: investorPayments.length > 0 ? 16 : 0 }}>
                 <div className="stat-card">
-                  <div className="stat-label">Aporte Atualizado</div>
-                  <div className="stat-value" style={{ fontSize: 18, color: 'var(--info)' }}>{formatCurrency(financialSummary.current)}</div>
+                  <div className="stat-label">Rendimento do Aporte</div>
+                  <div className="stat-value" style={{ fontSize: 18, color: 'var(--info)' }}>+{formatCurrency(financialSummary.current - financialSummary.invested)}</div>
                 </div>
                 <div className="stat-card">
                   <div className="stat-label">Lucro com Vendas</div>
