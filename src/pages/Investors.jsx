@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatCurrency, getInitials, calculateProfitDistribution } from '../utils/helpers';
-import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff } from 'lucide-react';
+import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff, Link, Check } from 'lucide-react';
 
 export default function Investors() {
   const { investors, birds, sales, addInvestor, updateInvestor, deleteInvestor } = useApp();
@@ -10,6 +10,16 @@ export default function Investors() {
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
   const [showPassword, setShowPassword] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+
+  const copyInvestorLink = (investorId) => {
+    const baseUrl = window.location.origin + window.location.pathname;
+    const link = `${baseUrl}#/portal/${investorId}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setCopiedId(investorId);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
 
   const distribution = useMemo(
     () => calculateProfitDistribution(sales, birds),
@@ -86,6 +96,14 @@ export default function Investors() {
                   <p>{investorBirds.length} especies no plantel</p>
                 </div>
                 <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    className="btn-icon"
+                    onClick={() => copyInvestorLink(investor.id)}
+                    title="Copiar link de acesso"
+                    style={{ color: copiedId === investor.id ? 'var(--success)' : undefined }}
+                  >
+                    {copiedId === investor.id ? <Check size={16} /> : <Link size={16} />}
+                  </button>
                   <button className="btn-icon edit" onClick={() => handleEdit(investor)} title="Editar">
                     <Edit size={16} />
                   </button>
