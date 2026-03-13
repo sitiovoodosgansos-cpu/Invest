@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
-  isEggProduct, getEggProfitRate, getBirdProfitRate, filterValidTransactions
+  isEggProduct, getEggProfitRate, getBirdProfitRate, filterValidTransactions, matchSaleToBird
 } from '../utils/helpers';
 import { parseCSV, readFileAsText } from '../utils/csvParser';
 import { parseWixOrderText } from '../utils/pdfParser';
@@ -46,26 +46,10 @@ export default function Sales() {
       const isEgg = isEggProduct(description);
       const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
 
-      let matchedBirdId = null;
-      let matchedInvestorId = null;
-      let matchedBreed = null;
-
-      for (const bird of birds) {
-        const breedUpper = bird.breed.toUpperCase();
-        if (description.toUpperCase().includes(breedUpper)) {
-          matchedBirdId = bird.id;
-          matchedInvestorId = bird.investorId;
-          matchedBreed = bird.breed;
-          break;
-        }
-        const words = bird.breed.toUpperCase().split(' ');
-        if (words.length > 1 && words.every(w => description.toUpperCase().includes(w))) {
-          matchedBirdId = bird.id;
-          matchedInvestorId = bird.investorId;
-          matchedBreed = bird.breed;
-          break;
-        }
-      }
+      const matchedBird = matchSaleToBird(description, birds);
+      const matchedBirdId = matchedBird ? matchedBird.id : null;
+      const matchedInvestorId = matchedBird ? matchedBird.investorId : null;
+      const matchedBreed = matchedBird ? matchedBird.breed : null;
 
       return {
         ...row,

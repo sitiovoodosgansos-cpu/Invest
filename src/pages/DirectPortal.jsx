@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
@@ -9,25 +9,54 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, Legend, PieChart, Pie, Cell
 } from 'recharts';
-import { LogOut, Bird, Wallet, TrendingUp, ShoppingCart, DollarSign, Send } from 'lucide-react';
+import { Bird, Wallet, TrendingUp, DollarSign, Send } from 'lucide-react';
 
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
-export default function InvestorPortal() {
-  const { currentUser, logout } = useAuth();
-  const { investors, birds, sales, financialInvestments, payments } = useApp();
+export default function DirectPortal() {
+  const { token } = useParams();
+  const { investors, birds, sales, financialInvestments, payments, loading, firestoreError } = useApp();
   const [period, setPeriod] = useState('monthly');
 
-  const investor = investors.find(i => i.id === currentUser.investorId);
   const distribution = useMemo(() => calculateProfitDistribution(sales, birds), [sales, birds]);
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: 12 }}>
+        <div style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Carregando...</p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
+    );
+  }
+
+  if (firestoreError) {
+    return (
+      <div className="login-page">
+        <div className="login-card" style={{ textAlign: 'center' }}>
+          <div className="login-logo"><Bird size={28} /></div>
+          <h3>Erro de conexao</h3>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+            Nao foi possivel carregar os dados. Tente novamente em alguns instantes.
+          </p>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>Tentar novamente</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Find investor by token (token = investor.id)
+  const investor = investors.find(i => i.id === token);
 
   if (!investor) {
     return (
       <div className="login-page">
         <div className="login-card" style={{ textAlign: 'center' }}>
-          <h3>Investidor nao encontrado</h3>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>Sua conta pode ter sido removida. Entre em contato com o administrador.</p>
-          <button className="btn btn-primary" onClick={logout}><LogOut size={16} /> Sair</button>
+          <div className="login-logo"><Bird size={28} /></div>
+          <h3>Link invalido</h3>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+            Este link de acesso nao foi encontrado. Solicite um novo link ao administrador.
+          </p>
         </div>
       </div>
     );
@@ -98,9 +127,6 @@ export default function InvestorPortal() {
             <div className="investor-avatar" style={{ width: 36, height: 36, fontSize: 13 }}>{getInitials(investor.name)}</div>
             <span style={{ fontWeight: 600, fontSize: 14 }}>{investor.name}</span>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={logout}>
-            <LogOut size={14} /> Sair
-          </button>
         </div>
       </header>
 
@@ -229,7 +255,7 @@ export default function InvestorPortal() {
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={timelineData}>
                       <defs>
-                        <linearGradient id="colorProfitPortal" x1="0" y1="0" x2="0" y2="1">
+                        <linearGradient id="colorProfitDirect" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#6C2BD9" stopOpacity={0.2} />
                           <stop offset="95%" stopColor="#6C2BD9" stopOpacity={0} />
                         </linearGradient>
@@ -239,7 +265,7 @@ export default function InvestorPortal() {
                       <YAxis fontSize={11} tickFormatter={v => `R$${v.toFixed(0)}`} />
                       <Tooltip formatter={v => formatCurrency(v)} />
                       <Legend />
-                      <Area type="monotone" dataKey="ovos" name="Ovos" stroke="#6C2BD9" fill="url(#colorProfitPortal)" />
+                      <Area type="monotone" dataKey="ovos" name="Ovos" stroke="#6C2BD9" fill="url(#colorProfitDirect)" />
                       <Area type="monotone" dataKey="aves" name="Animais" stroke="#3B82F6" fill="none" strokeDasharray="5 5" />
                     </AreaChart>
                   </ResponsiveContainer>
@@ -291,6 +317,7 @@ export default function InvestorPortal() {
                 <thead>
                   <tr>
                     <th>Data</th>
+                    <th>Pedido</th>
                     <th>Item</th>
                     <th>Tipo</th>
                     <th>Valor Venda</th>
@@ -302,6 +329,7 @@ export default function InvestorPortal() {
                   {mySales.map((item, idx) => (
                     <tr key={idx}>
                       <td>{formatDate(item.date || item.importedAt)}</td>
+                      <td style={{ fontSize: 12 }}>{item.orderNumber || '-'}</td>
                       <td>{item.itemDescription || item.item || '-'}</td>
                       <td>
                         <span className={`badge ${item.isEgg ? 'badge-purple' : 'badge-blue'}`}>

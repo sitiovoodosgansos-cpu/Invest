@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
 
 const AppContext = createContext();
 
 const STORAGE_KEY = 'sitio_voo_dos_gansos_data';
+const BACKUP_KEY = 'sitio_voo_dos_gansos_backup';
 const FIRESTORE_DOC = doc(db, 'config', 'appData');
 
 const defaultData = {
@@ -13,7 +14,17 @@ const defaultData = {
   sales: [],
   financialInvestments: [],
   customSpecies: [],
+  payments: [],
 };
+
+// Count total items across all arrays in data
+const countItems = (d) =>
+  (d.investors?.length || 0) +
+  (d.birds?.length || 0) +
+  (d.sales?.length || 0) +
+  (d.financialInvestments?.length || 0) +
+  (d.customSpecies?.length || 0) +
+  (d.payments?.length || 0);
 
 // Default species (empty breeds - user adds breeds manually via the app)
 export const BIRD_SPECIES = [];
@@ -21,11 +32,15 @@ export const BIRD_SPECIES = [];
 export function AppProvider({ children }) {
   const [data, setData] = useState(defaultData);
   const [loading, setLoading] = useState(true);
+  const [firestoreError, setFirestoreError] = useState(null);
   const lastLocalWriteTime = useRef(0);
+  const dataLoadedFromFirestore = useRef(false);
+  const firestoreItemCount = useRef(0);
 
   // Listen to Firestore in real-time
   useEffect(() => {
     const unsubscribe = onSnapshot(FIRESTORE_DOC, (snapshot) => {
+      setFirestoreError(null);
       if (snapshot.exists()) {
         // Ignore Firestore snapshots that arrive shortly after a local write
         // to prevent onSnapshot (local cache + server confirm) from overwriting local state
@@ -34,9 +49,13 @@ export function AppProvider({ children }) {
           setLoading(false);
           return;
         }
-        setData({ ...defaultData, ...snapshot.data() });
+        const firestoreData = { ...defaultData, ...snapshot.data() };
+        firestoreItemCount.current = countItems(firestoreData);
+        dataLoadedFromFirestore.current = true;
+        setData(firestoreData);
       } else {
         // First time: try to migrate from localStorage
+        dataLoadedFromFirestore.current = true;
         try {
           const stored = localStorage.getItem(STORAGE_KEY);
           if (stored) {
@@ -52,6 +71,7 @@ export function AppProvider({ children }) {
       setLoading(false);
     }, (error) => {
       console.error('Firestore error:', error);
+      setFirestoreError(error.code || error.message || 'Erro de conexao');
       // Fallback to localStorage if Firestore fails
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
@@ -65,7 +85,7 @@ export function AppProvider({ children }) {
     return () => unsubscribe();
   }, []);
 
-  // Save to Firestore when data changes
+  // Save to Firestore when data changes (with protection against empty overwrites)
   const isFirstRender = useRef(true);
   useEffect(() => {
     if (loading) return;
@@ -73,8 +93,37 @@ export function AppProvider({ children }) {
       isFirstRender.current = false;
       return;
     }
-    // Save to both Firestore and localStorage (backup)
+    // PROTECTION: Don't save until we've loaded from Firestore at least once
+    if (!dataLoadedFromFirestore.current) return;
+
+    const newCount = countItems(data);
+
+    // PROTECTION: Block saving empty data if Firestore had data
+    // (prevents accidental wipe from race conditions or bugs)
+    if (newCount === 0 && firestoreItemCount.current > 0) {
+      console.warn('Blocked: tentativa de salvar dados vazios no Firestore (havia', firestoreItemCount.current, 'itens)');
+      return;
+    }
+
+    // BACKUP: Save previous version before overwriting
+    try {
+      const current = localStorage.getItem(STORAGE_KEY);
+      if (current) {
+        const prev = JSON.parse(current);
+        if (countItems(prev) > 0) {
+          localStorage.setItem(BACKUP_KEY, JSON.stringify({
+            data: prev,
+            savedAt: new Date().toISOString(),
+          }));
+        }
+      }
+    } catch {
+      // ignore backup errors
+    }
+
+    // Save to both Firestore and localStorage
     lastLocalWriteTime.current = Date.now();
+    firestoreItemCount.current = newCount;
     setDoc(FIRESTORE_DOC, data).catch(err => {
       console.error('Firestore save error:', err);
     });
@@ -221,13 +270,36 @@ export function AppProvider({ children }) {
     }));
   };
 
+  // Payments (withdrawals / profit sent to investor)
+  const addPayment = (payment) => {
+    const newPayment = {
+      ...payment,
+      id: Date.now().toString(),
+      createdAt: new Date().toISOString(),
+    };
+    setData(prev => ({
+      ...prev,
+      payments: [...(prev.payments || []), newPayment],
+    }));
+    return newPayment;
+  };
+
+  const deletePayment = (id) => {
+    setData(prev => ({
+      ...prev,
+      payments: (prev.payments || []).filter(p => p.id !== id),
+    }));
+  };
+
   const value = {
     ...data,
     loading,
+    firestoreError,
     addInvestor, updateInvestor, deleteInvestor,
     addBird, updateBird, deleteBird,
     addSales, clearSales, deleteSale, updateSale,
     addFinancialInvestment, deleteFinancialInvestment,
+    addPayment, deletePayment,
     addCustomSpecies, deleteCustomSpecies,
   };
 

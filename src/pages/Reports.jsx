@@ -9,7 +9,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, Legend, PieChart, Pie, Cell
 } from 'recharts';
-import { FileDown, Eye, Users, Filter, Calendar } from 'lucide-react';
+import { FileDown, Eye, Users, Filter, Calendar, Link, Check, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
@@ -76,11 +76,24 @@ function getMonthOptions() {
 }
 
 export default function Reports() {
-  const { investors, birds, sales, financialInvestments } = useApp();
+  const { investors, birds, sales, financialInvestments, payments } = useApp();
   const [selectedInvestor, setSelectedInvestor] = useState('');
   const [period, setPeriod] = useState('monthly');
   const [dateFilter, setDateFilter] = useState('all');
   const [specificMonth, setSpecificMonth] = useState('');
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [sortField, setSortField] = useState('date');
+  const [sortDirection, setSortDirection] = useState('desc');
+
+  const copyInvestorLink = () => {
+    if (!selectedInvestor) return;
+    const baseUrl = window.location.origin + window.location.pathname;
+    const link = `${baseUrl}#/portal/${selectedInvestor}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    });
+  };
 
   const distribution = useMemo(
     () => calculateProfitDistribution(sales, birds),
@@ -110,6 +123,50 @@ export default function Reports() {
       totalProfit: eggProfit + birdProfit,
     };
   }, [investorDist, dateRange]);
+
+  // Sort distribution items
+  const sortedDistItems = useMemo(() => {
+    if (!filteredDist || !filteredDist.items.length) return [];
+    const items = [...filteredDist.items];
+    const dir = sortDirection === 'asc' ? 1 : -1;
+    items.sort((a, b) => {
+      switch (sortField) {
+        case 'date': {
+          const da = new Date(a.date || a.importedAt || 0).getTime();
+          const db = new Date(b.date || b.importedAt || 0).getTime();
+          return (da - db) * dir;
+        }
+        case 'type': {
+          const ta = a.isEgg ? 0 : 1;
+          const tb = b.isEgg ? 0 : 1;
+          return (ta - tb) * dir;
+        }
+        case 'price':
+          return ((a.totalValue || 0) - (b.totalValue || 0)) * dir;
+        case 'profit':
+          return ((a.profit || 0) - (b.profit || 0)) * dir;
+        default:
+          return 0;
+      }
+    });
+    return items;
+  }, [filteredDist, sortField, sortDirection]);
+
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <ArrowUpDown size={12} style={{ opacity: 0.3, marginLeft: 4 }} />;
+    return sortDirection === 'asc'
+      ? <ArrowUp size={12} style={{ marginLeft: 4, color: 'var(--primary)' }} />
+      : <ArrowDown size={12} style={{ marginLeft: 4, color: 'var(--primary)' }} />;
+  };
 
   const totalBirdInvestment = investorBirds.reduce((s, b) => s + (parseFloat(b.investmentValue) || 0), 0);
   const totalMatrices = investorBirds.reduce((s, b) => s + (parseInt(b.matrixCount) || 0), 0);
@@ -153,7 +210,7 @@ export default function Reports() {
     if (!investor) return;
     try {
       const periodLabel = dateRange ? dateRange.label : 'Todos os periodos';
-      exportInvestorReport(investor, birds, sales, financialInvestments, filteredDist, periodLabel);
+      exportInvestorReport(investor, birds, sales, financialInvestments, filteredDist, periodLabel, payments);
     } catch (err) {
       console.error('Erro ao exportar PDF:', err);
       alert('Erro ao gerar o PDF. Tente novamente.');
@@ -224,6 +281,18 @@ export default function Reports() {
 
             <button className="btn btn-primary" onClick={handleExportPDF}>
               <FileDown size={16} /> Exportar PDF
+            </button>
+            <button
+              className="btn"
+              onClick={copyInvestorLink}
+              style={{
+                background: linkCopied ? 'var(--success)' : 'var(--primary)',
+                color: '#fff',
+                border: 'none',
+              }}
+            >
+              {linkCopied ? <Check size={16} /> : <Link size={16} />}
+              {linkCopied ? 'Link copiado!' : 'Copiar link do investidor'}
             </button>
           </>
         )}
@@ -423,12 +492,30 @@ export default function Reports() {
               <div className="table-container">
                 <table>
                   <thead>
-                    <tr><th>Data</th><th>Item</th><th>Tipo</th><th>Raca</th><th>Valor</th><th>Taxa</th><th>Lucro</th></tr>
+                    <tr>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('date')}>
+                        Data <SortIcon field="date" />
+                      </th>
+                      <th>Pedido</th>
+                      <th>Item</th>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('type')}>
+                        Tipo <SortIcon field="type" />
+                      </th>
+                      <th>Raca</th>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('price')}>
+                        Valor <SortIcon field="price" />
+                      </th>
+                      <th>Taxa</th>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('profit')}>
+                        Lucro <SortIcon field="profit" />
+                      </th>
+                    </tr>
                   </thead>
                   <tbody>
-                    {filteredDist.items.map((item, idx) => (
+                    {sortedDistItems.map((item, idx) => (
                       <tr key={idx}>
                         <td>{formatDate(item.date || item.importedAt)}</td>
+                        <td style={{ fontSize: 12 }}>{item.orderNumber || '-'}</td>
                         <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {item.itemDescription || '-'}
                         </td>

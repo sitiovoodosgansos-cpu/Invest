@@ -46,28 +46,98 @@ export function getMonthsDifference(startDate, endDate) {
   return (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
 }
 
-// Match a sale item to a bird breed
+// Remove accents/diacritics from text for flexible matching
+function normalize(text) {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+}
+
+// Calculate similarity between two strings (0 to 1)
+function similarity(a, b) {
+  if (a === b) return 1;
+  if (!a || !b) return 0;
+  const longer = a.length > b.length ? a : b;
+  const shorter = a.length > b.length ? b : a;
+  if (longer.length === 0) return 1;
+  // Check if shorter is contained in longer
+  if (longer.includes(shorter)) return shorter.length / longer.length;
+  // Levenshtein-based similarity for short strings
+  if (shorter.length <= 20) {
+    const dist = levenshtein(shorter, longer);
+    return 1 - dist / longer.length;
+  }
+  return 0;
+}
+
+function levenshtein(a, b) {
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      matrix[i][j] = b[i - 1] === a[j - 1]
+        ? matrix[i - 1][j - 1]
+        : Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+// Match a sale item to a bird breed (fuzzy matching)
 export function matchSaleToBird(itemDescription, birds) {
   if (!itemDescription || !birds.length) return null;
-  const desc = itemDescription.toUpperCase();
+  const desc = normalize(itemDescription);
 
-  // Try to find a matching bird by breed name
+  // 1) Exact match (normalized, no accents)
   for (const bird of birds) {
-    const breedUpper = bird.breed.toUpperCase();
-    if (desc.includes(breedUpper)) {
+    if (desc.includes(normalize(bird.breed))) {
       return bird;
     }
   }
 
-  // Try partial matching
+  // 2) All words of breed found in description (any order)
   for (const bird of birds) {
-    const words = bird.breed.toUpperCase().split(' ');
-    if (words.length > 1 && words.every(w => desc.includes(w))) {
+    const words = normalize(bird.breed).split(/\s+/).filter(w => w.length > 2);
+    if (words.length > 0 && words.every(w => desc.includes(w))) {
       return bird;
     }
   }
 
-  return null;
+  // 3) Any significant word of breed found in description (single-word partial match)
+  for (const bird of birds) {
+    const words = normalize(bird.breed).split(/\s+/).filter(w => w.length >= 4);
+    if (words.some(w => desc.includes(w))) {
+      return bird;
+    }
+  }
+
+  // 4) Fuzzy similarity: find best match above threshold
+  const MIN_SIMILARITY = 0.6;
+  let bestBird = null;
+  let bestScore = 0;
+
+  const descWords = desc.split(/\s+/).filter(w => w.length >= 3);
+
+  for (const bird of birds) {
+    const breedNorm = normalize(bird.breed);
+    const breedWords = breedNorm.split(/\s+/).filter(w => w.length >= 3);
+
+    // Compare each breed word against each description word
+    for (const bw of breedWords) {
+      for (const dw of descWords) {
+        const score = similarity(bw, dw);
+        if (score > bestScore && score >= MIN_SIMILARITY) {
+          bestScore = score;
+          bestBird = bird;
+        }
+      }
+    }
+  }
+
+  return bestBird;
 }
 
 export function filterValidTransactions(sales) {
