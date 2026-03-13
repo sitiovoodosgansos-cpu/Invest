@@ -69,12 +69,10 @@ export function AuthProvider({ children }) {
   };
 
   const login = (username, password, investors) => {
-    const u = username.trim();
-    const p = password.trim();
     const admin = getAdmin();
 
     // Check admin credentials
-    if (admin && admin.username === u && admin.password === p) {
+    if (admin && admin.username === username && admin.password === password) {
       const user = { ...admin, role: 'admin' };
       setCurrentUser(user);
       sessionStorage.setItem(AUTH_KEY, JSON.stringify(user));
@@ -83,7 +81,7 @@ export function AuthProvider({ children }) {
 
     // Check investor credentials
     const investor = investors.find(
-      i => i.loginUsername?.trim() === u && i.loginPassword?.trim() === p
+      i => i.loginUsername === username && i.loginPassword === password
     );
     if (investor) {
       const user = { role: 'investor', investorId: investor.id, name: investor.name };
@@ -92,23 +90,7 @@ export function AuthProvider({ children }) {
       return { success: true, user };
     }
 
-    // More specific error when data might not have loaded
-    if (!investors || investors.length === 0) {
-      return { success: false, error: 'Dados ainda carregando. Aguarde e tente novamente.' };
-    }
-
-    // Debug: show available logins (first 2 chars only) to help diagnose
-    const availableLogins = investors
-      .filter(i => i.loginUsername)
-      .map(i => i.loginUsername.trim().substring(0, 3) + '...')
-      .join(', ');
-
-    return {
-      success: false,
-      error: availableLogins
-        ? `Usuario ou senha incorretos. Logins disponiveis: ${availableLogins}`
-        : `Usuario ou senha incorretos. Nenhum investidor tem login configurado (${investors.length} investidores encontrados).`
-    };
+    return { success: false, error: 'Usuario ou senha incorretos' };
   };
 
   const logout = () => {

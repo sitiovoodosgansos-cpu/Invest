@@ -11,7 +11,6 @@ import Financial from './pages/Financial';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
 import InvestorPortal from './pages/InvestorPortal';
-import DirectPortal from './pages/DirectPortal';
 import {
   LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut
 } from 'lucide-react';
@@ -131,10 +130,7 @@ export default function App() {
     <AppProvider>
       <AuthProvider>
         <HashRouter>
-          <Routes>
-            <Route path="/portal/:token" element={<DirectPortal />} />
-            <Route path="*" element={<AppRouter />} />
-          </Routes>
+          <AppRouter />
         </HashRouter>
       </AuthProvider>
     </AppProvider>

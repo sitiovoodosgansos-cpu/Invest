@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatCurrency, getInitials, calculateProfitDistribution } from '../utils/helpers';
-import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff, Link, Check } from 'lucide-react';
+import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff } from 'lucide-react';
 
 export default function Investors() {
   const { investors, birds, sales, addInvestor, updateInvestor, deleteInvestor } = useApp();
@@ -10,16 +10,6 @@ export default function Investors() {
   const [search, setSearch] = useState('');
   const [form, setForm] = useState({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
   const [showPassword, setShowPassword] = useState(false);
-  const [copiedId, setCopiedId] = useState(null);
-
-  const copyInvestorLink = (investorId) => {
-    const baseUrl = window.location.origin + window.location.pathname;
-    const link = `${baseUrl}#/portal/${investorId}`;
-    navigator.clipboard.writeText(link).then(() => {
-      setCopiedId(investorId);
-      setTimeout(() => setCopiedId(null), 2000);
-    });
-  };
 
   const distribution = useMemo(
     () => calculateProfitDistribution(sales, birds),
@@ -139,30 +129,6 @@ export default function Investors() {
                   <div className="investor-stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(profit)}</div>
                 </div>
               </div>
-
-              <button
-                onClick={() => copyInvestorLink(investor.id)}
-                style={{
-                  width: '100%',
-                  marginTop: 12,
-                  padding: '10px 16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  border: copiedId === investor.id ? '2px solid var(--success)' : '2px dashed var(--primary)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: copiedId === investor.id ? 'var(--success-bg)' : 'var(--primary-bg)',
-                  color: copiedId === investor.id ? 'var(--success)' : 'var(--primary)',
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-              >
-                {copiedId === investor.id ? <Check size={16} /> : <Link size={16} />}
-                {copiedId === investor.id ? 'Link copiado!' : 'Copiar link do relatorio'}
-              </button>
             </div>
           );
         })}
