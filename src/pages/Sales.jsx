@@ -103,7 +103,7 @@ export default function Sales() {
     }
   };
 
-  // PASTE TEXT
+  // PASTE TEXT (supports multiple orders, up to 50 at once)
   const handlePasteImport = () => {
     if (!pasteText.trim()) return;
 
@@ -116,9 +116,13 @@ export default function Sales() {
         throw new Error('Nenhum item encontrado no texto colado. Verifique o formato do recibo.');
       }
       const result = processAndAddSales(pdfData.items);
-      result.source = 'Texto';
+      result.source = pdfData.multipleOrders ? `Texto (${pdfData.orderCount} pedidos)` : 'Texto';
       result.orderNumber = pdfData.orderNumber;
       result.buyerName = pdfData.buyerName;
+      if (pdfData.multipleOrders) {
+        result.orderCount = pdfData.orderCount;
+        result.orderSummary = pdfData.orderSummary;
+      }
       setImportResult(result);
       setPasteText('');
     } catch (err) {
@@ -314,7 +318,7 @@ export default function Sales() {
         {importTab === 'paste' && (
           <div>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-              Cole o conteudo copiado do PDF do pedido Wix. O sistema detecta automaticamente os itens, valores e quantidades.
+              Cole o conteudo copiado do PDF dos pedidos Wix. Suporta ate 50 pedidos de uma vez — basta colar todos juntos. O sistema detecta automaticamente cada pedido, itens, valores e quantidades.
             </p>
             <textarea
               value={pasteText}
@@ -472,7 +476,10 @@ export default function Sales() {
                   </strong>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, fontSize: 13 }}>
-                  <div><strong>{importResult.total}</strong> itens no pedido</div>
+                  {importResult.orderCount > 1 && (
+                    <div><strong>{importResult.orderCount}</strong> pedidos processados</div>
+                  )}
+                  <div><strong>{importResult.total}</strong> itens no total</div>
                   <div><strong>{importResult.rejected}</strong> recusados/reembolsados</div>
                   <div><strong>{importResult.valid}</strong> vendas validas</div>
                   <div><strong>{importResult.matched}</strong> vinculadas</div>
