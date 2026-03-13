@@ -36,7 +36,84 @@ async function extractTextFromPDF(arrayBuffer) {
  *   Cupom ... -R$ desconto
  *   Total R$ total
  */
+/**
+ * Parse multiple Wix orders from a single text block.
+ * Splits by "Pedido XXXXX" boundaries and parses each individually.
+ * Supports up to 50 orders pasted at once.
+ */
 export function parseWixOrderText(text) {
+  // Split text into individual orders by "Pedido XXXXX" boundaries
+  const orderChunks = splitOrderChunks(text);
+
+  if (orderChunks.length <= 1) {
+    // Single order (or no clear boundary) – parse as before
+    return parseSingleOrder(text);
+  }
+
+  // Multiple orders – parse each and merge results
+  const allItems = [];
+  const orders = [];
+  let totalShipping = 0;
+  let totalDiscount = 0;
+
+  for (const chunk of orderChunks) {
+    const parsed = parseSingleOrder(chunk);
+    orders.push({
+      orderNumber: parsed.orderNumber,
+      buyerName: parsed.buyerName,
+      date: parsed.date,
+      itemCount: parsed.items.length,
+    });
+    allItems.push(...parsed.items);
+    totalShipping += parsed.shipping;
+    totalDiscount += parsed.discount;
+  }
+
+  return {
+    orderNumber: orders.map(o => o.orderNumber).filter(Boolean).join(', '),
+    buyerName: '',
+    date: '',
+    items: allItems,
+    subtotal: allItems.reduce((s, r) => s + r.totalValue, 0),
+    shipping: totalShipping,
+    discount: totalDiscount,
+    total: allItems.reduce((s, r) => s + r.totalValue, 0) + totalShipping - totalDiscount,
+    multipleOrders: true,
+    orderCount: orders.length,
+    orderSummary: orders,
+  };
+}
+
+/**
+ * Split pasted text into individual order chunks based on "Pedido XXXXX" pattern
+ */
+function splitOrderChunks(text) {
+  // Find all positions where "Pedido XXXXX" appears
+  const orderStarts = [];
+  const regex = /Pedido\s+\d+/gi;
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    orderStarts.push(m.index);
+  }
+
+  if (orderStarts.length <= 1) {
+    return [text];
+  }
+
+  const chunks = [];
+  for (let i = 0; i < orderStarts.length; i++) {
+    const start = orderStarts[i];
+    const end = i + 1 < orderStarts.length ? orderStarts[i + 1] : text.length;
+    chunks.push(text.slice(start, end));
+  }
+
+  return chunks;
+}
+
+/**
+ * Parse a single Wix order text block
+ */
+function parseSingleOrder(text) {
   const results = [];
 
   // Extract order number
@@ -72,7 +149,6 @@ export function parseWixOrderText(text) {
   const discount = discountMatch ? parseBRL(discountMatch[1]) : 0;
 
   // Extract line items: "ITEM R$ price xQTY R$ total"
-  // Pattern: product name, then R$ unit price, then xN quantity, then R$ line total
   const itemRegex = /((?:OVO|Ave|Kit|Ingresso|Masterclass|Galinha|Faisão|Pavão|Pato|Marreco|Peru|Ganso|Codorna)[^\n]*?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/gi;
 
   let match;
@@ -90,7 +166,7 @@ export function parseWixOrderText(text) {
       price: unitPrice,
       quantity,
       totalValue,
-      shipping: 0, // shipping is separate, not per-item
+      shipping: 0,
       discount: 0,
       transactionStatus: 'Pago',
     });
@@ -98,11 +174,9 @@ export function parseWixOrderText(text) {
 
   // If no items found with the strict pattern, try a more lenient one
   if (results.length === 0) {
-    // Try: "description R$ XX,XX xN R$ XX,XX" without requiring keyword prefix
     const lenientRegex = /([A-ZÀ-Úa-zà-ú][\w\s\-–()]+?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
     while ((match = lenientRegex.exec(text)) !== null) {
       const itemDescription = match[1].trim();
-      // Skip non-product lines
       if (/^(Itens|Frete|Imposto|Cupom|Total|Pago|Subtotal)/i.test(itemDescription)) continue;
 
       const unitPrice = parseBRL(match[2]);
