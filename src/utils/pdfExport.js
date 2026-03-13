@@ -166,8 +166,19 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
     doc.text(`Total: ${formatCurrency(distribution.totalProfit)}`, pageWidth - 20, y + 24, { align: 'right' });
   }
 
-  // Payments section
+  // Calculate balance (always)
   const investorPayments = (payments || []).filter(p => p.investorId === investor.id).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const totalPaid = investorPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
+  const invFinancial = financialInvestments.filter(f => f.investorId === investor.id);
+  const totalFinancialCurrent = invFinancial.reduce((s, f) => {
+    const months = getMonthsDifference(f.date, new Date().toISOString());
+    return s + calculateCompoundInterest(f.amount, 0.03, months);
+  }, 0);
+  const salesProfit = distribution ? distribution.totalProfit : 0;
+  const totalAccumulated = totalFinancialCurrent + salesProfit;
+  const netBalance = totalAccumulated - totalPaid;
+
+  // Payments table (if any)
   if (investorPayments.length > 0) {
     if (y > 220) { doc.addPage(); y = 20; }
 
@@ -194,31 +205,35 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
     });
 
     y = doc.lastAutoTable.finalY + 8;
+  }
 
-    const totalPaid = investorPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
+  // Balance summary box (always shown when there's any financial data)
+  if (totalAccumulated > 0 || totalPaid > 0) {
+    if (y > 240) { doc.addPage(); y = 20; }
 
-    // Calculate net balance
-    const investorFinancial = financialInvestments.filter(f => f.investorId === investor.id);
-    const totalFinancialCurrent = investorFinancial.reduce((s, f) => {
-      const months = getMonthsDifference(f.date, new Date().toISOString());
-      return s + calculateCompoundInterest(f.amount, 0.03, months);
-    }, 0);
-    const salesProfit = distribution ? distribution.totalProfit : 0;
-    const netBalance = totalFinancialCurrent + salesProfit - totalPaid;
+    doc.setFillColor(248, 249, 252);
+    doc.roundedRect(14, y, pageWidth - 28, 48, 4, 4, 'F');
 
-    if (y > 250) { doc.addPage(); y = 20; }
-
-    doc.setFillColor(254, 243, 199);
-    doc.roundedRect(14, y, pageWidth - 28, 30, 4, 4, 'F');
     doc.setTextColor(30, 27, 75);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Total pago: ${formatCurrency(totalPaid)}`, 20, y + 10);
-    doc.text(`Total acumulado: ${formatCurrency(totalFinancialCurrent + salesProfit)}`, 20, y + 20);
+    doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
-    doc.text(`Saldo liquido: ${formatCurrency(netBalance)}`, pageWidth - 20, y + 15, { align: 'right' });
+    doc.text('Saldo do Investidor', 20, y + 10);
 
-    y += 38;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Aporte atualizado (c/ juros): ${formatCurrency(totalFinancialCurrent)}`, 20, y + 19);
+    doc.text(`Lucro com vendas: ${formatCurrency(salesProfit)}`, 20, y + 27);
+    doc.text(`Total acumulado: ${formatCurrency(totalAccumulated)}`, 20, y + 35);
+    doc.text(`Total pago: ${formatCurrency(totalPaid)}`, pageWidth / 2, y + 19);
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    const balanceColor = netBalance >= 0 ? [16, 185, 129] : [239, 68, 68];
+    doc.setTextColor(...balanceColor);
+    doc.text(`Saldo liquido: ${formatCurrency(netBalance)}`, pageWidth - 20, y + 35, { align: 'right' });
+
+    doc.setTextColor(30, 27, 75);
+    y += 56;
   }
 
   // Footer with page numbers
