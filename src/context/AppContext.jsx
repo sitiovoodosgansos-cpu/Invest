@@ -15,6 +15,7 @@ const defaultData = {
   financialInvestments: [],
   customSpecies: [],
   payments: [],
+  expenses: [],
 };
 
 // Count total items across all arrays in data
@@ -24,7 +25,8 @@ const countItems = (d) =>
   (d.sales?.length || 0) +
   (d.financialInvestments?.length || 0) +
   (d.customSpecies?.length || 0) +
-  (d.payments?.length || 0);
+  (d.payments?.length || 0) +
+  (d.expenses?.length || 0);
 
 // Default species (empty breeds - user adds breeds manually via the app)
 export const BIRD_SPECIES = [];
@@ -291,6 +293,34 @@ export function AppProvider({ children }) {
     }));
   };
 
+  // Expenses (operational costs)
+  const addExpense = (expense) => {
+    const newExpense = {
+      ...expense,
+      id: Date.now().toString(),
+      createdAt: new Date().toISOString(),
+    };
+    setData(prev => ({
+      ...prev,
+      expenses: [...(prev.expenses || []), newExpense],
+    }));
+    return newExpense;
+  };
+
+  const updateExpense = (id, updates) => {
+    setData(prev => ({
+      ...prev,
+      expenses: (prev.expenses || []).map(e => e.id === id ? { ...e, ...updates } : e),
+    }));
+  };
+
+  const deleteExpense = (id) => {
+    setData(prev => ({
+      ...prev,
+      expenses: (prev.expenses || []).filter(e => e.id !== id),
+    }));
+  };
+
   const value = {
     ...data,
     loading,
@@ -300,6 +330,7 @@ export function AppProvider({ children }) {
     addSales, clearSales, deleteSale, updateSale,
     addFinancialInvestment, deleteFinancialInvestment,
     addPayment, deletePayment,
+    addExpense, updateExpense, deleteExpense,
     addCustomSpecies, deleteCustomSpecies,
   };
 
