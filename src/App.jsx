@@ -111,19 +111,8 @@ function AppRouter() {
     );
   }
 
-  if (!currentUser) {
-    return <Login />;
-  }
-
-  if (isInvestor) {
-    return <InvestorPortal />;
-  }
-
-  if (isAdmin) {
-    return <AdminLayout />;
-  }
-
-  return <Login />;
+  // Login desabilitado para testes - acesso direto ao admin
+  return <AdminLayout />;
 }
 
 export default function App() {
