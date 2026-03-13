@@ -9,7 +9,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, Legend, PieChart, Pie, Cell
 } from 'recharts';
-import { FileDown, Eye, Users, Filter, Calendar, Link, Check } from 'lucide-react';
+import { FileDown, Eye, Users, Filter, Calendar } from 'lucide-react';
 
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
@@ -81,17 +81,6 @@ export default function Reports() {
   const [period, setPeriod] = useState('monthly');
   const [dateFilter, setDateFilter] = useState('all');
   const [specificMonth, setSpecificMonth] = useState('');
-  const [linkCopied, setLinkCopied] = useState(false);
-
-  const copyInvestorLink = () => {
-    if (!selectedInvestor) return;
-    const baseUrl = window.location.origin + window.location.pathname;
-    const link = `${baseUrl}#/portal/${selectedInvestor}`;
-    navigator.clipboard.writeText(link).then(() => {
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
-    });
-  };
 
   const distribution = useMemo(
     () => calculateProfitDistribution(sales, birds),
@@ -235,18 +224,6 @@ export default function Reports() {
 
             <button className="btn btn-primary" onClick={handleExportPDF}>
               <FileDown size={16} /> Exportar PDF
-            </button>
-            <button
-              className="btn"
-              onClick={copyInvestorLink}
-              style={{
-                background: linkCopied ? 'var(--success)' : 'var(--primary)',
-                color: '#fff',
-                border: 'none',
-              }}
-            >
-              {linkCopied ? <Check size={16} /> : <Link size={16} />}
-              {linkCopied ? 'Link copiado!' : 'Copiar link do investidor'}
             </button>
           </>
         )}
