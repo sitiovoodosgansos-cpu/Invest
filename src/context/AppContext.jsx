@@ -14,6 +14,7 @@ const defaultData = {
   sales: [],
   financialInvestments: [],
   customSpecies: [],
+  payments: [],
 };
 
 // Count total items across all arrays in data
@@ -22,7 +23,8 @@ const countItems = (d) =>
   (d.birds?.length || 0) +
   (d.sales?.length || 0) +
   (d.financialInvestments?.length || 0) +
-  (d.customSpecies?.length || 0);
+  (d.customSpecies?.length || 0) +
+  (d.payments?.length || 0);
 
 // Default species (empty breeds - user adds breeds manually via the app)
 export const BIRD_SPECIES = [];
@@ -268,6 +270,27 @@ export function AppProvider({ children }) {
     }));
   };
 
+  // Payments (withdrawals / profit sent to investor)
+  const addPayment = (payment) => {
+    const newPayment = {
+      ...payment,
+      id: Date.now().toString(),
+      createdAt: new Date().toISOString(),
+    };
+    setData(prev => ({
+      ...prev,
+      payments: [...(prev.payments || []), newPayment],
+    }));
+    return newPayment;
+  };
+
+  const deletePayment = (id) => {
+    setData(prev => ({
+      ...prev,
+      payments: (prev.payments || []).filter(p => p.id !== id),
+    }));
+  };
+
   const value = {
     ...data,
     loading,
@@ -276,6 +299,7 @@ export function AppProvider({ children }) {
     addBird, updateBird, deleteBird,
     addSales, clearSales, deleteSale, updateSale,
     addFinancialInvestment, deleteFinancialInvestment,
+    addPayment, deletePayment,
     addCustomSpecies, deleteCustomSpecies,
   };
 

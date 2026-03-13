@@ -9,13 +9,13 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, Legend, PieChart, Pie, Cell
 } from 'recharts';
-import { Bird, Wallet, TrendingUp, DollarSign } from 'lucide-react';
+import { Bird, Wallet, TrendingUp, DollarSign, Send } from 'lucide-react';
 
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
 export default function DirectPortal() {
   const { token } = useParams();
-  const { investors, birds, sales, financialInvestments, loading, firestoreError } = useApp();
+  const { investors, birds, sales, financialInvestments, payments, loading, firestoreError } = useApp();
   const [period, setPeriod] = useState('monthly');
 
   const distribution = useMemo(() => calculateProfitDistribution(sales, birds), [sales, birds]);
@@ -78,6 +78,10 @@ export default function DirectPortal() {
     return s + calculateCompoundInterest(f.amount, 0.03, months);
   }, 0);
   const totalFinancialProfit = totalFinancialCurrent - totalFinancialInvested;
+
+  const myPayments = (payments || []).filter(p => p.investorId === investor.id).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const totalPaid = myPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
+  const netBalance = totalFinancialCurrent + totalProfit - totalPaid;
 
   // Timeline chart data
   const timelineData = useMemo(() => {
@@ -347,6 +351,49 @@ export default function DirectPortal() {
                 Aves: <strong style={{ color: 'var(--info)' }}>{formatCurrency(myDistribution.birdProfit)}</strong>
               </span>
               <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--success)' }}>Total: {formatCurrency(totalProfit)}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Payments received */}
+        {myPayments.length > 0 && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Pagamentos Recebidos ({myPayments.length})</span>
+            </div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Descricao</th>
+                    <th>Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {myPayments.map(p => (
+                    <tr key={p.id}>
+                      <td>{formatDate(p.date)}</td>
+                      <td style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{p.description || '-'}</td>
+                      <td style={{ color: 'var(--success)', fontWeight: 700 }}>{formatCurrency(p.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginTop: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 13 }}>Total acumulado (rendimento + lucro vendas):</span>
+                <strong>{formatCurrency(totalFinancialCurrent + totalProfit)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 13 }}>Total pago:</span>
+                <strong style={{ color: 'var(--warning)' }}>-{formatCurrency(totalPaid)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>Saldo liquido:</span>
+                <strong style={{ color: netBalance >= 0 ? 'var(--success)' : 'var(--danger)', fontSize: 16 }}>{formatCurrency(netBalance)}</strong>
+              </div>
             </div>
           </div>
         )}

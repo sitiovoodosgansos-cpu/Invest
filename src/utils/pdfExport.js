@@ -4,7 +4,7 @@ import { formatCurrency, formatDate, getMonthsDifference, calculateCompoundInter
 
 const ROWS_PER_PAGE = 50;
 
-export function exportInvestorReport(investor, birds, sales, financialInvestments, distribution, periodLabel) {
+export function exportInvestorReport(investor, birds, sales, financialInvestments, distribution, periodLabel, payments) {
   const doc = new jsPDF();
   const pageWidth = doc.internal.pageSize.getWidth();
 
@@ -164,6 +164,61 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
     doc.text(`Lucro com Aves: ${formatCurrency(distribution.birdProfit)}`, 20, y + 28);
     doc.setFont('helvetica', 'bold');
     doc.text(`Total: ${formatCurrency(distribution.totalProfit)}`, pageWidth - 20, y + 24, { align: 'right' });
+  }
+
+  // Payments section
+  const investorPayments = (payments || []).filter(p => p.investorId === investor.id).sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (investorPayments.length > 0) {
+    if (y > 220) { doc.addPage(); y = 20; }
+
+    doc.setTextColor(30, 27, 75);
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Pagamentos Realizados', 14, y);
+    y += 4;
+
+    const paymentRows = investorPayments.map(p => [
+      formatDate(p.date),
+      p.description || '-',
+      formatCurrency(p.amount),
+    ]);
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Data', 'Descricao', 'Valor Pago']],
+      body: paymentRows,
+      theme: 'striped',
+      headStyles: { fillColor: [217, 119, 6], fontSize: 9 },
+      bodyStyles: { fontSize: 9 },
+      margin: { left: 14, right: 14 },
+    });
+
+    y = doc.lastAutoTable.finalY + 8;
+
+    const totalPaid = investorPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
+
+    // Calculate net balance
+    const investorFinancial = financialInvestments.filter(f => f.investorId === investor.id);
+    const totalFinancialCurrent = investorFinancial.reduce((s, f) => {
+      const months = getMonthsDifference(f.date, new Date().toISOString());
+      return s + calculateCompoundInterest(f.amount, 0.03, months);
+    }, 0);
+    const salesProfit = distribution ? distribution.totalProfit : 0;
+    const netBalance = totalFinancialCurrent + salesProfit - totalPaid;
+
+    if (y > 250) { doc.addPage(); y = 20; }
+
+    doc.setFillColor(254, 243, 199);
+    doc.roundedRect(14, y, pageWidth - 28, 30, 4, 4, 'F');
+    doc.setTextColor(30, 27, 75);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Total pago: ${formatCurrency(totalPaid)}`, 20, y + 10);
+    doc.text(`Total acumulado: ${formatCurrency(totalFinancialCurrent + salesProfit)}`, 20, y + 20);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Saldo liquido: ${formatCurrency(netBalance)}`, pageWidth - 20, y + 15, { align: 'right' });
+
+    y += 38;
   }
 
   // Footer with page numbers

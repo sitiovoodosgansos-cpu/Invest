@@ -76,7 +76,7 @@ function getMonthOptions() {
 }
 
 export default function Reports() {
-  const { investors, birds, sales, financialInvestments } = useApp();
+  const { investors, birds, sales, financialInvestments, payments } = useApp();
   const [selectedInvestor, setSelectedInvestor] = useState('');
   const [period, setPeriod] = useState('monthly');
   const [dateFilter, setDateFilter] = useState('all');
@@ -210,7 +210,7 @@ export default function Reports() {
     if (!investor) return;
     try {
       const periodLabel = dateRange ? dateRange.label : 'Todos os periodos';
-      exportInvestorReport(investor, birds, sales, financialInvestments, filteredDist, periodLabel);
+      exportInvestorReport(investor, birds, sales, financialInvestments, filteredDist, periodLabel, payments);
     } catch (err) {
       console.error('Erro ao exportar PDF:', err);
       alert('Erro ao gerar o PDF. Tente novamente.');
