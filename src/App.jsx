@@ -111,8 +111,19 @@ function AppRouter() {
     );
   }
 
-  // Login desabilitado para testes - acesso direto ao admin
-  return <AdminLayout />;
+  if (!currentUser) {
+    return <Login />;
+  }
+
+  if (isInvestor) {
+    return <InvestorPortal />;
+  }
+
+  if (isAdmin) {
+    return <AdminLayout />;
+  }
+
+  return <Login />;
 }
 
 export default function App() {
