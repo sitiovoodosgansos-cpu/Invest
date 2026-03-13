@@ -168,6 +168,11 @@ export default function Reports() {
       : <ArrowDown size={12} style={{ marginLeft: 4, color: 'var(--primary)' }} />;
   };
 
+  const investorPayments = useMemo(() =>
+    (payments || []).filter(p => p.investorId === selectedInvestor).sort((a, b) => new Date(b.date) - new Date(a.date)),
+    [payments, selectedInvestor]
+  );
+
   const totalBirdInvestment = investorBirds.reduce((s, b) => s + (parseFloat(b.investmentValue) || 0), 0);
   const totalMatrices = investorBirds.reduce((s, b) => s + (parseInt(b.matrixCount) || 0), 0);
   const totalBreeders = investorBirds.reduce((s, b) => s + (parseInt(b.breederCount) || 0), 0);
@@ -179,6 +184,14 @@ export default function Reports() {
       return { invested: acc.invested + parseFloat(f.amount), current: acc.current + current };
     }, { invested: 0, current: 0 });
   }, [investorFinancial]);
+
+  const balanceSummary = useMemo(() => {
+    const totalPaid = investorPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
+    const salesProfit = filteredDist ? filteredDist.totalProfit : 0;
+    const totalAccumulated = financialSummary.current + salesProfit;
+    const netBalance = totalAccumulated - totalPaid;
+    return { totalPaid, salesProfit, totalAccumulated, netBalance };
+  }, [investorPayments, financialSummary, filteredDist]);
 
   // Timeline for investor (uses filtered data)
   const timelineData = useMemo(() => {
@@ -381,6 +394,73 @@ export default function Reports() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* Balance Summary */}
+          {(investorFinancial.length > 0 || (filteredDist && filteredDist.totalProfit > 0) || investorPayments.length > 0) && (
+            <div className="card" style={{ marginBottom: 24 }}>
+              <div className="card-header">
+                <span className="card-title">Saldo do Investidor</span>
+              </div>
+              <div className="stats-grid" style={{ marginBottom: investorPayments.length > 0 ? 16 : 0 }}>
+                <div className="stat-card">
+                  <div className="stat-label">Aporte Atualizado</div>
+                  <div className="stat-value" style={{ fontSize: 18, color: 'var(--info)' }}>{formatCurrency(financialSummary.current)}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Lucro com Vendas</div>
+                  <div className="stat-value" style={{ fontSize: 18, color: 'var(--success)' }}>{formatCurrency(balanceSummary.salesProfit)}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Total Acumulado</div>
+                  <div className="stat-value" style={{ fontSize: 18, color: 'var(--primary)' }}>{formatCurrency(balanceSummary.totalAccumulated)}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-label">Total Pago</div>
+                  <div className="stat-value" style={{ fontSize: 18, color: '#D97706' }}>{formatCurrency(balanceSummary.totalPaid)}</div>
+                </div>
+              </div>
+
+              {/* Net balance highlight */}
+              <div style={{
+                background: balanceSummary.netBalance >= 0 ? 'var(--success-bg, #ecfdf5)' : 'var(--danger-bg, #fef2f2)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '12px 20px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: investorPayments.length > 0 ? 16 : 0,
+              }}>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>Saldo Liquido</span>
+                <span style={{
+                  fontSize: 20,
+                  fontWeight: 700,
+                  color: balanceSummary.netBalance >= 0 ? 'var(--success)' : 'var(--danger)',
+                }}>
+                  {formatCurrency(balanceSummary.netBalance)}
+                </span>
+              </div>
+
+              {/* Payments table */}
+              {investorPayments.length > 0 && (
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr><th>Data</th><th>Descricao</th><th>Valor Pago</th></tr>
+                    </thead>
+                    <tbody>
+                      {investorPayments.map(p => (
+                        <tr key={p.id}>
+                          <td>{formatDate(p.date)}</td>
+                          <td>{p.description || '-'}</td>
+                          <td style={{ color: '#D97706', fontWeight: 600 }}>{formatCurrency(p.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
