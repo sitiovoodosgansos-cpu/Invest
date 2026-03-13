@@ -9,11 +9,12 @@ import Plantel from './pages/Plantel';
 import Sales from './pages/Sales';
 import Financial from './pages/Financial';
 import Reports from './pages/Reports';
+import Expenses from './pages/Expenses';
 import Login from './pages/Login';
 import InvestorPortal from './pages/InvestorPortal';
 import DirectPortal from './pages/DirectPortal';
 import {
-  LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut
+  LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut, Receipt
 } from 'lucide-react';
 
 function AdminLayout() {
@@ -26,6 +27,7 @@ function AdminLayout() {
     { to: '/plantel', icon: <Bird />, label: 'Plantel' },
     { to: '/vendas', icon: <ShoppingCart />, label: 'Vendas' },
     { to: '/financeiro', icon: <Wallet />, label: 'Financeiro' },
+    { to: '/despesas', icon: <Receipt />, label: 'Despesas' },
     { to: '/relatorios', icon: <FileBarChart />, label: 'Relatórios' },
   ];
 
@@ -89,6 +91,7 @@ function AdminLayout() {
           <Route path="/plantel" element={<Plantel />} />
           <Route path="/vendas" element={<Sales />} />
           <Route path="/financeiro" element={<Financial />} />
+          <Route path="/despesas" element={<Expenses />} />
           <Route path="/relatorios" element={<Reports />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
