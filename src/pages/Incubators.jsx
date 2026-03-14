@@ -59,11 +59,17 @@ export default function Incubators() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfYear = new Date(now.getFullYear(), 0, 1);
 
+  // Helper to sum losses from a batch
+  const getBatchLosses = (b) => (parseInt(b.totalInfertil) || 0) + (parseInt(b.totalNaoDesenvolveu) || 0) + (parseInt(b.totalMorreuNoOvo) || 0);
+
   // Stats from hatched batches
   const hatchStats = useMemo(() => {
     const hatched = allBatches.filter(b => b.status === 'hatched' && b.dateHatch);
     const totalChicks = hatched.reduce((s, b) => s + (parseInt(b.totalHatched) || 0), 0);
-    const totalDefects = hatched.reduce((s, b) => s + (parseInt(b.totalDefects) || 0), 0);
+    const totalInfertil = hatched.reduce((s, b) => s + (parseInt(b.totalInfertil) || 0), 0);
+    const totalNaoDesenvolveu = hatched.reduce((s, b) => s + (parseInt(b.totalNaoDesenvolveu) || 0), 0);
+    const totalMorreuNoOvo = hatched.reduce((s, b) => s + (parseInt(b.totalMorreuNoOvo) || 0), 0);
+    const totalLosses = totalInfertil + totalNaoDesenvolveu + totalMorreuNoOvo;
     const totalEggsSet = hatched.reduce((s, b) => s + (parseInt(b.totalEggs) || 0), 0);
 
     const weekChicks = hatched.filter(b => new Date(b.dateHatch) >= startOfWeek).reduce((s, b) => s + (parseInt(b.totalHatched) || 0), 0);
@@ -72,7 +78,7 @@ export default function Incubators() {
 
     const overallHatchRate = totalEggsSet > 0 ? ((totalChicks / totalEggsSet) * 100) : 0;
 
-    return { totalChicks, totalDefects, totalEggsSet, weekChicks, monthChicks, yearChicks, overallHatchRate };
+    return { totalChicks, totalInfertil, totalNaoDesenvolveu, totalMorreuNoOvo, totalLosses, totalEggsSet, weekChicks, monthChicks, yearChicks, overallHatchRate };
   }, [allBatches, startOfWeek.getTime(), startOfMonth.getTime(), startOfYear.getTime()]);
 
   // Active batches (still incubating)
@@ -86,10 +92,10 @@ export default function Incubators() {
       const hatchedBatches = batches.filter(b => b.status === 'hatched');
       const totalEggs = hatchedBatches.reduce((s, b) => s + (parseInt(b.totalEggs) || 0), 0);
       const totalHatched = hatchedBatches.reduce((s, b) => s + (parseInt(b.totalHatched) || 0), 0);
-      const totalDefects = hatchedBatches.reduce((s, b) => s + (parseInt(b.totalDefects) || 0), 0);
+      const totalLosses = hatchedBatches.reduce((s, b) => s + getBatchLosses(b), 0);
       const hatchRate = totalEggs > 0 ? ((totalHatched / totalEggs) * 100) : 0;
       const activeBatch = batches.filter(b => b.status === 'incubating');
-      stats[inc.id] = { totalBatches: batches.length, hatchedBatches: hatchedBatches.length, totalEggs, totalHatched, totalDefects, hatchRate, activeBatch };
+      stats[inc.id] = { totalBatches: batches.length, hatchedBatches: hatchedBatches.length, totalEggs, totalHatched, totalLosses, hatchRate, activeBatch };
     });
     return stats;
   }, [allIncubators, allBatches]);
@@ -106,12 +112,15 @@ export default function Incubators() {
         return d >= m && d <= mEnd;
       });
       const chicks = mBatches.reduce((s, b) => s + (parseInt(b.totalHatched) || 0), 0);
-      const defects = mBatches.reduce((s, b) => s + (parseInt(b.totalDefects) || 0), 0);
+      const infertil = mBatches.reduce((s, b) => s + (parseInt(b.totalInfertil) || 0), 0);
+      const naoDesenv = mBatches.reduce((s, b) => s + (parseInt(b.totalNaoDesenvolveu) || 0), 0);
+      const morreu = mBatches.reduce((s, b) => s + (parseInt(b.totalMorreuNoOvo) || 0), 0);
       months.push({
         period: MONTH_NAMES[m.getMonth()],
-        saudaveis: chicks - defects,
-        defeitos: defects,
-        total: chicks,
+        nascidos: chicks,
+        inferteis: infertil,
+        naoDesenvolveu: naoDesenv,
+        morreuNoOvo: morreu,
       });
     }
     return months;
@@ -132,7 +141,9 @@ export default function Incubators() {
         return d >= weekStart && d < weekEnd;
       });
       const chicks = wBatches.reduce((s, b) => s + (parseInt(b.totalHatched) || 0), 0);
-      const defects = wBatches.reduce((s, b) => s + (parseInt(b.totalDefects) || 0), 0);
+      const infertil = wBatches.reduce((s, b) => s + (parseInt(b.totalInfertil) || 0), 0);
+      const naoDesenv = wBatches.reduce((s, b) => s + (parseInt(b.totalNaoDesenvolveu) || 0), 0);
+      const morreu = wBatches.reduce((s, b) => s + (parseInt(b.totalMorreuNoOvo) || 0), 0);
       const getWeekNum = (date) => {
         const d = new Date(date);
         const start = new Date(d.getFullYear(), 0, 1);
@@ -140,9 +151,10 @@ export default function Incubators() {
       };
       weeks.push({
         period: `S${getWeekNum(weekStart)}`,
-        saudaveis: chicks - defects,
-        defeitos: defects,
-        total: chicks,
+        nascidos: chicks,
+        inferteis: infertil,
+        naoDesenvolveu: naoDesenv,
+        morreuNoOvo: morreu,
       });
     }
     return weeks;
@@ -204,7 +216,9 @@ export default function Incubators() {
       notes: batchForm.notes.trim(),
       status: 'incubating',
       totalHatched: 0,
-      totalDefects: 0,
+      totalInfertil: 0,
+      totalNaoDesenvolveu: 0,
+      totalMorreuNoOvo: 0,
       dateHatch: '',
       hatchResults: {},
     };
@@ -259,7 +273,9 @@ export default function Incubators() {
         const existing = batch.hatchResults?.[birdId];
         results[birdId] = {
           hatched: existing?.hatched ?? '',
-          defects: existing?.defects ?? '',
+          infertil: existing?.infertil ?? '',
+          naoDesenvolveu: existing?.naoDesenvolveu ?? '',
+          morreuNoOvo: existing?.morreuNoOvo ?? '',
         };
       });
     }
@@ -277,7 +293,7 @@ export default function Incubators() {
       ...prev,
       hatchResults: {
         ...prev.hatchResults,
-        [birdId]: { ...(prev.hatchResults[birdId] || { hatched: '', defects: '' }), [field]: value },
+        [birdId]: { ...(prev.hatchResults[birdId] || { hatched: '', infertil: '', naoDesenvolveu: '', morreuNoOvo: '' }), [field]: value },
       },
     }));
   };
@@ -285,8 +301,10 @@ export default function Incubators() {
   const hatchTotals = useMemo(() => {
     const results = hatchForm.hatchResults || {};
     const hatched = Object.values(results).reduce((s, r) => s + (parseInt(r.hatched) || 0), 0);
-    const defects = Object.values(results).reduce((s, r) => s + (parseInt(r.defects) || 0), 0);
-    return { hatched, defects };
+    const infertil = Object.values(results).reduce((s, r) => s + (parseInt(r.infertil) || 0), 0);
+    const naoDesenvolveu = Object.values(results).reduce((s, r) => s + (parseInt(r.naoDesenvolveu) || 0), 0);
+    const morreuNoOvo = Object.values(results).reduce((s, r) => s + (parseInt(r.morreuNoOvo) || 0), 0);
+    return { hatched, infertil, naoDesenvolveu, morreuNoOvo, totalLosses: infertil + naoDesenvolveu + morreuNoOvo };
   }, [hatchForm.hatchResults]);
 
   const handleSaveHatch = (e) => {
@@ -298,7 +316,9 @@ export default function Incubators() {
       dateHatch: hatchForm.dateHatch,
       hatchResults: hatchForm.hatchResults,
       totalHatched: hatchTotals.hatched,
-      totalDefects: hatchTotals.defects,
+      totalInfertil: hatchTotals.infertil,
+      totalNaoDesenvolveu: hatchTotals.naoDesenvolveu,
+      totalMorreuNoOvo: hatchTotals.morreuNoOvo,
       hatchNotes: hatchForm.notes.trim(),
     });
     setShowHatchModal(false);
@@ -341,9 +361,9 @@ export default function Incubators() {
           <div className="stat-value" style={{ color: getHatchRateColor(hatchStats.overallHatchRate) }}>
             {hatchStats.overallHatchRate.toFixed(0)}%
           </div>
-          {hatchStats.totalDefects > 0 && (
+          {hatchStats.totalLosses > 0 && (
             <div className="stat-change" style={{ color: 'var(--danger)', fontSize: 11 }}>
-              {hatchStats.totalDefects} com defeito
+              {hatchStats.totalLosses} perdas
             </div>
           )}
         </div>
@@ -364,8 +384,10 @@ export default function Incubators() {
                   <YAxis fontSize={11} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="saudaveis" name="Saudaveis" fill="#10B981" stackId="a" />
-                  <Bar dataKey="defeitos" name="Com Defeito" fill="#EF4444" stackId="a" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="nascidos" name="Nascidos" fill="#10B981" stackId="a" />
+                  <Bar dataKey="inferteis" name="Inferteis" fill="#94a3b8" stackId="a" />
+                  <Bar dataKey="naoDesenvolveu" name="Nao Desenvolveu" fill="#f59e0b" stackId="a" />
+                  <Bar dataKey="morreuNoOvo" name="Morreu no Ovo" fill="#EF4444" stackId="a" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -382,8 +404,10 @@ export default function Incubators() {
                   <YAxis fontSize={11} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="saudaveis" name="Saudaveis" fill="#3B82F6" stackId="a" />
-                  <Bar dataKey="defeitos" name="Com Defeito" fill="#EF4444" stackId="a" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="nascidos" name="Nascidos" fill="#3B82F6" stackId="a" />
+                  <Bar dataKey="inferteis" name="Inferteis" fill="#94a3b8" stackId="a" />
+                  <Bar dataKey="naoDesenvolveu" name="Nao Desenvolveu" fill="#f59e0b" stackId="a" />
+                  <Bar dataKey="morreuNoOvo" name="Morreu no Ovo" fill="#EF4444" stackId="a" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -480,9 +504,9 @@ export default function Incubators() {
                     </div>
                   </div>
 
-                  {stats.totalDefects > 0 && (
+                  {stats.totalLosses > 0 && (
                     <div style={{ fontSize: 11, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                      <AlertTriangle size={12} /> {stats.totalDefects} pintinhos com defeito no total
+                      <AlertTriangle size={12} /> {stats.totalLosses} perdas no total
                     </div>
                   )}
 
@@ -534,10 +558,14 @@ export default function Incubators() {
                                     <span style={{ color: 'var(--success)', fontWeight: 600 }}>{batch.totalHatched} nascidos</span>
                                     <span style={{ margin: '0 6px' }}>|</span>
                                     <span style={{ fontWeight: 600, color: getHatchRateColor(hatchRate) }}>{hatchRate.toFixed(0)}% eclosao</span>
-                                    {(parseInt(batch.totalDefects) || 0) > 0 && (
+                                    {getBatchLosses(batch) > 0 && (
                                       <>
                                         <span style={{ margin: '0 6px' }}>|</span>
-                                        <span style={{ color: 'var(--danger)' }}>{batch.totalDefects} defeito{batch.totalDefects > 1 ? 's' : ''}</span>
+                                        <span style={{ color: 'var(--text-muted)' }}>
+                                          {(parseInt(batch.totalInfertil) || 0) > 0 && <span>{batch.totalInfertil} inf. </span>}
+                                          {(parseInt(batch.totalNaoDesenvolveu) || 0) > 0 && <span>{batch.totalNaoDesenvolveu} n/desenv. </span>}
+                                          {(parseInt(batch.totalMorreuNoOvo) || 0) > 0 && <span style={{ color: 'var(--danger)' }}>{batch.totalMorreuNoOvo} morreu</span>}
+                                        </span>
                                       </>
                                     )}
                                   </>
@@ -555,8 +583,14 @@ export default function Incubators() {
                                         {hatchResult && (parseInt(hatchResult.hatched) || 0) > 0 && (
                                           <span style={{ color: 'var(--success)' }}> ({hatchResult.hatched} nasc.)</span>
                                         )}
-                                        {hatchResult && (parseInt(hatchResult.defects) || 0) > 0 && (
-                                          <span style={{ color: 'var(--danger)' }}> ({hatchResult.defects} def.)</span>
+                                        {hatchResult && (parseInt(hatchResult.infertil) || 0) > 0 && (
+                                          <span style={{ color: 'var(--text-muted)' }}> ({hatchResult.infertil} inf.)</span>
+                                        )}
+                                        {hatchResult && (parseInt(hatchResult.naoDesenvolveu) || 0) > 0 && (
+                                          <span style={{ color: '#f59e0b' }}> ({hatchResult.naoDesenvolveu} n/des.)</span>
+                                        )}
+                                        {hatchResult && (parseInt(hatchResult.morreuNoOvo) || 0) > 0 && (
+                                          <span style={{ color: 'var(--danger)' }}> ({hatchResult.morreuNoOvo} morreu)</span>
                                         )}
                                       </span>
                                     );
@@ -607,7 +641,9 @@ export default function Incubators() {
                   <th>Ovos</th>
                   <th>Status</th>
                   <th>Nascidos</th>
-                  <th>Defeitos</th>
+                  <th>Inferteis</th>
+                  <th>N/Desenv.</th>
+                  <th>Morreu</th>
                   <th>Taxa</th>
                   <th style={{ width: 100, textAlign: 'center' }}>Acoes</th>
                 </tr>
@@ -632,8 +668,14 @@ export default function Incubators() {
                       <td style={{ fontWeight: 600, color: batch.status === 'hatched' ? 'var(--success)' : 'var(--text-muted)' }}>
                         {batch.status === 'hatched' ? batch.totalHatched : '-'}
                       </td>
-                      <td style={{ fontWeight: 600, color: (parseInt(batch.totalDefects) || 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
-                        {batch.status === 'hatched' ? (batch.totalDefects || 0) : '-'}
+                      <td style={{ fontWeight: 600, color: (parseInt(batch.totalInfertil) || 0) > 0 ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
+                        {batch.status === 'hatched' ? (batch.totalInfertil || 0) : '-'}
+                      </td>
+                      <td style={{ fontWeight: 600, color: (parseInt(batch.totalNaoDesenvolveu) || 0) > 0 ? '#f59e0b' : 'var(--text-muted)' }}>
+                        {batch.status === 'hatched' ? (batch.totalNaoDesenvolveu || 0) : '-'}
+                      </td>
+                      <td style={{ fontWeight: 600, color: (parseInt(batch.totalMorreuNoOvo) || 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                        {batch.status === 'hatched' ? (batch.totalMorreuNoOvo || 0) : '-'}
                       </td>
                       <td style={{ fontWeight: 600, color: batch.status === 'hatched' ? getHatchRateColor(hatchRate) : 'var(--text-muted)' }}>
                         {batch.status === 'hatched' ? `${hatchRate.toFixed(0)}%` : '-'}
@@ -798,7 +840,7 @@ export default function Incubators() {
         if (!batch) return null;
         return (
           <div className="modal-overlay" onClick={() => setShowHatchModal(false)}>
-            <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 620 }}>
+            <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 780 }}>
               <h3 className="modal-title">Registrar Eclosao</h3>
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
                 {allIncubators.find(i => i.id === batch.incubatorId)?.name || 'Chocadeira'} - Entrada: {formatDate(batch.dateIn)} - {batch.totalEggs} ovos
@@ -815,9 +857,9 @@ export default function Incubators() {
                     <div style={{ fontSize: 13, fontWeight: 600 }}>
                       Nascidos: <span style={{ color: 'var(--success)', fontSize: 16 }}>{hatchTotals.hatched}</span>
                     </div>
-                    {hatchTotals.defects > 0 && (
+                    {hatchTotals.totalLosses > 0 && (
                       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--danger)' }}>
-                        {hatchTotals.defects} com defeito
+                        {hatchTotals.totalLosses} perdas
                       </div>
                     )}
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -833,13 +875,15 @@ export default function Incubators() {
                         <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 12, fontWeight: 600 }}>Ave / Raca</th>
                         <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, fontWeight: 600, width: 70 }}>Ovos</th>
                         <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, fontWeight: 600, width: 90 }}>Nascidos</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, fontWeight: 600, width: 90 }}>Defeitos</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 11, fontWeight: 600, width: 75 }}>Infertil</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 11, fontWeight: 600, width: 75 }}>N/Desenv.</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 11, fontWeight: 600, width: 75 }}>Morreu</th>
                       </tr>
                     </thead>
                     <tbody>
                       {Object.entries(batch.eggs || {}).filter(([, q]) => (parseInt(q) || 0) > 0).map(([birdId, eggQty]) => {
                         const bird = birds.find(b => b.id === birdId);
-                        const result = hatchForm.hatchResults[birdId] || { hatched: '', defects: '' };
+                        const result = hatchForm.hatchResults[birdId] || { hatched: '', infertil: '', naoDesenvolveu: '', morreuNoOvo: '' };
                         return (
                           <tr key={birdId} style={{ borderBottom: '1px solid var(--border)' }}>
                             <td style={{ padding: '8px 12px' }}>
@@ -857,8 +901,22 @@ export default function Incubators() {
                             </td>
                             <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                               <input className="form-input" type="number" min="0"
-                                value={result.defects}
-                                onChange={e => updateHatchResult(birdId, 'defects', e.target.value)}
+                                value={result.infertil}
+                                onChange={e => updateHatchResult(birdId, 'infertil', e.target.value)}
+                                placeholder="0" style={{ width: 55, textAlign: 'center', padding: '6px 2px', margin: '0 auto' }}
+                              />
+                            </td>
+                            <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                              <input className="form-input" type="number" min="0"
+                                value={result.naoDesenvolveu}
+                                onChange={e => updateHatchResult(birdId, 'naoDesenvolveu', e.target.value)}
+                                placeholder="0" style={{ width: 55, textAlign: 'center', padding: '6px 2px', margin: '0 auto' }}
+                              />
+                            </td>
+                            <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                              <input className="form-input" type="number" min="0"
+                                value={result.morreuNoOvo}
+                                onChange={e => updateHatchResult(birdId, 'morreuNoOvo', e.target.value)}
                                 placeholder="0" style={{ width: 60, textAlign: 'center', padding: '6px 4px', margin: '0 auto' }}
                               />
                             </td>
