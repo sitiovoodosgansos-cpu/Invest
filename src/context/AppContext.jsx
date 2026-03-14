@@ -18,6 +18,8 @@ const defaultData = {
   expenses: [],
   customExpenseCategories: [],
   eggCollections: [],
+  incubators: [],
+  incubatorBatches: [],
 };
 
 // Count total items across all arrays in data
@@ -30,7 +32,9 @@ const countItems = (d) =>
   (d.payments?.length || 0) +
   (d.expenses?.length || 0) +
   (d.customExpenseCategories?.length || 0) +
-  (d.eggCollections?.length || 0);
+  (d.eggCollections?.length || 0) +
+  (d.incubators?.length || 0) +
+  (d.incubatorBatches?.length || 0);
 
 // Default species (empty breeds - user adds breeds manually via the app)
 export const BIRD_SPECIES = [];
@@ -378,6 +382,36 @@ export function AppProvider({ children }) {
     }));
   };
 
+  // Incubators
+  const addIncubator = (incubator) => {
+    const newIncubator = { ...incubator, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    setData(prev => ({ ...prev, incubators: [...(prev.incubators || []), newIncubator] }));
+    return newIncubator;
+  };
+  const updateIncubator = (id, updates) => {
+    setData(prev => ({ ...prev, incubators: (prev.incubators || []).map(i => i.id === id ? { ...i, ...updates } : i) }));
+  };
+  const deleteIncubator = (id) => {
+    setData(prev => ({
+      ...prev,
+      incubators: (prev.incubators || []).filter(i => i.id !== id),
+      incubatorBatches: (prev.incubatorBatches || []).filter(b => b.incubatorId !== id),
+    }));
+  };
+
+  // Incubator Batches
+  const addIncubatorBatch = (batch) => {
+    const newBatch = { ...batch, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    setData(prev => ({ ...prev, incubatorBatches: [...(prev.incubatorBatches || []), newBatch] }));
+    return newBatch;
+  };
+  const updateIncubatorBatch = (id, updates) => {
+    setData(prev => ({ ...prev, incubatorBatches: (prev.incubatorBatches || []).map(b => b.id === id ? { ...b, ...updates } : b) }));
+  };
+  const deleteIncubatorBatch = (id) => {
+    setData(prev => ({ ...prev, incubatorBatches: (prev.incubatorBatches || []).filter(b => b.id !== id) }));
+  };
+
   const value = {
     ...data,
     loading,
@@ -390,6 +424,8 @@ export function AppProvider({ children }) {
     addExpense, updateExpense, deleteExpense,
     addCustomExpenseCategory, deleteCustomExpenseCategory,
     addEggCollection, updateEggCollection, deleteEggCollection,
+    addIncubator, updateIncubator, deleteIncubator,
+    addIncubatorBatch, updateIncubatorBatch, deleteIncubatorBatch,
     addCustomSpecies, deleteCustomSpecies,
   };
 
