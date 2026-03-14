@@ -17,6 +17,7 @@ const defaultData = {
   payments: [],
   expenses: [],
   customExpenseCategories: [],
+  eggCollections: [],
 };
 
 // Count total items across all arrays in data
@@ -28,7 +29,8 @@ const countItems = (d) =>
   (d.customSpecies?.length || 0) +
   (d.payments?.length || 0) +
   (d.expenses?.length || 0) +
-  (d.customExpenseCategories?.length || 0);
+  (d.customExpenseCategories?.length || 0) +
+  (d.eggCollections?.length || 0);
 
 // Default species (empty breeds - user adds breeds manually via the app)
 export const BIRD_SPECIES = [];
@@ -348,6 +350,34 @@ export function AppProvider({ children }) {
     }));
   };
 
+  // Egg Collections
+  const addEggCollection = (collection) => {
+    const newCollection = {
+      ...collection,
+      id: Date.now().toString(),
+      createdAt: new Date().toISOString(),
+    };
+    setData(prev => ({
+      ...prev,
+      eggCollections: [...(prev.eggCollections || []), newCollection],
+    }));
+    return newCollection;
+  };
+
+  const updateEggCollection = (id, updates) => {
+    setData(prev => ({
+      ...prev,
+      eggCollections: (prev.eggCollections || []).map(c => c.id === id ? { ...c, ...updates } : c),
+    }));
+  };
+
+  const deleteEggCollection = (id) => {
+    setData(prev => ({
+      ...prev,
+      eggCollections: (prev.eggCollections || []).filter(c => c.id !== id),
+    }));
+  };
+
   const value = {
     ...data,
     loading,
@@ -359,6 +389,7 @@ export function AppProvider({ children }) {
     addPayment, deletePayment,
     addExpense, updateExpense, deleteExpense,
     addCustomExpenseCategory, deleteCustomExpenseCategory,
+    addEggCollection, updateEggCollection, deleteEggCollection,
     addCustomSpecies, deleteCustomSpecies,
   };
 

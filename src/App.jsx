@@ -10,11 +10,12 @@ import Sales from './pages/Sales';
 import Financial from './pages/Financial';
 import Reports from './pages/Reports';
 import Expenses from './pages/Expenses';
+import EggCollection from './pages/EggCollection';
 import Login from './pages/Login';
 import InvestorPortal from './pages/InvestorPortal';
 import DirectPortal from './pages/DirectPortal';
 import {
-  LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut, Receipt
+  LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut, Receipt, Egg
 } from 'lucide-react';
 
 function AdminLayout() {
@@ -25,6 +26,7 @@ function AdminLayout() {
     { to: '/dashboard', icon: <LayoutDashboard />, label: 'Dashboard' },
     { to: '/investidores', icon: <Users />, label: 'Investidores' },
     { to: '/plantel', icon: <Bird />, label: 'Plantel' },
+    { to: '/coleta-ovos', icon: <Egg />, label: 'Coleta de Ovos' },
     { to: '/vendas', icon: <ShoppingCart />, label: 'Vendas' },
     { to: '/financeiro', icon: <Wallet />, label: 'Financeiro' },
     { to: '/despesas', icon: <Receipt />, label: 'Despesas' },
@@ -89,6 +91,7 @@ function AdminLayout() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/investidores" element={<Investors />} />
           <Route path="/plantel" element={<Plantel />} />
+          <Route path="/coleta-ovos" element={<EggCollection />} />
           <Route path="/vendas" element={<Sales />} />
           <Route path="/financeiro" element={<Financial />} />
           <Route path="/despesas" element={<Expenses />} />
