@@ -1,8 +1,39 @@
-import React, { useState } from 'react';
+import React, { Component, useState } from 'react';
 import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { useApp } from './context/AppContext';
 import { AppProvider } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
+
+// Global ErrorBoundary to prevent blank pages on crash
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('App crash:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 40, textAlign: 'center', fontFamily: 'sans-serif' }}>
+          <h2 style={{ color: '#e53e3e' }}>Algo deu errado</h2>
+          <p style={{ color: '#666', marginBottom: 16 }}>{this.state.error?.message}</p>
+          <button
+            onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+            style={{ padding: '10px 24px', background: '#6C2BD9', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14 }}
+          >
+            Recarregar Pagina
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import Dashboard from './pages/Dashboard';
 import Investors from './pages/Investors';
 import Plantel from './pages/Plantel';
@@ -137,15 +168,17 @@ function AppRouter() {
 
 export default function App() {
   return (
-    <AppProvider>
-      <AuthProvider>
-        <HashRouter>
-          <Routes>
-            <Route path="/portal/:token" element={<DirectPortal />} />
-            <Route path="*" element={<AppRouter />} />
-          </Routes>
-        </HashRouter>
-      </AuthProvider>
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <AuthProvider>
+          <HashRouter>
+            <Routes>
+              <Route path="/portal/:token" element={<DirectPortal />} />
+              <Route path="*" element={<AppRouter />} />
+            </Routes>
+          </HashRouter>
+        </AuthProvider>
+      </AppProvider>
+    </ErrorBoundary>
   );
 }

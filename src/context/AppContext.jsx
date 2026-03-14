@@ -133,10 +133,12 @@ export function AppProvider({ children }) {
     }
 
     // Save to both Firestore and localStorage
+    // Sanitize: Firestore rejects undefined values, so strip them via JSON round-trip
+    const sanitized = JSON.parse(JSON.stringify(data));
     lastLocalWriteTime.current = Date.now();
     firestoreItemCount.current = newCount;
     pendingWriteCount.current += 1;
-    setDoc(FIRESTORE_DOC, data)
+    setDoc(FIRESTORE_DOC, sanitized)
       .catch(err => {
         console.error('Firestore save error:', err);
       })
