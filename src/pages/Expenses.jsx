@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatCurrency, formatDate } from '../utils/helpers';
+import { formatCurrency, formatDate, getMonthsDifference, calculateCompoundInterest } from '../utils/helpers';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -8,7 +8,7 @@ import {
 } from 'recharts';
 import {
   Plus, Trash2, Edit2, Save, X, Image, Eye, FileDown, Receipt,
-  ArrowUp, ArrowDown, ArrowUpDown
+  ArrowUp, ArrowDown, ArrowUpDown, TrendingUp
 } from 'lucide-react';
 
 const EXPENSE_CATEGORIES = [
@@ -21,6 +21,7 @@ const EXPENSE_CATEGORIES = [
   'Energia e Agua',
   'Equipamentos',
   'Impostos e Taxas',
+  'Rendimento Investidores',
   'Outros',
 ];
 
@@ -39,6 +40,7 @@ const CATEGORY_COLORS = {
   'Energia e Agua': '#6366F1',
   'Equipamentos': '#10B981',
   'Impostos e Taxas': '#F97316',
+  'Rendimento Investidores': '#D946EF',
   'Outros': '#94A3B8',
 };
 
@@ -52,7 +54,7 @@ function fileToBase64(file) {
 }
 
 export default function Expenses() {
-  const { expenses, sales, addExpense, updateExpense, deleteExpense } = useApp();
+  const { expenses, sales, financialInvestments, investors, addExpense, updateExpense, deleteExpense } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [viewImage, setViewImage] = useState(null);
@@ -70,7 +72,47 @@ export default function Expenses() {
   });
   const imageInputRef = useRef(null);
 
-  const allExpenses = expenses || [];
+  // Generate virtual yield expenses from financial investments (3% monthly compound interest)
+  const yieldExpenses = useMemo(() => {
+    const entries = [];
+    (financialInvestments || []).forEach(inv => {
+      const investor = (investors || []).find(i => i.id === inv.investorId);
+      const investorName = investor?.name || 'Investidor';
+      const principal = parseFloat(inv.amount) || 0;
+      if (principal <= 0) return;
+
+      const startDate = new Date(inv.date);
+      const now = new Date();
+      const totalMonths = getMonthsDifference(inv.date);
+
+      for (let m = 1; m <= totalMonths; m++) {
+        // Yield for month m = principal * 1.03^(m-1) * 0.03
+        const monthYield = principal * Math.pow(1.03, m - 1) * 0.03;
+        const monthDate = new Date(startDate.getFullYear(), startDate.getMonth() + m, 1);
+        // Use last day of the month for the expense date
+        const lastDay = new Date(monthDate.getFullYear(), monthDate.getMonth(), 0);
+        if (lastDay > now) break;
+
+        entries.push({
+          id: `yield-${inv.id}-${m}`,
+          date: lastDay.toISOString().slice(0, 10),
+          amount: monthYield,
+          item: `Rendimento 3% - ${investorName} (mes ${m})`,
+          category: 'Rendimento Investidores',
+          isAutomatic: true,
+        });
+      }
+    });
+    return entries;
+  }, [financialInvestments, investors]);
+
+  // Total yield cost
+  const totalYieldCost = useMemo(() => {
+    return yieldExpenses.reduce((s, e) => s + e.amount, 0);
+  }, [yieldExpenses]);
+
+  const manualExpenses = expenses || [];
+  const allExpenses = useMemo(() => [...manualExpenses, ...yieldExpenses], [manualExpenses, yieldExpenses]);
 
   // Get available months from expenses
   const availableMonths = useMemo(() => {
@@ -390,11 +432,13 @@ export default function Expenses() {
             {formatCurrency(totalRevenue - totalExpenses)}
           </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-card-icon purple"><Receipt size={20} /></div>
-          <div className="stat-label">Lancamentos</div>
-          <div className="stat-value">{allExpenses.length}</div>
-        </div>
+        {totalYieldCost > 0 && (
+          <div className="stat-card">
+            <div className="stat-card-icon" style={{ background: '#fae8ff', color: '#D946EF' }}><TrendingUp size={20} /></div>
+            <div className="stat-label">Rendimento Investidores</div>
+            <div className="stat-value" style={{ color: '#D946EF' }}>{formatCurrency(totalYieldCost)}</div>
+          </div>
+        )}
       </div>
 
       {/* Action Bar */}
@@ -534,14 +578,18 @@ export default function Expenses() {
                       )}
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                        <button className="btn-icon" title="Editar" onClick={() => handleEdit(expense)}>
-                          <Edit2 size={14} />
-                        </button>
-                        <button className="btn-icon" title="Excluir" onClick={() => handleDelete(expense)} style={{ color: 'var(--danger)' }}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
+                      {expense.isAutomatic ? (
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Auto</span>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                          <button className="btn-icon" title="Editar" onClick={() => handleEdit(expense)}>
+                            <Edit2 size={14} />
+                          </button>
+                          <button className="btn-icon" title="Excluir" onClick={() => handleDelete(expense)} style={{ color: 'var(--danger)' }}>
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
