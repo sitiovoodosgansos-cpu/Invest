@@ -8,10 +8,17 @@ export function formatCurrency(value) {
 export function formatDate(dateStr) {
   if (!dateStr) return '-';
   try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return String(dateStr).split(',')[0] || dateStr;
+    // For date-only strings (YYYY-MM-DD), parse manually to avoid timezone shift
+    const s = String(dateStr);
+    const match = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      return `${match[3]}/${match[2]}/${match[1]}`;
+    }
+    // For full ISO strings, format in UTC to avoid day shift
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s.split(',')[0] || dateStr;
     return new Intl.DateTimeFormat('pt-BR', {
-      day: '2-digit', month: '2-digit', year: 'numeric'
+      day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC'
     }).format(d);
   } catch {
     return String(dateStr).split(',')[0] || dateStr;
