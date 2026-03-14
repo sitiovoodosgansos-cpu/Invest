@@ -155,19 +155,33 @@ function parseSingleOrder(text) {
   // Remove "Sexo:" prefix so gender info (Casal/Macho/Fêmea) merges into item description
   normalized = normalized.replace(/\bSexo:\s*/gi, '');
 
-  // Extract line items using a general regex that captures any text before "R$ price xQTY R$ total"
-  // This handles both OVO items and bird items (Brahma, Sedosa, etc.)
-  const itemRegex = /([A-ZÀ-Úa-zà-ú][\w\s\-–(),.]*?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
+  // Two-phase item extraction (safe from catastrophic backtracking):
+  // Phase 1: Find all "R$ unitPrice xQty R$ total" patterns
+  // Phase 2: Extract item description from text before each match
+  const pricePattern = /R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
+  const priceMatches = [...normalized.matchAll(pricePattern)];
 
-  let match;
-  while ((match = itemRegex.exec(normalized)) !== null) {
-    let itemDescription = match[1].trim();
-    // Skip summary lines
+  for (let i = 0; i < priceMatches.length; i++) {
+    const pm = priceMatches[i];
+    // Description = text between end of previous match and start of this price
+    const startPos = i === 0 ? 0 : priceMatches[i - 1].index + priceMatches[i - 1][0].length;
+    let itemDescription = normalized.slice(startPos, pm.index).trim();
+
+    // For the first item, strip header text (everything up to and including time "HH:MM")
+    if (i === 0) {
+      const timeMatch = itemDescription.match(/\d{1,2}:\d{2}\s*/);
+      if (timeMatch) {
+        itemDescription = itemDescription.slice(timeMatch.index + timeMatch[0].length).trim();
+      }
+    }
+
+    // Skip summary/non-item lines
     if (/^(Itens|Frete|Imposto|Cupom|Total|Pago|Subtotal)/i.test(itemDescription)) continue;
+    if (!itemDescription) continue;
 
-    const unitPrice = parseBRL(match[2]);
-    let quantity = parseInt(match[3], 10);
-    const totalValue = parseBRL(match[4]);
+    const unitPrice = parseBRL(pm[1]);
+    let quantity = parseInt(pm[2], 10);
+    const totalValue = parseBRL(pm[3]);
 
     // Detect and handle gender suffix (Casal = 2 birds, Macho/Fêmea = 1 bird)
     let gender = '';
