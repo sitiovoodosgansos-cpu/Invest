@@ -55,6 +55,9 @@ function DirectPortalContent() {
   const loading = appData.loading;
   const firestoreError = appData.firestoreError;
 
+  // Find investor by token (token = investor.id)
+  const investor = investors.find(i => i.id === token) || null;
+
   const distribution = useMemo(() => {
     try {
       return calculateProfitDistribution(sales, birds);
@@ -63,53 +66,10 @@ function DirectPortalContent() {
     }
   }, [sales, birds]);
 
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: 12, background: 'var(--bg, #f8fafc)' }}>
-        <div style={{ width: 36, height: 36, border: '3px solid #E2E8F0', borderTopColor: '#6C2BD9', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        <p style={{ color: '#64748B', fontSize: 14 }}>Carregando portal do investidor...</p>
-        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-      </div>
-    );
-  }
-
-  if (firestoreError) {
-    return (
-      <div className="login-page">
-        <div className="login-card" style={{ textAlign: 'center' }}>
-          <div className="login-logo"><Bird size={28} /></div>
-          <h3>Erro de conexao</h3>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
-            Nao foi possivel carregar os dados. Tente novamente em alguns instantes.
-          </p>
-          <button className="btn btn-primary" onClick={() => window.location.reload()}>Tentar novamente</button>
-        </div>
-      </div>
-    );
-  }
-
-  // Find investor by token (token = investor.id)
-  const investor = investors.find(i => i.id === token);
-
-  if (!investor) {
-    return (
-      <div className="login-page">
-        <div className="login-card" style={{ textAlign: 'center' }}>
-          <div className="login-logo"><Bird size={28} /></div>
-          <h3>Link invalido</h3>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
-            Este link de acesso nao foi encontrado ou os dados ainda estao carregando.
-            Solicite um novo link ao administrador.
-          </p>
-          <button className="btn btn-primary" onClick={() => window.location.reload()}>Tentar novamente</button>
-        </div>
-      </div>
-    );
-  }
-
-  const myBirds = birds.filter(b => b.investorId === investor.id);
-  const myFinancial = financialInvestments.filter(f => f.investorId === investor.id);
-  const myDistribution = distribution.distribution[investor.id];
+  // ALL derived data computed here (before any early return) to respect Rules of Hooks
+  const myBirds = useMemo(() => investor ? birds.filter(b => b.investorId === investor.id) : [], [birds, investor]);
+  const myFinancial = useMemo(() => investor ? financialInvestments.filter(f => f.investorId === investor.id) : [], [financialInvestments, investor]);
+  const myDistribution = investor ? distribution.distribution[investor.id] : null;
   const mySales = myDistribution ? (myDistribution.items || []) : [];
 
   const totalInvested = myBirds.reduce((s, b) => s + (parseFloat(b.investmentValue) || 0), 0);
@@ -124,7 +84,10 @@ function DirectPortalContent() {
   }, 0);
   const totalFinancialProfit = totalFinancialCurrent - totalFinancialInvested;
 
-  const myPayments = payments.filter(p => p.investorId === investor.id).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const myPayments = useMemo(() => {
+    if (!investor) return [];
+    return payments.filter(p => p.investorId === investor.id).sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [payments, investor]);
   const totalPaid = myPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
   const netBalance = totalFinancialCurrent + totalProfit - totalPaid;
 
@@ -161,6 +124,48 @@ function DirectPortalContent() {
       return [];
     }
   }, [mySales]);
+
+  // === EARLY RETURNS (after all hooks) ===
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: 12, background: '#f8fafc' }}>
+        <div style={{ width: 36, height: 36, border: '3px solid #E2E8F0', borderTopColor: '#6C2BD9', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <p style={{ color: '#64748B', fontSize: 14 }}>Carregando portal do investidor...</p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      </div>
+    );
+  }
+
+  if (firestoreError) {
+    return (
+      <div className="login-page">
+        <div className="login-card" style={{ textAlign: 'center' }}>
+          <div className="login-logo"><Bird size={28} /></div>
+          <h3>Erro de conexao</h3>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+            Nao foi possivel carregar os dados. Tente novamente em alguns instantes.
+          </p>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>Tentar novamente</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!investor) {
+    return (
+      <div className="login-page">
+        <div className="login-card" style={{ textAlign: 'center' }}>
+          <div className="login-logo"><Bird size={28} /></div>
+          <h3>Link invalido</h3>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+            Este link de acesso nao foi encontrado. Solicite um novo link ao administrador.
+          </p>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>Tentar novamente</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="investor-portal">
