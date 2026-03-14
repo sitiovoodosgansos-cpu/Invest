@@ -155,6 +155,10 @@ function parseSingleOrder(text) {
   // Remove "Sexo:" prefix so gender info (Casal/Macho/Fêmea) merges into item description
   normalized = normalized.replace(/\bSexo:\s*/gi, '');
 
+  // Remove "para [destination]" that appears between date/time and the first item
+  // e.g. "18:17 para Sitio Voo dos Gansos OVO - ..." → "18:17 OVO - ..."
+  normalized = normalized.replace(/\bpara\s+[\wÀ-ÿ\s]+?(?=OVO\b)/gi, '');
+
   // Extract line items using a general regex that captures any text before "R$ price xQTY R$ total"
   // This handles both OVO items and bird items (Brahma, Sedosa, etc.)
   // Note: \w doesn't match accented chars (ê,ã,ç,etc), so we add À-ÿ explicitly
