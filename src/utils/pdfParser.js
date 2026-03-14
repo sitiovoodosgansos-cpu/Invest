@@ -148,11 +148,15 @@ function parseSingleOrder(text) {
     || text.match(/Cupom[^-]*-\s*R\$\s*([\d.,]+)/i);
   const discount = discountMatch ? parseBRL(discountMatch[1]) : 0;
 
+  // Normalize: collapse newlines into spaces so multi-line item names are joined
+  // Preserve paragraph breaks (double newlines) but merge single line breaks
+  const normalized = text.replace(/\r\n/g, '\n').replace(/(?<!\n)\n(?!\n)/g, ' ');
+
   // Extract line items: "ITEM R$ price xQTY R$ total"
-  const itemRegex = /((?:OVO|Ave|Kit|Ingresso|Masterclass|Galinha|Faisão|Pavão|Pato|Marreco|Peru|Ganso|Codorna)[^\n]*?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/gi;
+  const itemRegex = /((?:OVO|Ave|Kit|Ingresso|Masterclass|Galinha|Faisão|Faisao|Pavão|Pavao|Pato|Marreco|Peru|Ganso|Codorna)[\s\S]*?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/gi;
 
   let match;
-  while ((match = itemRegex.exec(text)) !== null) {
+  while ((match = itemRegex.exec(normalized)) !== null) {
     const itemDescription = match[1].trim();
     const unitPrice = parseBRL(match[2]);
     const quantity = parseInt(match[3], 10);
@@ -175,7 +179,7 @@ function parseSingleOrder(text) {
   // If no items found with the strict pattern, try a more lenient one
   if (results.length === 0) {
     const lenientRegex = /([A-ZÀ-Úa-zà-ú][\w\s\-–()]+?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
-    while ((match = lenientRegex.exec(text)) !== null) {
+    while ((match = lenientRegex.exec(normalized)) !== null) {
       const itemDescription = match[1].trim();
       if (/^(Itens|Frete|Imposto|Cupom|Total|Pago|Subtotal)/i.test(itemDescription)) continue;
 
