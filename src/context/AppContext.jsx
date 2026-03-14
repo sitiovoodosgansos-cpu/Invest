@@ -38,16 +38,17 @@ export function AppProvider({ children }) {
   const lastLocalWriteTime = useRef(0);
   const dataLoadedFromFirestore = useRef(false);
   const firestoreItemCount = useRef(0);
+  const pendingWriteCount = useRef(0);
 
   // Listen to Firestore in real-time
   useEffect(() => {
     const unsubscribe = onSnapshot(FIRESTORE_DOC, (snapshot) => {
       setFirestoreError(null);
       if (snapshot.exists()) {
-        // Ignore Firestore snapshots that arrive shortly after a local write
-        // to prevent onSnapshot (local cache + server confirm) from overwriting local state
+        // Ignore Firestore snapshots while we have pending writes or shortly after a write
+        // to prevent onSnapshot from overwriting local state with stale data
         const timeSinceWrite = Date.now() - lastLocalWriteTime.current;
-        if (timeSinceWrite < 3000) {
+        if (pendingWriteCount.current > 0 || timeSinceWrite < 5000) {
           setLoading(false);
           return;
         }
@@ -126,9 +127,17 @@ export function AppProvider({ children }) {
     // Save to both Firestore and localStorage
     lastLocalWriteTime.current = Date.now();
     firestoreItemCount.current = newCount;
-    setDoc(FIRESTORE_DOC, data).catch(err => {
-      console.error('Firestore save error:', err);
-    });
+    pendingWriteCount.current += 1;
+    setDoc(FIRESTORE_DOC, data)
+      .catch(err => {
+        console.error('Firestore save error:', err);
+      })
+      .finally(() => {
+        pendingWriteCount.current = Math.max(0, pendingWriteCount.current - 1);
+        // Update the write time when the write completes so the debounce window
+        // starts AFTER the server confirms, not before
+        lastLocalWriteTime.current = Date.now();
+      });
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data, loading]);
 
