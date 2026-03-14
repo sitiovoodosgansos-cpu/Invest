@@ -157,7 +157,8 @@ function parseSingleOrder(text) {
 
   // Extract line items using a general regex that captures any text before "R$ price xQTY R$ total"
   // This handles both OVO items and bird items (Brahma, Sedosa, etc.)
-  const itemRegex = /([A-ZÀ-Úa-zà-ú][\w\s\-–(),.]*?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
+  // Note: \w doesn't match accented chars (ê,ã,ç,etc), so we add À-ÿ explicitly
+  const itemRegex = /([A-ZÀ-ÿa-zà-ÿ][\wÀ-ÿ\s\-–(),.]*?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
 
   let match;
   while ((match = itemRegex.exec(normalized)) !== null) {
