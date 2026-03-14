@@ -188,7 +188,7 @@ function parseSingleOrder(text) {
       price: unitPrice,
       quantity,
       totalValue,
-      gender: gender || undefined,
+      ...(gender ? { gender } : {}),
       shipping: 0,
       discount: 0,
       transactionStatus: 'Pago',
