@@ -150,17 +150,35 @@ function parseSingleOrder(text) {
 
   // Normalize: collapse newlines into spaces so multi-line item names are joined
   // Preserve paragraph breaks (double newlines) but merge single line breaks
-  const normalized = text.replace(/\r\n/g, '\n').replace(/(?<!\n)\n(?!\n)/g, ' ');
+  let normalized = text.replace(/\r\n/g, '\n').replace(/(?<!\n)\n(?!\n)/g, ' ');
 
-  // Extract line items: "ITEM R$ price xQTY R$ total"
-  const itemRegex = /((?:OVO|Ave|Kit|Ingresso|Masterclass|Galinha|Faisão|Faisao|Pavão|Pavao|Pato|Marreco|Peru|Ganso|Codorna)[\s\S]*?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/gi;
+  // Remove "Sexo:" prefix so gender info (Casal/Macho/Fêmea) merges into item description
+  normalized = normalized.replace(/\bSexo:\s*/gi, '');
+
+  // Extract line items using a general regex that captures any text before "R$ price xQTY R$ total"
+  // This handles both OVO items and bird items (Brahma, Sedosa, etc.)
+  const itemRegex = /([A-ZÀ-Úa-zà-ú][\w\s\-–(),.]*?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
 
   let match;
   while ((match = itemRegex.exec(normalized)) !== null) {
-    const itemDescription = match[1].trim();
+    let itemDescription = match[1].trim();
+    // Skip summary lines
+    if (/^(Itens|Frete|Imposto|Cupom|Total|Pago|Subtotal)/i.test(itemDescription)) continue;
+
     const unitPrice = parseBRL(match[2]);
-    const quantity = parseInt(match[3], 10);
+    let quantity = parseInt(match[3], 10);
     const totalValue = parseBRL(match[4]);
+
+    // Detect and handle gender suffix (Casal = 2 birds, Macho/Fêmea = 1 bird)
+    let gender = '';
+    const genderMatch = itemDescription.match(/\s+(Casal|Macho|F[eê]mea)\s*$/i);
+    if (genderMatch) {
+      gender = genderMatch[1];
+      itemDescription = itemDescription.replace(/\s+(Casal|Macho|F[eê]mea)\s*$/i, '').trim();
+      if (gender.toLowerCase() === 'casal') {
+        quantity = quantity * 2;
+      }
+    }
 
     results.push({
       orderNumber,
@@ -170,36 +188,11 @@ function parseSingleOrder(text) {
       price: unitPrice,
       quantity,
       totalValue,
+      gender: gender || undefined,
       shipping: 0,
       discount: 0,
       transactionStatus: 'Pago',
     });
-  }
-
-  // If no items found with the strict pattern, try a more lenient one
-  if (results.length === 0) {
-    const lenientRegex = /([A-ZÀ-Úa-zà-ú][\w\s\-–()]+?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
-    while ((match = lenientRegex.exec(normalized)) !== null) {
-      const itemDescription = match[1].trim();
-      if (/^(Itens|Frete|Imposto|Cupom|Total|Pago|Subtotal)/i.test(itemDescription)) continue;
-
-      const unitPrice = parseBRL(match[2]);
-      const quantity = parseInt(match[3], 10);
-      const totalValue = parseBRL(match[4]);
-
-      results.push({
-        orderNumber,
-        buyerName,
-        date,
-        itemDescription,
-        price: unitPrice,
-        quantity,
-        totalValue,
-        shipping: 0,
-        discount: 0,
-        transactionStatus: 'Pago',
-      });
-    }
   }
 
   // Distribute discount proportionally across items
