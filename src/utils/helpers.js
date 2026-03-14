@@ -93,58 +93,28 @@ function levenshtein(a, b) {
   return matrix[b.length][a.length];
 }
 
-// Match a sale item to a bird breed (fuzzy matching)
+// Match a sale item to a bird breed (exact match only)
 export function matchSaleToBird(itemDescription, birds) {
   if (!itemDescription || !birds.length) return null;
   const desc = normalize(itemDescription);
 
-  // 1) Exact match (normalized, no accents)
+  // Only match if the breed name appears exactly in the description (case/accent insensitive)
   for (const bird of birds) {
     if (desc.includes(normalize(bird.breed))) {
       return bird;
     }
   }
 
-  // 2) All words of breed found in description (any order)
-  for (const bird of birds) {
-    const words = normalize(bird.breed).split(/\s+/).filter(w => w.length > 2);
-    if (words.length > 0 && words.every(w => desc.includes(w))) {
-      return bird;
-    }
-  }
-
-  // 3) Any significant word of breed found in description (single-word partial match)
-  for (const bird of birds) {
-    const words = normalize(bird.breed).split(/\s+/).filter(w => w.length >= 4);
-    if (words.some(w => desc.includes(w))) {
-      return bird;
-    }
-  }
-
-  // 4) Fuzzy similarity: find best match above threshold
-  const MIN_SIMILARITY = 0.6;
-  let bestBird = null;
-  let bestScore = 0;
-
-  const descWords = desc.split(/\s+/).filter(w => w.length >= 3);
-
-  for (const bird of birds) {
-    const breedNorm = normalize(bird.breed);
-    const breedWords = breedNorm.split(/\s+/).filter(w => w.length >= 3);
-
-    // Compare each breed word against each description word
-    for (const bw of breedWords) {
-      for (const dw of descWords) {
-        const score = similarity(bw, dw);
-        if (score > bestScore && score >= MIN_SIMILARITY) {
-          bestScore = score;
-          bestBird = bird;
-        }
+  // Also check for "OVO" / "OVOS" keyword matching bird species for egg sales
+  if (isEggProduct(itemDescription)) {
+    for (const bird of birds) {
+      if (desc.includes(normalize(bird.species))) {
+        return bird;
       }
     }
   }
 
-  return bestBird;
+  return null;
 }
 
 export function filterValidTransactions(sales) {
@@ -155,6 +125,8 @@ export function filterValidTransactions(sales) {
 }
 
 // Calculate profit distribution for sales
+// Respects saved matchedInvestorId/matchedBirdId on each sale to preserve manual/import links.
+// Only falls back to re-matching if no saved link exists.
 export function calculateProfitDistribution(sales, birds) {
   const validSales = filterValidTransactions(sales);
   const distribution = {};
@@ -168,10 +140,19 @@ export function calculateProfitDistribution(sales, birds) {
 
     const isEgg = isEggProduct(description);
     const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
-    const matchedBird = matchSaleToBird(description, birds);
 
-    if (matchedBird) {
-      const investorId = matchedBird.investorId;
+    // Use saved match if available, otherwise try to match
+    let investorId = sale.matchedInvestorId || null;
+    let breedName = sale.matchedBreed || null;
+    if (!investorId) {
+      const matchedBird = matchSaleToBird(description, birds);
+      if (matchedBird) {
+        investorId = matchedBird.investorId;
+        breedName = matchedBird.breed;
+      }
+    }
+
+    if (investorId) {
       if (!distribution[investorId]) {
         distribution[investorId] = { eggProfit: 0, birdProfit: 0, totalProfit: 0, items: [] };
       }
@@ -184,7 +165,7 @@ export function calculateProfitDistribution(sales, birds) {
       distribution[investorId].totalProfit += profit;
       distribution[investorId].items.push({
         ...sale,
-        matchedBird: matchedBird.breed,
+        matchedBird: breedName,
         isEgg,
         profit,
         rate,
