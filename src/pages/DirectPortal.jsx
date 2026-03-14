@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, Component } from 'react';
 import { useParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import {
@@ -13,18 +13,61 @@ import { Bird, Wallet, TrendingUp, DollarSign, Send } from 'lucide-react';
 
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
-export default function DirectPortal() {
+// ErrorBoundary to prevent blank page on crash
+class PortalErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="login-page">
+          <div className="login-card" style={{ textAlign: 'center' }}>
+            <div className="login-logo"><Bird size={28} /></div>
+            <h3>Erro ao carregar portal</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+              Ocorreu um erro ao carregar os dados. Tente novamente.
+            </p>
+            <button className="btn btn-primary" onClick={() => window.location.reload()}>Recarregar</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function DirectPortalContent() {
   const { token } = useParams();
-  const { investors, birds, sales, financialInvestments, payments, loading, firestoreError } = useApp();
+  const appData = useApp();
   const [period, setPeriod] = useState('monthly');
 
-  const distribution = useMemo(() => calculateProfitDistribution(sales, birds), [sales, birds]);
+  // Defensive data access - ensure arrays are always arrays
+  const investors = Array.isArray(appData.investors) ? appData.investors : [];
+  const birds = Array.isArray(appData.birds) ? appData.birds : [];
+  const sales = Array.isArray(appData.sales) ? appData.sales : [];
+  const financialInvestments = Array.isArray(appData.financialInvestments) ? appData.financialInvestments : [];
+  const payments = Array.isArray(appData.payments) ? appData.payments : [];
+  const loading = appData.loading;
+  const firestoreError = appData.firestoreError;
+
+  const distribution = useMemo(() => {
+    try {
+      return calculateProfitDistribution(sales, birds);
+    } catch {
+      return { distribution: {}, unmatchedSales: [] };
+    }
+  }, [sales, birds]);
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: 12 }}>
-        <div style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Carregando...</p>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: 12, background: 'var(--bg, #f8fafc)' }}>
+        <div style={{ width: 36, height: 36, border: '3px solid #E2E8F0', borderTopColor: '#6C2BD9', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <p style={{ color: '#64748B', fontSize: 14 }}>Carregando portal do investidor...</p>
         <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
       </div>
     );
@@ -55,8 +98,10 @@ export default function DirectPortal() {
           <div className="login-logo"><Bird size={28} /></div>
           <h3>Link invalido</h3>
           <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
-            Este link de acesso nao foi encontrado. Solicite um novo link ao administrador.
+            Este link de acesso nao foi encontrado ou os dados ainda estao carregando.
+            Solicite um novo link ao administrador.
           </p>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>Tentar novamente</button>
         </div>
       </div>
     );
@@ -65,48 +110,56 @@ export default function DirectPortal() {
   const myBirds = birds.filter(b => b.investorId === investor.id);
   const myFinancial = financialInvestments.filter(f => f.investorId === investor.id);
   const myDistribution = distribution.distribution[investor.id];
-  const mySales = myDistribution ? myDistribution.items : [];
+  const mySales = myDistribution ? (myDistribution.items || []) : [];
 
   const totalInvested = myBirds.reduce((s, b) => s + (parseFloat(b.investmentValue) || 0), 0);
   const totalMatrices = myBirds.reduce((s, b) => s + (parseInt(b.matrixCount) || 0), 0);
   const totalBreeders = myBirds.reduce((s, b) => s + (parseInt(b.breederCount) || 0), 0);
   const totalProfit = myDistribution ? myDistribution.totalProfit : 0;
 
-  const totalFinancialInvested = myFinancial.reduce((s, f) => s + f.amount, 0);
+  const totalFinancialInvested = myFinancial.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
   const totalFinancialCurrent = myFinancial.reduce((s, f) => {
-    const months = getMonthsDifference(f.date, new Date().toISOString());
-    return s + calculateCompoundInterest(f.amount, 0.03, months);
+    const months = getMonthsDifference(f.date);
+    return s + calculateCompoundInterest(parseFloat(f.amount) || 0, 0.03, months);
   }, 0);
   const totalFinancialProfit = totalFinancialCurrent - totalFinancialInvested;
 
-  const myPayments = (payments || []).filter(p => p.investorId === investor.id).sort((a, b) => new Date(b.date) - new Date(a.date));
-  const totalPaid = myPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
+  const myPayments = payments.filter(p => p.investorId === investor.id).sort((a, b) => new Date(b.date) - new Date(a.date));
+  const totalPaid = myPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
   const netBalance = totalFinancialCurrent + totalProfit - totalPaid;
 
   // Timeline chart data
   const timelineData = useMemo(() => {
-    if (!mySales.length) return [];
-    const grouped = groupSalesByPeriod(mySales, period);
-    return Object.entries(grouped)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, items]) => ({
-        period: key,
-        ovos: items.filter(i => i.isEgg).reduce((s, i) => s + i.profit, 0),
-        aves: items.filter(i => !i.isEgg).reduce((s, i) => s + i.profit, 0),
-        total: items.reduce((s, i) => s + i.profit, 0),
-      }));
+    try {
+      if (!mySales.length) return [];
+      const grouped = groupSalesByPeriod(mySales, period);
+      return Object.entries(grouped)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, items]) => ({
+          period: key,
+          ovos: items.filter(i => i.isEgg).reduce((s, i) => s + (i.profit || 0), 0),
+          aves: items.filter(i => !i.isEgg).reduce((s, i) => s + (i.profit || 0), 0),
+          total: items.reduce((s, i) => s + (i.profit || 0), 0),
+        }));
+    } catch {
+      return [];
+    }
   }, [mySales, period]);
 
   // Breed breakdown chart data
   const breedData = useMemo(() => {
-    if (!mySales.length) return [];
-    const byBreed = {};
-    mySales.forEach(item => {
-      const breed = item.matchedBird || 'Outros';
-      if (!byBreed[breed]) byBreed[breed] = 0;
-      byBreed[breed] += item.profit;
-    });
-    return Object.entries(byBreed).map(([name, value]) => ({ name, value }));
+    try {
+      if (!mySales.length) return [];
+      const byBreed = {};
+      mySales.forEach(item => {
+        const breed = item.matchedBird || 'Outros';
+        if (!byBreed[breed]) byBreed[breed] = 0;
+        byBreed[breed] += (item.profit || 0);
+      });
+      return Object.entries(byBreed).map(([name, value]) => ({ name, value }));
+    } catch {
+      return [];
+    }
   }, [mySales]);
 
   return (
@@ -210,15 +263,15 @@ export default function DirectPortal() {
                 </thead>
                 <tbody>
                   {myFinancial.map(f => {
-                    const months = getMonthsDifference(f.date, new Date().toISOString());
-                    const current = calculateCompoundInterest(f.amount, 0.03, months);
+                    const months = getMonthsDifference(f.date);
+                    const current = calculateCompoundInterest(parseFloat(f.amount) || 0, 0.03, months);
                     return (
                       <tr key={f.id}>
                         <td>{formatDate(f.date)}</td>
                         <td>{formatCurrency(f.amount)}</td>
                         <td>{months} meses</td>
                         <td style={{ fontWeight: 600 }}>{formatCurrency(current)}</td>
-                        <td style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(current - f.amount)}</td>
+                        <td style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(current - (parseFloat(f.amount) || 0))}</td>
                       </tr>
                     );
                   })}
@@ -262,7 +315,7 @@ export default function DirectPortal() {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                       <XAxis dataKey="period" fontSize={11} />
-                      <YAxis fontSize={11} tickFormatter={v => `R$${v.toFixed(0)}`} />
+                      <YAxis fontSize={11} tickFormatter={v => `R$${(v || 0).toFixed(0)}`} />
                       <Tooltip formatter={v => formatCurrency(v)} />
                       <Legend />
                       <Area type="monotone" dataKey="ovos" name="Ovos" stroke="#6C2BD9" fill="url(#colorProfitDirect)" />
@@ -289,7 +342,7 @@ export default function DirectPortal() {
                         cy="50%"
                         outerRadius={90}
                         dataKey="value"
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
                       >
                         {breedData.map((_, i) => (
                           <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -337,21 +390,23 @@ export default function DirectPortal() {
                         </span>
                       </td>
                       <td>{formatCurrency(item.totalValue)}</td>
-                      <td>{(item.rate * 100).toFixed(1)}%</td>
+                      <td>{((item.rate || 0) * 100).toFixed(1)}%</td>
                       <td style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(item.profit)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <div style={{ padding: '12px 16px', background: 'var(--primary-bg)', borderRadius: 'var(--radius-sm)', marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13 }}>
-                Ovos: <strong style={{ color: 'var(--primary)' }}>{formatCurrency(myDistribution.eggProfit)}</strong>
-                {' | '}
-                Aves: <strong style={{ color: 'var(--info)' }}>{formatCurrency(myDistribution.birdProfit)}</strong>
-              </span>
-              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--success)' }}>Total: {formatCurrency(totalProfit)}</span>
-            </div>
+            {myDistribution && (
+              <div style={{ padding: '12px 16px', background: 'var(--primary-bg)', borderRadius: 'var(--radius-sm)', marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 13 }}>
+                  Ovos: <strong style={{ color: 'var(--primary)' }}>{formatCurrency(myDistribution.eggProfit || 0)}</strong>
+                  {' | '}
+                  Aves: <strong style={{ color: 'var(--info)' }}>{formatCurrency(myDistribution.birdProfit || 0)}</strong>
+                </span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--success)' }}>Total: {formatCurrency(totalProfit)}</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -407,5 +462,13 @@ export default function DirectPortal() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function DirectPortal() {
+  return (
+    <PortalErrorBoundary>
+      <DirectPortalContent />
+    </PortalErrorBoundary>
   );
 }
