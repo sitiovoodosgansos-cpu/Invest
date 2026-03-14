@@ -46,13 +46,12 @@ export default function EggCollection() {
   const [expandedBird, setExpandedBird] = useState(null);
   const [showBirdConfigModal, setShowBirdConfigModal] = useState(null);
   const [birdConfigForm, setBirdConfigForm] = useState({ annualEggPotential: '', ringNumber: '', ringColor: '', notes: '' });
-  const [form, setForm] = useState({
-    date: new Date().toISOString().slice(0, 10),
-    birdId: '',
-    quantity: '',
-    cracked: '0',
-    notes: '',
-  });
+  // Batch collection: date + per-bird quantities
+  const [batchDate, setBatchDate] = useState(new Date().toISOString().slice(0, 10));
+  const [batchEntries, setBatchEntries] = useState({});
+  const [batchNotes, setBatchNotes] = useState('');
+  // Single edit form (for editing existing records)
+  const [editForm, setEditForm] = useState({ date: '', birdId: '', quantity: '', cracked: '0', notes: '' });
 
   const allCollections = eggCollections || [];
 
@@ -208,28 +207,42 @@ export default function EggCollection() {
     return months;
   }, [allCollections]);
 
-  const handleSubmit = (e) => {
+  const handleBatchSubmit = (e) => {
     e.preventDefault();
-    if (!form.birdId || !form.quantity) return;
-    const data = {
-      date: form.date,
-      birdId: form.birdId,
-      quantity: parseInt(form.quantity) || 0,
-      cracked: parseInt(form.cracked) || 0,
-      notes: form.notes.trim(),
-    };
-    if (editingId) {
-      updateEggCollection(editingId, data);
-    } else {
-      addEggCollection(data);
-    }
-    setForm({ date: new Date().toISOString().slice(0, 10), birdId: '', quantity: '', cracked: '0', notes: '' });
+    // Create one collection per bird that has quantity > 0
+    const entries = Object.entries(batchEntries).filter(([, v]) => (parseInt(v.quantity) || 0) > 0);
+    if (entries.length === 0) return;
+    entries.forEach(([birdId, entry]) => {
+      addEggCollection({
+        date: batchDate,
+        birdId,
+        quantity: parseInt(entry.quantity) || 0,
+        cracked: parseInt(entry.cracked) || 0,
+        notes: batchNotes.trim(),
+      });
+    });
+    setBatchEntries({});
+    setBatchNotes('');
+    setBatchDate(new Date().toISOString().slice(0, 10));
+    setShowModal(false);
+  };
+
+  const handleEditSubmit = (e) => {
+    e.preventDefault();
+    if (!editForm.birdId || !editForm.quantity) return;
+    updateEggCollection(editingId, {
+      date: editForm.date,
+      birdId: editForm.birdId,
+      quantity: parseInt(editForm.quantity) || 0,
+      cracked: parseInt(editForm.cracked) || 0,
+      notes: editForm.notes.trim(),
+    });
     setEditingId(null);
     setShowModal(false);
   };
 
   const handleEdit = (collection) => {
-    setForm({
+    setEditForm({
       date: collection.date,
       birdId: collection.birdId,
       quantity: String(collection.quantity),
@@ -239,6 +252,21 @@ export default function EggCollection() {
     setEditingId(collection.id);
     setShowModal(true);
   };
+
+  const updateBatchEntry = (birdId, field, value) => {
+    setBatchEntries(prev => ({
+      ...prev,
+      [birdId]: { ...(prev[birdId] || { quantity: '', cracked: '' }), [field]: value },
+    }));
+  };
+
+  const batchTotal = useMemo(() => {
+    return Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.quantity) || 0), 0);
+  }, [batchEntries]);
+
+  const batchCrackedTotal = useMemo(() => {
+    return Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.cracked) || 0), 0);
+  }, [batchEntries]);
 
   const handleDelete = (id) => {
     if (window.confirm('Remover esta coleta?')) deleteEggCollection(id);
@@ -528,7 +556,9 @@ export default function EggCollection() {
         </select>
         <div style={{ flex: 1 }} />
         <button className="btn btn-primary" onClick={() => {
-          setForm({ date: new Date().toISOString().slice(0, 10), birdId: '', quantity: '', cracked: '0', notes: '' });
+          setBatchDate(new Date().toISOString().slice(0, 10));
+          setBatchEntries({});
+          setBatchNotes('');
           setEditingId(null);
           setShowModal(true);
         }}>
@@ -609,41 +639,143 @@ export default function EggCollection() {
       {/* Add/Edit Collection Modal */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3 className="modal-title">{editingId ? 'Editar Coleta' : 'Nova Coleta de Ovos'}</h3>
-            <form onSubmit={handleSubmit}>
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Data *</label>
-                  <input className="form-input" type="date" required value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Ave / Raca *</label>
-                  <select className="form-input" required value={form.birdId} onChange={e => setForm({ ...form, birdId: e.target.value })}>
-                    <option value="">Selecione a ave</option>
-                    {birds.map(b => <option key={b.id} value={b.id}>{getBirdLabel(b)}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Quantidade de Ovos *</label>
-                  <input className="form-input" type="number" min="0" required value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} placeholder="0" />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Ovos Trincados</label>
-                  <input className="form-input" type="number" min="0" value={form.cracked} onChange={e => setForm({ ...form, cracked: e.target.value })} placeholder="0" />
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Observacoes</label>
-                <input className="form-input" type="text" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Ex: Ovos para chocadeira, ovos para venda..." />
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary">{editingId ? 'Salvar' : 'Registrar Coleta'}</button>
-              </div>
-            </form>
+          <div className="modal" onClick={e => e.stopPropagation()} style={!editingId ? { maxWidth: 620 } : undefined}>
+            {editingId ? (
+              <>
+                <h3 className="modal-title">Editar Coleta</h3>
+                <form onSubmit={handleEditSubmit}>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Data *</label>
+                      <input className="form-input" type="date" required value={editForm.date} onChange={e => setEditForm({ ...editForm, date: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Ave / Raca *</label>
+                      <select className="form-input" required value={editForm.birdId} onChange={e => setEditForm({ ...editForm, birdId: e.target.value })}>
+                        <option value="">Selecione a ave</option>
+                        {birds.map(b => <option key={b.id} value={b.id}>{getBirdLabel(b)}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Quantidade de Ovos *</label>
+                      <input className="form-input" type="number" min="0" required value={editForm.quantity} onChange={e => setEditForm({ ...editForm, quantity: e.target.value })} placeholder="0" />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Ovos Trincados</label>
+                      <input className="form-input" type="number" min="0" value={editForm.cracked} onChange={e => setEditForm({ ...editForm, cracked: e.target.value })} placeholder="0" />
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Observacoes</label>
+                    <input className="form-input" type="text" value={editForm.notes} onChange={e => setEditForm({ ...editForm, notes: e.target.value })} placeholder="Ex: Ovos para chocadeira, ovos para venda..." />
+                  </div>
+                  <div className="modal-actions">
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
+                    <button type="submit" className="btn btn-primary">Salvar</button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <>
+                <h3 className="modal-title">Nova Coleta de Ovos</h3>
+                <form onSubmit={handleBatchSubmit}>
+                  <div className="form-row" style={{ marginBottom: 16 }}>
+                    <div className="form-group">
+                      <label className="form-label">Data da Coleta *</label>
+                      <input className="form-input" type="date" required value={batchDate} onChange={e => setBatchDate(e.target.value)} />
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, paddingBottom: 2 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>
+                        Total: <span style={{ color: 'var(--primary)', fontSize: 16 }}>{batchTotal}</span> ovos
+                      </div>
+                      {batchCrackedTotal > 0 && (
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--danger)' }}>
+                          {batchCrackedTotal} trincados
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {birds.length === 0 ? (
+                    <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                      Nenhuma ave cadastrada. Cadastre aves na pagina do Plantel primeiro.
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: 'var(--bg-secondary)', position: 'sticky', top: 0, zIndex: 1 }}>
+                            <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 12, fontWeight: 600 }}>Ave / Raca</th>
+                            <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, fontWeight: 600, width: 100 }}>Ovos</th>
+                            <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, fontWeight: 600, width: 100 }}>Trincados</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {birds.map(bird => {
+                            const entry = batchEntries[bird.id] || { quantity: '', cracked: '' };
+                            const matrices = parseInt(bird.matrixCount) || 1;
+                            return (
+                              <tr key={bird.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                <td style={{ padding: '8px 12px' }}>
+                                  <div style={{ fontWeight: 600, fontSize: 13 }}>{bird.species} - {bird.breed}</div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                    {matrices} {matrices > 1 ? 'matrizes' : 'matriz'}
+                                    {bird.ringNumber && (
+                                      <span style={{
+                                        marginLeft: 6, padding: '1px 5px', borderRadius: 6, fontSize: 10, fontWeight: 600,
+                                        background: bird.ringColor ? bird.ringColor + '30' : '#e2e8f0',
+                                        color: bird.ringColor || 'var(--text-secondary)',
+                                      }}>
+                                        {bird.ringNumber}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                                  <input
+                                    className="form-input"
+                                    type="number"
+                                    min="0"
+                                    value={entry.quantity}
+                                    onChange={e => updateBatchEntry(bird.id, 'quantity', e.target.value)}
+                                    placeholder="0"
+                                    style={{ width: 70, textAlign: 'center', padding: '6px 4px', margin: '0 auto' }}
+                                  />
+                                </td>
+                                <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                                  <input
+                                    className="form-input"
+                                    type="number"
+                                    min="0"
+                                    value={entry.cracked}
+                                    onChange={e => updateBatchEntry(bird.id, 'cracked', e.target.value)}
+                                    placeholder="0"
+                                    style={{ width: 70, textAlign: 'center', padding: '6px 4px', margin: '0 auto' }}
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  <div className="form-group" style={{ marginTop: 12 }}>
+                    <label className="form-label">Observacoes</label>
+                    <input className="form-input" type="text" value={batchNotes} onChange={e => setBatchNotes(e.target.value)} placeholder="Ex: Ovos para chocadeira, ovos para venda..." />
+                  </div>
+                  <div className="modal-actions">
+                    <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
+                    <button type="submit" className="btn btn-primary" disabled={batchTotal === 0}>
+                      <Egg size={14} /> Registrar {batchTotal > 0 ? `${batchTotal} ovos` : 'Coleta'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}
