@@ -11,7 +11,7 @@ import {
   ArrowUp, ArrowDown, ArrowUpDown, TrendingUp
 } from 'lucide-react';
 
-const EXPENSE_CATEGORIES = [
+const DEFAULT_EXPENSE_CATEGORIES = [
   'Alimentacao Animal',
   'Remedios e Vacinas',
   'Estrutura e Manutencao',
@@ -44,6 +44,11 @@ const CATEGORY_COLORS = {
   'Outros': '#94A3B8',
 };
 
+const CUSTOM_COLOR_PALETTE = [
+  '#0EA5E9', '#E11D48', '#84CC16', '#A855F7', '#F43F5E',
+  '#06B6D4', '#D97706', '#7C3AED', '#059669', '#DC2626',
+];
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -54,7 +59,7 @@ function fileToBase64(file) {
 }
 
 export default function Expenses() {
-  const { expenses, sales, financialInvestments, investors, addExpense, updateExpense, deleteExpense } = useApp();
+  const { expenses, sales, financialInvestments, investors, customExpenseCategories, addExpense, updateExpense, deleteExpense, addCustomExpenseCategory, deleteCustomExpenseCategory } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [viewImage, setViewImage] = useState(null);
@@ -62,6 +67,8 @@ export default function Expenses() {
   const [filterMonth, setFilterMonth] = useState('all');
   const [sortField, setSortField] = useState('date');
   const [sortDir, setSortDir] = useState('desc');
+  const [showNewCategoryInput, setShowNewCategoryInput] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10),
     amount: '',
@@ -71,6 +78,22 @@ export default function Expenses() {
     imageName: '',
   });
   const imageInputRef = useRef(null);
+
+  // Merge default + custom categories
+  const customCats = customExpenseCategories || [];
+  const allCategories = useMemo(() => {
+    const customNames = customCats.map(c => c.name);
+    return [...DEFAULT_EXPENSE_CATEGORIES, ...customNames];
+  }, [customCats]);
+
+  // Merge colors (custom categories get colors from palette)
+  const allCategoryColors = useMemo(() => {
+    const colors = { ...CATEGORY_COLORS };
+    customCats.forEach((c, i) => {
+      colors[c.name] = c.color || CUSTOM_COLOR_PALETTE[i % CUSTOM_COLOR_PALETTE.length];
+    });
+    return colors;
+  }, [customCats]);
 
   // Generate virtual yield expenses from financial investments (3% monthly compound interest)
   const yieldExpenses = useMemo(() => {
@@ -445,7 +468,7 @@ export default function Expenses() {
       <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 10 }}>
         <select className="form-input" style={{ width: 'auto', minWidth: 180 }} value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
           <option value="all">Todas as categorias</option>
-          {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
         <select className="form-input" style={{ width: 'auto', minWidth: 160 }} value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
           <option value="all">Todos os meses</option>
@@ -504,7 +527,7 @@ export default function Expenses() {
                 alignItems: 'center',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: CATEGORY_COLORS[cat] || '#94A3B8' }} />
+                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: allCategoryColors[cat] || '#94A3B8' }} />
                   <span style={{ fontSize: 13 }}>{cat}</span>
                 </div>
                 <strong style={{ fontSize: 13, color: 'var(--danger)' }}>{formatCurrency(total)}</strong>
@@ -555,8 +578,8 @@ export default function Expenses() {
                         fontSize: 11,
                         padding: '2px 8px',
                         borderRadius: 10,
-                        background: (CATEGORY_COLORS[expense.category] || '#94A3B8') + '20',
-                        color: CATEGORY_COLORS[expense.category] || '#94A3B8',
+                        background: (allCategoryColors[expense.category] || '#94A3B8') + '20',
+                        color: allCategoryColors[expense.category] || '#94A3B8',
                         fontWeight: 600,
                       }}>
                         {expense.category || '-'}
@@ -630,10 +653,54 @@ export default function Expenses() {
               </div>
               <div className="form-group">
                 <label className="form-label">Categoria *</label>
-                <select className="form-input" required value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+                <select className="form-input" required value={form.category} onChange={e => {
+                  if (e.target.value === '__new__') {
+                    setShowNewCategoryInput(true);
+                    setForm({ ...form, category: '' });
+                  } else {
+                    setForm({ ...form, category: e.target.value });
+                  }
+                }}>
                   <option value="">Selecione a categoria</option>
-                  {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  {allCategories.filter(c => c !== 'Rendimento Investidores').map(c => <option key={c} value={c}>{c}</option>)}
+                  <option value="__new__">+ Criar nova categoria...</option>
                 </select>
+                {showNewCategoryInput && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <input
+                      className="form-input"
+                      type="text"
+                      placeholder="Nome da nova categoria"
+                      value={newCategoryName}
+                      onChange={e => setNewCategoryName(e.target.value)}
+                      autoFocus
+                      style={{ flex: 1 }}
+                    />
+                    <button type="button" className="btn btn-primary" style={{ fontSize: 13, padding: '6px 12px' }} onClick={() => {
+                      const name = newCategoryName.trim();
+                      if (!name) return;
+                      if (allCategories.some(c => c.toLowerCase() === name.toLowerCase())) {
+                        setForm({ ...form, category: allCategories.find(c => c.toLowerCase() === name.toLowerCase()) });
+                        setShowNewCategoryInput(false);
+                        setNewCategoryName('');
+                        return;
+                      }
+                      const colorIndex = customCats.length % CUSTOM_COLOR_PALETTE.length;
+                      addCustomExpenseCategory({ name, color: CUSTOM_COLOR_PALETTE[colorIndex] });
+                      setForm({ ...form, category: name });
+                      setShowNewCategoryInput(false);
+                      setNewCategoryName('');
+                    }}>
+                      <Save size={14} />
+                    </button>
+                    <button type="button" className="btn btn-secondary" style={{ fontSize: 13, padding: '6px 12px' }} onClick={() => {
+                      setShowNewCategoryInput(false);
+                      setNewCategoryName('');
+                    }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Comprovante (imagem)</label>
