@@ -55,6 +55,7 @@ export function getMonthsDifference(startDate, endDate) {
 
 // Remove accents/diacritics from text for flexible matching
 function normalize(text) {
+  if (!text) return '';
   return text
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -100,7 +101,8 @@ export function matchSaleToBird(itemDescription, birds) {
 
   // Only match if the breed name appears exactly in the description (case/accent insensitive)
   for (const bird of birds) {
-    if (desc.includes(normalize(bird.breed))) {
+    const breed = normalize(bird.breed);
+    if (breed && desc.includes(breed)) {
       return bird;
     }
   }
@@ -108,7 +110,8 @@ export function matchSaleToBird(itemDescription, birds) {
   // Also check for "OVO" / "OVOS" keyword matching bird species for egg sales
   if (isEggProduct(itemDescription)) {
     for (const bird of birds) {
-      if (desc.includes(normalize(bird.species))) {
+      const species = normalize(bird.species);
+      if (species && desc.includes(species)) {
         return bird;
       }
     }
