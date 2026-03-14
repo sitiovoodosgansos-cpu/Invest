@@ -16,6 +16,7 @@ const defaultData = {
   customSpecies: [],
   payments: [],
   expenses: [],
+  customExpenseCategories: [],
 };
 
 // Count total items across all arrays in data
@@ -26,7 +27,8 @@ const countItems = (d) =>
   (d.financialInvestments?.length || 0) +
   (d.customSpecies?.length || 0) +
   (d.payments?.length || 0) +
-  (d.expenses?.length || 0);
+  (d.expenses?.length || 0) +
+  (d.customExpenseCategories?.length || 0);
 
 // Default species (empty breeds - user adds breeds manually via the app)
 export const BIRD_SPECIES = [];
@@ -330,6 +332,22 @@ export function AppProvider({ children }) {
     }));
   };
 
+  // Custom Expense Categories
+  const addCustomExpenseCategory = (category) => {
+    setData(prev => {
+      const existing = prev.customExpenseCategories || [];
+      if (existing.some(c => c.name.toLowerCase() === category.name.toLowerCase())) return prev;
+      return { ...prev, customExpenseCategories: [...existing, { ...category, id: Date.now().toString() }] };
+    });
+  };
+
+  const deleteCustomExpenseCategory = (id) => {
+    setData(prev => ({
+      ...prev,
+      customExpenseCategories: (prev.customExpenseCategories || []).filter(c => c.id !== id),
+    }));
+  };
+
   const value = {
     ...data,
     loading,
@@ -340,6 +358,7 @@ export function AppProvider({ children }) {
     addFinancialInvestment, deleteFinancialInvestment,
     addPayment, deletePayment,
     addExpense, updateExpense, deleteExpense,
+    addCustomExpenseCategory, deleteCustomExpenseCategory,
     addCustomSpecies, deleteCustomSpecies,
   };
 
