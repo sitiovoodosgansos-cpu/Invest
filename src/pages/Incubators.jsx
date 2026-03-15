@@ -519,10 +519,11 @@ export default function Incubators() {
                       {(() => {
                         const incBatches = allBatches.filter(b => b.incubatorId === inc.id).sort((a, b) => new Date(b.dateIn) - new Date(a.dateIn));
                         if (incBatches.length === 0) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nenhuma chocagem registrada</div>;
-                        return incBatches.map(batch => {
+                        return incBatches.map((batch, batchIdx) => {
                           const st = BATCH_STATUS[batch.status] || BATCH_STATUS.incubating;
                           const hatchRate = (parseInt(batch.totalEggs) || 0) > 0
                             ? ((parseInt(batch.totalHatched) || 0) / (parseInt(batch.totalEggs) || 1) * 100) : 0;
+                          const batchNumber = incBatches.length - batchIdx;
                           return (
                             <div key={batch.id} style={{
                               padding: 10, marginBottom: 8, borderRadius: 'var(--radius-sm)',
@@ -530,6 +531,10 @@ export default function Incubators() {
                             }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <span style={{
+                                    padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+                                    background: '#e0e7ff', color: '#3730a3',
+                                  }}>Lote #{batchNumber}</span>
                                   <span style={{
                                     padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 600,
                                     background: st.bg, color: st.color,
@@ -636,6 +641,7 @@ export default function Incubators() {
             <table>
               <thead>
                 <tr>
+                  <th>Lote</th>
                   <th>Chocadeira</th>
                   <th>Data Entrada</th>
                   <th>Ovos</th>
@@ -649,13 +655,21 @@ export default function Incubators() {
                 </tr>
               </thead>
               <tbody>
-                {filteredBatches.map(batch => {
+                {filteredBatches.map((batch, idx) => {
                   const inc = allIncubators.find(i => i.id === batch.incubatorId);
                   const st = BATCH_STATUS[batch.status] || BATCH_STATUS.incubating;
                   const hatchRate = (parseInt(batch.totalEggs) || 0) > 0
                     ? ((parseInt(batch.totalHatched) || 0) / (parseInt(batch.totalEggs) || 1) * 100) : 0;
+                  // Calculate batch number within its incubator
+                  const incBatches = allBatches.filter(b => b.incubatorId === batch.incubatorId).sort((a, b) => new Date(a.dateIn) - new Date(b.dateIn));
+                  const batchNum = incBatches.findIndex(b => b.id === batch.id) + 1;
                   return (
                     <tr key={batch.id}>
+                      <td>
+                        <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, background: '#e0e7ff', color: '#3730a3' }}>
+                          #{batchNum}
+                        </span>
+                      </td>
                       <td><strong>{inc ? inc.name : 'Removida'}</strong></td>
                       <td>{formatDate(batch.dateIn)}</td>
                       <td style={{ fontWeight: 600 }}>{batch.totalEggs}</td>
