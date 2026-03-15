@@ -7,7 +7,8 @@ import {
 } from 'recharts';
 import {
   Plus, Trash2, Edit2, Egg, TrendingUp, AlertTriangle, Calendar,
-  ChevronDown, ChevronUp, Target, Award, Save, X, ChevronLeft, ChevronRight
+  ChevronDown, ChevronUp, Target, Save, X, ChevronLeft, ChevronRight,
+  Search, ArrowUpAZ, ArrowDownAZ, Heart, HeartOff
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -22,11 +23,35 @@ const MONTH_NAMES_FULL = [
 
 const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
 
+const BIRD_STATUS = {
+  active: { label: 'Ativa', color: '#10B981', bg: '#d1fae5' },
+  sick: { label: 'Doente', color: '#F59E0B', bg: '#fef3c7' },
+  broody: { label: 'Choca', color: '#8B5CF6', bg: '#ede9fe' },
+  dead: { label: 'Morta', color: '#EF4444', bg: '#fee2e2' },
+};
+
 function getWeekNumber(date) {
   const d = new Date(date);
   const start = new Date(d.getFullYear(), 0, 1);
   const diff = d - start;
   return Math.ceil((diff / 86400000 + start.getDay() + 1) / 7);
+}
+
+// Get or initialize individuals array for a bird
+function getIndividuals(bird) {
+  if (bird.individuals && bird.individuals.length > 0) return bird.individuals;
+  const count = parseInt(bird.matrixCount) || 1;
+  return Array.from({ length: count }, (_, i) => ({
+    id: String(i + 1),
+    ringNumber: '',
+    status: 'active',
+    notes: '',
+  }));
+}
+
+function getActiveBirdCount(bird) {
+  const individuals = getIndividuals(bird);
+  return individuals.filter(i => i.status === 'active').length;
 }
 
 export default function EggCollection() {
@@ -41,7 +66,7 @@ export default function EggCollection() {
   const [chartPeriod, setChartPeriod] = useState('weekly');
   const [expandedBird, setExpandedBird] = useState(null);
   const [showBirdConfigModal, setShowBirdConfigModal] = useState(null);
-  const [birdConfigForm, setBirdConfigForm] = useState({ annualEggPotential: '', ringNumber: '', ringColor: '', notes: '' });
+  const [birdConfigForm, setBirdConfigForm] = useState({ annualEggPotential: '', notes: '', individuals: [] });
   const [batchDate, setBatchDate] = useState(new Date().toISOString().slice(0, 10));
   const [batchEntries, setBatchEntries] = useState({});
   const [batchNotes, setBatchNotes] = useState('');
@@ -49,6 +74,9 @@ export default function EggCollection() {
   // Calendar state
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState(null);
+  // Search/sort for bird performance
+  const [birdSearch, setBirdSearch] = useState('');
+  const [birdSort, setBirdSort] = useState('alpha'); // alpha | eggs
 
   const allCollections = eggCollections || [];
 
@@ -102,11 +130,10 @@ export default function EggCollection() {
     [allCollections, startOfYear.getTime()]
   );
 
-  // Daily average this month
   const dayOfMonth = now.getDate();
   const dailyAvg = dayOfMonth > 0 ? (monthTotal / dayOfMonth).toFixed(1) : 0;
 
-  // Bird performance
+  // Bird performance - uses active bird count for potential calculation
   const birdPerformance = useMemo(() => {
     const perf = {};
     birds.forEach(bird => {
@@ -118,19 +145,23 @@ export default function EggCollection() {
       const yearEggs = birdCollections.filter(c => new Date(c.date) >= startOfYear).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
 
       const annualPotential = parseInt(bird.annualEggPotential) || 0;
-      const matrices = parseInt(bird.matrixCount) || 1;
-      const totalAnnualPotential = annualPotential * matrices;
+      const totalBirds = parseInt(bird.matrixCount) || 1;
+      const activeBirds = getActiveBirdCount(bird);
+      // Performance based on ACTIVE birds only
+      const activeAnnualPotential = annualPotential * activeBirds;
 
       let weekPerf = 0, monthPerf = 0, yearPerf = 0;
-      if (totalAnnualPotential > 0) {
-        weekPerf = ((weekEggs / (totalAnnualPotential / 52)) * 100);
-        monthPerf = ((monthEggs / (totalAnnualPotential / 12)) * 100);
-        yearPerf = ((yearEggs / totalAnnualPotential) * 100);
+      if (activeAnnualPotential > 0) {
+        weekPerf = ((weekEggs / (activeAnnualPotential / 52)) * 100);
+        monthPerf = ((monthEggs / (activeAnnualPotential / 12)) * 100);
+        yearPerf = ((yearEggs / activeAnnualPotential) * 100);
       }
 
       perf[bird.id] = {
         bird, totalEggs, totalCracked, weekEggs, monthEggs, yearEggs,
-        annualPotential: totalAnnualPotential,
+        annualPotential: activeAnnualPotential,
+        totalBirds,
+        activeBirds,
         weekPerf: Math.min(weekPerf, 999),
         monthPerf: Math.min(monthPerf, 999),
         yearPerf: Math.min(yearPerf, 999),
@@ -139,6 +170,25 @@ export default function EggCollection() {
     });
     return perf;
   }, [birds, allCollections, startOfWeek.getTime(), startOfMonth.getTime(), startOfYear.getTime()]);
+
+  // Filtered & sorted birds for cards
+  const filteredBirds = useMemo(() => {
+    let list = [...birds];
+    if (birdSearch.trim()) {
+      const q = birdSearch.toLowerCase();
+      list = list.filter(b => `${b.species} ${b.breed}`.toLowerCase().includes(q));
+    }
+    if (birdSort === 'alpha') {
+      list.sort((a, b) => `${a.species} ${a.breed}`.localeCompare(`${b.species} ${b.breed}`));
+    } else {
+      list.sort((a, b) => {
+        const pa = birdPerformance[a.id]?.monthEggs || 0;
+        const pb = birdPerformance[b.id]?.monthEggs || 0;
+        return pb - pa;
+      });
+    }
+    return list;
+  }, [birds, birdSearch, birdSort, birdPerformance]);
 
   // ===== EVOLUTION CHART DATA =====
   const evolutionData = useMemo(() => {
@@ -190,9 +240,9 @@ export default function EggCollection() {
 
   // ===== TOP 10 BIRDS CHART =====
   const top10Data = useMemo(() => {
-    const birdEggs = birds.map(bird => {
-      let eggs = 0;
+    return birds.map(bird => {
       const birdCols = allCollections.filter(c => c.birdId === bird.id);
+      let eggs = 0;
       if (chartPeriod === 'daily') {
         const today = now.toISOString().slice(0, 10);
         eggs = birdCols.filter(c => c.date === today).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
@@ -203,9 +253,8 @@ export default function EggCollection() {
       } else {
         eggs = birdCols.filter(c => new Date(c.date) >= startOfYear).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
       }
-      return { name: `${bird.breed}`, eggs };
+      return { name: bird.breed, eggs };
     }).filter(b => b.eggs > 0).sort((a, b) => b.eggs - a.eggs).slice(0, 10);
-    return birdEggs;
   }, [birds, allCollections, chartPeriod, startOfWeek.getTime(), startOfMonth.getTime(), startOfYear.getTime()]);
 
   // ===== CALENDAR DATA =====
@@ -249,19 +298,9 @@ export default function EggCollection() {
     return allCollections.filter(c => c.date === key).sort((a, b) => (a.birdId || '').localeCompare(b.birdId || ''));
   }, [selectedDay, allCollections, calendarYear, calendarMonth]);
 
-  const isToday = (day) => {
-    return day === now.getDate() && calendarMonth === now.getMonth() && calendarYear === now.getFullYear();
-  };
-
-  const navigateMonth = (delta) => {
-    setCalendarDate(new Date(calendarYear, calendarMonth + delta, 1));
-    setSelectedDay(null);
-  };
-
-  // Max eggs in a day this month (for color intensity)
-  const maxDayEggs = useMemo(() => {
-    return Math.max(1, ...Object.values(calendarDaysData).map(d => d.total));
-  }, [calendarDaysData]);
+  const isToday = (day) => day === now.getDate() && calendarMonth === now.getMonth() && calendarYear === now.getFullYear();
+  const navigateMonth = (delta) => { setCalendarDate(new Date(calendarYear, calendarMonth + delta, 1)); setSelectedDay(null); };
+  const maxDayEggs = useMemo(() => Math.max(1, ...Object.values(calendarDaysData).map(d => d.total)), [calendarDaysData]);
 
   // ===== HANDLERS =====
   const handleBatchSubmit = (e) => {
@@ -269,84 +308,77 @@ export default function EggCollection() {
     const entries = Object.entries(batchEntries).filter(([, v]) => (parseInt(v.quantity) || 0) > 0);
     if (entries.length === 0) return;
     entries.forEach(([birdId, entry]) => {
-      addEggCollection({
-        date: batchDate,
-        birdId,
-        quantity: parseInt(entry.quantity) || 0,
-        cracked: parseInt(entry.cracked) || 0,
-        notes: batchNotes.trim(),
-      });
+      addEggCollection({ date: batchDate, birdId, quantity: parseInt(entry.quantity) || 0, cracked: parseInt(entry.cracked) || 0, notes: batchNotes.trim() });
     });
-    setBatchEntries({});
-    setBatchNotes('');
-    setBatchDate(new Date().toISOString().slice(0, 10));
-    setShowModal(false);
+    setBatchEntries({}); setBatchNotes(''); setBatchDate(new Date().toISOString().slice(0, 10)); setShowModal(false);
   };
 
   const handleEditSubmit = (e) => {
     e.preventDefault();
     if (!editForm.birdId || !editForm.quantity) return;
-    updateEggCollection(editingId, {
-      date: editForm.date,
-      birdId: editForm.birdId,
-      quantity: parseInt(editForm.quantity) || 0,
-      cracked: parseInt(editForm.cracked) || 0,
-      notes: editForm.notes.trim(),
-    });
-    setEditingId(null);
-    setShowModal(false);
+    updateEggCollection(editingId, { date: editForm.date, birdId: editForm.birdId, quantity: parseInt(editForm.quantity) || 0, cracked: parseInt(editForm.cracked) || 0, notes: editForm.notes.trim() });
+    setEditingId(null); setShowModal(false);
   };
 
   const handleEdit = (collection) => {
-    setEditForm({
-      date: collection.date,
-      birdId: collection.birdId,
-      quantity: String(collection.quantity),
-      cracked: String(collection.cracked || 0),
-      notes: collection.notes || '',
-    });
-    setEditingId(collection.id);
-    setShowModal(true);
+    setEditForm({ date: collection.date, birdId: collection.birdId, quantity: String(collection.quantity), cracked: String(collection.cracked || 0), notes: collection.notes || '' });
+    setEditingId(collection.id); setShowModal(true);
   };
 
   const updateBatchEntry = (birdId, field, value) => {
-    setBatchEntries(prev => ({
-      ...prev,
-      [birdId]: { ...(prev[birdId] || { quantity: '', cracked: '' }), [field]: value },
-    }));
+    setBatchEntries(prev => ({ ...prev, [birdId]: { ...(prev[birdId] || { quantity: '', cracked: '' }), [field]: value } }));
   };
 
-  const batchTotal = useMemo(() =>
-    Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.quantity) || 0), 0),
-    [batchEntries]
-  );
-  const batchCrackedTotal = useMemo(() =>
-    Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.cracked) || 0), 0),
-    [batchEntries]
-  );
+  const batchTotal = useMemo(() => Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.quantity) || 0), 0), [batchEntries]);
+  const batchCrackedTotal = useMemo(() => Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.cracked) || 0), 0), [batchEntries]);
 
-  const handleDelete = (id) => {
-    if (window.confirm('Remover esta coleta?')) deleteEggCollection(id);
-  };
+  const handleDelete = (id) => { if (window.confirm('Remover esta coleta?')) deleteEggCollection(id); };
 
   const handleBirdConfig = (bird) => {
+    const individuals = getIndividuals(bird);
     setBirdConfigForm({
       annualEggPotential: bird.annualEggPotential || '',
-      ringNumber: bird.ringNumber || '',
-      ringColor: bird.ringColor || '',
       notes: bird.birdNotes || '',
+      individuals: individuals.map(ind => ({ ...ind })),
     });
     setShowBirdConfigModal(bird.id);
   };
 
   const handleSaveBirdConfig = () => {
+    const individuals = birdConfigForm.individuals.map((ind, i) => ({
+      id: ind.id || String(i + 1),
+      ringNumber: (ind.ringNumber || '').trim(),
+      status: ind.status || 'active',
+      notes: (ind.notes || '').trim(),
+    }));
     updateBird(showBirdConfigModal, {
       annualEggPotential: birdConfigForm.annualEggPotential,
-      ringNumber: birdConfigForm.ringNumber,
-      ringColor: birdConfigForm.ringColor,
       birdNotes: birdConfigForm.notes,
+      individuals,
     });
     setShowBirdConfigModal(null);
+  };
+
+  const updateIndividual = (idx, field, value) => {
+    setBirdConfigForm(prev => {
+      const updated = [...prev.individuals];
+      updated[idx] = { ...updated[idx], [field]: value };
+      return { ...prev, individuals: updated };
+    });
+  };
+
+  const addIndividual = () => {
+    setBirdConfigForm(prev => ({
+      ...prev,
+      individuals: [...prev.individuals, { id: String(Date.now()), ringNumber: '', status: 'active', notes: '' }],
+    }));
+  };
+
+  const removeIndividual = (idx) => {
+    setBirdConfigForm(prev => ({
+      ...prev,
+      individuals: prev.individuals.filter((_, i) => i !== idx),
+    }));
   };
 
   const getPerfColor = (perf) => {
@@ -365,16 +397,12 @@ export default function EggCollection() {
   };
 
   const openNewCollection = () => {
-    setBatchDate(new Date().toISOString().slice(0, 10));
-    setBatchEntries({});
-    setBatchNotes('');
-    setEditingId(null);
-    setShowModal(true);
+    setBatchDate(new Date().toISOString().slice(0, 10)); setBatchEntries({}); setBatchNotes(''); setEditingId(null); setShowModal(true);
   };
 
   return (
     <div className="animate-in">
-      {/* Header with Nova Coleta button */}
+      {/* Header */}
       <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2>Coleta de Ovos</h2>
@@ -424,11 +452,7 @@ export default function EggCollection() {
                 { key: 'monthly', label: 'Mensal' },
                 { key: 'yearly', label: 'Anual' },
               ].map(p => (
-                <button
-                  key={p.key}
-                  className={`period-btn ${chartPeriod === p.key ? 'active' : ''}`}
-                  onClick={() => setChartPeriod(p.key)}
-                >
+                <button key={p.key} className={`period-btn ${chartPeriod === p.key ? 'active' : ''}`} onClick={() => setChartPeriod(p.key)}>
                   {p.label}
                 </button>
               ))}
@@ -495,7 +519,6 @@ export default function EggCollection() {
           </div>
         </div>
         <div style={{ padding: 16 }}>
-          {/* Calendar grid */}
           <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <thead>
               <tr>
@@ -512,57 +535,28 @@ export default function EggCollection() {
                     const selected = day === selectedDay;
                     const today = day && isToday(day);
                     const intensity = dayData ? Math.min(dayData.total / maxDayEggs, 1) : 0;
-
                     return (
-                      <td
-                        key={di}
-                        onClick={() => day && setSelectedDay(selected ? null : day)}
+                      <td key={di} onClick={() => day && setSelectedDay(selected ? null : day)}
                         style={{
-                          padding: 4,
-                          textAlign: 'center',
-                          verticalAlign: 'top',
-                          height: 68,
+                          padding: 4, textAlign: 'center', verticalAlign: 'top', height: 68,
                           cursor: day ? 'pointer' : 'default',
                           border: selected ? '2px solid var(--primary)' : '1px solid var(--border)',
                           borderRadius: 'var(--radius-sm)',
                           background: selected ? 'var(--primary-bg)' : dayData ? `rgba(16, 185, 129, ${0.05 + intensity * 0.2})` : 'transparent',
                           transition: 'all 0.15s',
-                        }}
-                      >
-                        {day && (
-                          <>
-                            <div style={{
-                              fontSize: 12,
-                              fontWeight: today ? 700 : 400,
-                              color: today ? 'var(--primary)' : 'var(--text)',
-                              marginBottom: 2,
-                            }}>
-                              {day}
+                        }}>
+                        {day && (<>
+                          <div style={{ fontSize: 12, fontWeight: today ? 700 : 400, color: today ? 'var(--primary)' : 'var(--text)', marginBottom: 2 }}>{day}</div>
+                          {dayData ? (
+                            <div>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: '#10B981', lineHeight: 1.2 }}>{dayData.total}</div>
+                              <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{dayData.total === 1 ? 'ovo' : 'ovos'}</div>
+                              {dayData.cracked > 0 && <div style={{ fontSize: 9, color: 'var(--danger)', fontWeight: 600 }}>{dayData.cracked} trinc.</div>}
                             </div>
-                            {dayData ? (
-                              <div>
-                                <div style={{
-                                  fontSize: 16,
-                                  fontWeight: 700,
-                                  color: '#10B981',
-                                  lineHeight: 1.2,
-                                }}>
-                                  {dayData.total}
-                                </div>
-                                <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>
-                                  {dayData.total === 1 ? 'ovo' : 'ovos'}
-                                </div>
-                                {dayData.cracked > 0 && (
-                                  <div style={{ fontSize: 9, color: 'var(--danger)', fontWeight: 600 }}>
-                                    {dayData.cracked} trinc.
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>-</div>
-                            )}
-                          </>
-                        )}
+                          ) : (
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>-</div>
+                          )}
+                        </>)}
                       </td>
                     );
                   })}
@@ -578,9 +572,7 @@ export default function EggCollection() {
                 <h4 style={{ margin: 0, fontSize: 14 }}>
                   Coletas em {String(selectedDay).padStart(2, '0')}/{String(calendarMonth + 1).padStart(2, '0')}/{calendarYear}
                 </h4>
-                <button className="btn btn-sm btn-secondary" onClick={() => setSelectedDay(null)}>
-                  <X size={14} />
-                </button>
+                <button className="btn btn-sm btn-secondary" onClick={() => setSelectedDay(null)}><X size={14} /></button>
               </div>
               {selectedDayCollections.length > 0 ? (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -599,16 +591,10 @@ export default function EggCollection() {
                       const bird = birds.find(b => b.id === c.birdId);
                       return (
                         <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '6px 8px', fontSize: 13 }}>
-                            <strong>{bird ? getBirdLabel(bird) : 'Ave removida'}</strong>
-                          </td>
+                          <td style={{ padding: '6px 8px', fontSize: 13 }}><strong>{bird ? getBirdLabel(bird) : 'Ave removida'}</strong></td>
                           <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>{c.quantity}</td>
-                          <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600, color: (parseInt(c.cracked) || 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
-                            {c.cracked || 0}
-                          </td>
-                          <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600, color: 'var(--success)' }}>
-                            {(parseInt(c.quantity) || 0) - (parseInt(c.cracked) || 0)}
-                          </td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600, color: (parseInt(c.cracked) || 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>{c.cracked || 0}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600, color: 'var(--success)' }}>{(parseInt(c.quantity) || 0) - (parseInt(c.cracked) || 0)}</td>
                           <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--text-secondary)' }}>{c.notes || '-'}</td>
                           <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                             <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
@@ -632,23 +618,44 @@ export default function EggCollection() {
       {/* Bird Performance Cards */}
       {birds.length > 0 && (
         <div className="card" style={{ marginBottom: 24 }}>
-          <div className="card-header">
+          <div className="card-header" style={{ flexWrap: 'wrap', gap: 8 }}>
             <span className="card-title">Desempenho por Raca / Ave</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={14} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="text" className="form-input" placeholder="Buscar ave..."
+                  value={birdSearch} onChange={e => setBirdSearch(e.target.value)}
+                  style={{ paddingLeft: 28, width: 180, height: 32, fontSize: 12 }}
+                />
+              </div>
+              <button
+                className="btn btn-sm btn-secondary"
+                onClick={() => setBirdSort(prev => prev === 'alpha' ? 'eggs' : 'alpha')}
+                title={birdSort === 'alpha' ? 'Ordenar por producao' : 'Ordenar alfabetico'}
+                style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}
+              >
+                {birdSort === 'alpha' ? <><ArrowUpAZ size={14} /> A-Z</> : <><Egg size={14} /> Producao</>}
+              </button>
+            </div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12, padding: 16 }}>
-            {birds.map(bird => {
+            {filteredBirds.map(bird => {
               const perf = birdPerformance[bird.id];
               if (!perf) return null;
               const isExpanded = expandedBird === bird.id;
               const hasConfig = parseInt(bird.annualEggPotential) > 0;
-              const matrices = parseInt(bird.matrixCount) || 1;
+              const individuals = getIndividuals(bird);
+              const activeBirds = perf.activeBirds;
+              const totalBirds = individuals.length;
+              const sickCount = individuals.filter(i => i.status === 'sick').length;
+              const broodyCount = individuals.filter(i => i.status === 'broody').length;
+              const deadCount = individuals.filter(i => i.status === 'dead').length;
 
               return (
                 <div key={bird.id} style={{
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: 16,
-                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
+                  padding: 16, background: 'var(--bg-card)',
                 }}>
                   {/* Bird header */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -662,23 +669,19 @@ export default function EggCollection() {
                       </div>
                       <div>
                         <div style={{ fontWeight: 700, fontSize: 14 }}>{bird.species} - {bird.breed}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
-                          {matrices} {matrices > 1 ? 'matrizes' : 'matriz'}
-                          {bird.ringNumber && (
-                            <span style={{
-                              marginLeft: 6, padding: '1px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
-                              background: bird.ringColor ? bird.ringColor + '30' : '#e2e8f0',
-                              color: bird.ringColor || 'var(--text-secondary)',
-                              border: bird.ringColor ? `1px solid ${bird.ringColor}` : '1px solid var(--border)',
-                            }}>
-                              Anilha: {bird.ringNumber}
-                            </span>
-                          )}
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <Heart size={10} color="#10B981" />
+                            <strong style={{ color: '#10B981' }}>{activeBirds}</strong> ativas de {totalBirds}
+                          </span>
+                          {sickCount > 0 && <span style={{ fontSize: 10, color: BIRD_STATUS.sick.color, fontWeight: 600 }}>{sickCount} doente{sickCount > 1 ? 's' : ''}</span>}
+                          {broodyCount > 0 && <span style={{ fontSize: 10, color: BIRD_STATUS.broody.color, fontWeight: 600 }}>{broodyCount} choca{broodyCount > 1 ? 's' : ''}</span>}
+                          {deadCount > 0 && <span style={{ fontSize: 10, color: BIRD_STATUS.dead.color, fontWeight: 600 }}>{deadCount} morta{deadCount > 1 ? 's' : ''}</span>}
                         </div>
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn-icon" title="Configurar ave" onClick={() => handleBirdConfig(bird)} style={{ color: 'var(--primary)' }}>
+                      <button className="btn-icon" title="Gerenciar aves" onClick={() => handleBirdConfig(bird)} style={{ color: 'var(--primary)' }}>
                         <Edit2 size={14} />
                       </button>
                       <button className="btn-icon" onClick={() => setExpandedBird(isExpanded ? null : bird.id)}>
@@ -689,21 +692,17 @@ export default function EggCollection() {
 
                   {/* Quick stats */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
-                    <div style={{ textAlign: 'center', padding: '8px 4px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>Semana</div>
-                      <div style={{ fontSize: 18, fontWeight: 700 }}>{perf.weekEggs}</div>
-                      {hasConfig && <div style={{ fontSize: 10, fontWeight: 600, color: getPerfColor(perf.weekPerf) }}>{perf.weekPerf.toFixed(0)}%</div>}
-                    </div>
-                    <div style={{ textAlign: 'center', padding: '8px 4px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>Mes</div>
-                      <div style={{ fontSize: 18, fontWeight: 700 }}>{perf.monthEggs}</div>
-                      {hasConfig && <div style={{ fontSize: 10, fontWeight: 600, color: getPerfColor(perf.monthPerf) }}>{perf.monthPerf.toFixed(0)}%</div>}
-                    </div>
-                    <div style={{ textAlign: 'center', padding: '8px 4px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>Ano</div>
-                      <div style={{ fontSize: 18, fontWeight: 700 }}>{perf.yearEggs}</div>
-                      {hasConfig && <div style={{ fontSize: 10, fontWeight: 600, color: getPerfColor(perf.yearPerf) }}>{perf.yearPerf.toFixed(0)}%</div>}
-                    </div>
+                    {[
+                      { label: 'Semana', value: perf.weekEggs, perf: perf.weekPerf },
+                      { label: 'Mes', value: perf.monthEggs, perf: perf.monthPerf },
+                      { label: 'Ano', value: perf.yearEggs, perf: perf.yearPerf },
+                    ].map(s => (
+                      <div key={s.label} style={{ textAlign: 'center', padding: '8px 4px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{s.label}</div>
+                        <div style={{ fontSize: 18, fontWeight: 700 }}>{s.value}</div>
+                        {hasConfig && <div style={{ fontSize: 10, fontWeight: 600, color: getPerfColor(s.perf) }}>{s.perf.toFixed(0)}%</div>}
+                      </div>
+                    ))}
                   </div>
 
                   {/* Performance bar */}
@@ -711,7 +710,7 @@ export default function EggCollection() {
                     <div style={{ marginBottom: 8 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 4 }}>
                         <span style={{ color: 'var(--text-secondary)' }}>
-                          Potencial anual: {perf.annualPotential} ovos ({matrices} x {bird.annualEggPotential})
+                          Potencial: {perf.annualPotential} ovos/ano ({activeBirds} ativas x {bird.annualEggPotential})
                         </span>
                         <span style={{ fontWeight: 600, color: getPerfColor(perf.yearPerf) }}>{getPerfLabel(perf.yearPerf)}</span>
                       </div>
@@ -726,7 +725,7 @@ export default function EggCollection() {
 
                   {!hasConfig && (
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <AlertTriangle size={12} /> Configure o potencial anual de ovos para ver a analise de desempenho
+                      <AlertTriangle size={12} /> Configure o potencial anual para ver analise de desempenho
                     </div>
                   )}
 
@@ -736,15 +735,42 @@ export default function EggCollection() {
                     </div>
                   )}
 
-                  {/* Expanded details */}
+                  {/* Expanded: individual birds list */}
                   {isExpanded && (
                     <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-                      {bird.birdNotes && (
-                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, fontStyle: 'italic' }}>
-                          {bird.birdNotes}
-                        </div>
-                      )}
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>Aves Individuais</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {individuals.map((ind, i) => {
+                          const st = BIRD_STATUS[ind.status] || BIRD_STATUS.active;
+                          return (
+                            <div key={ind.id || i} style={{
+                              display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
+                              background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)',
+                              borderLeft: `3px solid ${st.color}`,
+                            }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, minWidth: 20 }}>#{i + 1}</span>
+                              {ind.ringNumber && (
+                                <span style={{
+                                  fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 8,
+                                  background: '#e2e8f0', color: 'var(--text)',
+                                }}>
+                                  {ind.ringNumber}
+                                </span>
+                              )}
+                              <span style={{
+                                fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 8,
+                                background: st.bg, color: st.color,
+                              }}>
+                                {st.label}
+                              </span>
+                              {ind.notes && <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>{ind.notes}</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Stats */}
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 10 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                           <span>Total de ovos coletados:</span>
                           <strong style={{ color: 'var(--text-primary)' }}>{perf.totalEggs}</strong>
@@ -762,20 +788,14 @@ export default function EggCollection() {
                         {hasConfig && (
                           <>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                              <span>Potencial semanal:</span>
+                              <span>Potencial semanal ({activeBirds} ativas):</span>
                               <strong style={{ color: 'var(--text-primary)' }}>{(perf.annualPotential / 52).toFixed(1)} ovos</strong>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                              <span>Potencial mensal:</span>
+                              <span>Potencial mensal ({activeBirds} ativas):</span>
                               <strong style={{ color: 'var(--text-primary)' }}>{(perf.annualPotential / 12).toFixed(1)} ovos</strong>
                             </div>
                           </>
-                        )}
-                        {bird.ringNumber && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                            <span>Anilha:</span>
-                            <strong>{bird.ringNumber} {bird.ringColor && `(${bird.ringColor})`}</strong>
-                          </div>
                         )}
                       </div>
                     </div>
@@ -783,6 +803,11 @@ export default function EggCollection() {
                 </div>
               );
             })}
+            {filteredBirds.length === 0 && birdSearch && (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, gridColumn: '1 / -1' }}>
+                Nenhuma ave encontrada para "{birdSearch}"
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -828,7 +853,7 @@ export default function EggCollection() {
                   </div>
                   <div className="form-group">
                     <label className="form-label">Observacoes</label>
-                    <input className="form-input" type="text" value={editForm.notes} onChange={e => setEditForm({ ...editForm, notes: e.target.value })} placeholder="Ex: Ovos para chocadeira, ovos para venda..." />
+                    <input className="form-input" type="text" value={editForm.notes} onChange={e => setEditForm({ ...editForm, notes: e.target.value })} placeholder="Ex: Ovos para chocadeira..." />
                   </div>
                   <div className="modal-actions">
                     <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
@@ -850,13 +875,10 @@ export default function EggCollection() {
                         Total: <span style={{ color: 'var(--primary)', fontSize: 16 }}>{batchTotal}</span> ovos
                       </div>
                       {batchCrackedTotal > 0 && (
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--danger)' }}>
-                          {batchCrackedTotal} trincados
-                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--danger)' }}>{batchCrackedTotal} trincados</div>
                       )}
                     </div>
                   </div>
-
                   {birds.length === 0 ? (
                     <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
                       Nenhuma ave cadastrada. Cadastre aves na pagina do Plantel primeiro.
@@ -874,41 +896,25 @@ export default function EggCollection() {
                         <tbody>
                           {birds.map(bird => {
                             const entry = batchEntries[bird.id] || { quantity: '', cracked: '' };
-                            const matrices = parseInt(bird.matrixCount) || 1;
+                            const active = getActiveBirdCount(bird);
+                            const total = (getIndividuals(bird)).length;
                             return (
                               <tr key={bird.id} style={{ borderBottom: '1px solid var(--border)' }}>
                                 <td style={{ padding: '8px 12px' }}>
                                   <div style={{ fontWeight: 600, fontSize: 13 }}>{bird.species} - {bird.breed}</div>
                                   <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                    {matrices} {matrices > 1 ? 'matrizes' : 'matriz'}
-                                    {bird.ringNumber && (
-                                      <span style={{
-                                        marginLeft: 6, padding: '1px 5px', borderRadius: 6, fontSize: 10, fontWeight: 600,
-                                        background: bird.ringColor ? bird.ringColor + '30' : '#e2e8f0',
-                                        color: bird.ringColor || 'var(--text-secondary)',
-                                      }}>
-                                        {bird.ringNumber}
-                                      </span>
-                                    )}
+                                    {active} ativa{active !== 1 ? 's' : ''} de {total}
                                   </div>
                                 </td>
                                 <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                                  <input
-                                    className="form-input" type="number" min="0"
-                                    value={entry.quantity}
+                                  <input className="form-input" type="number" min="0" value={entry.quantity}
                                     onChange={e => updateBatchEntry(bird.id, 'quantity', e.target.value)}
-                                    placeholder="0"
-                                    style={{ width: 70, textAlign: 'center', padding: '6px 4px', margin: '0 auto' }}
-                                  />
+                                    placeholder="0" style={{ width: 70, textAlign: 'center', padding: '6px 4px', margin: '0 auto' }} />
                                 </td>
                                 <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                                  <input
-                                    className="form-input" type="number" min="0"
-                                    value={entry.cracked}
+                                  <input className="form-input" type="number" min="0" value={entry.cracked}
                                     onChange={e => updateBatchEntry(bird.id, 'cracked', e.target.value)}
-                                    placeholder="0"
-                                    style={{ width: 70, textAlign: 'center', padding: '6px 4px', margin: '0 auto' }}
-                                  />
+                                    placeholder="0" style={{ width: 70, textAlign: 'center', padding: '6px 4px', margin: '0 auto' }} />
                                 </td>
                               </tr>
                             );
@@ -917,7 +923,6 @@ export default function EggCollection() {
                       </table>
                     </div>
                   )}
-
                   <div className="form-group" style={{ marginTop: 12 }}>
                     <label className="form-label">Observacoes</label>
                     <input className="form-input" type="text" value={batchNotes} onChange={e => setBatchNotes(e.target.value)} placeholder="Ex: Ovos para chocadeira, ovos para venda..." />
@@ -935,52 +940,99 @@ export default function EggCollection() {
         </div>
       )}
 
-      {/* Bird Config Modal */}
+      {/* Bird Config Modal - Individual bird management */}
       {showBirdConfigModal && (
         <div className="modal-overlay" onClick={() => setShowBirdConfigModal(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3 className="modal-title">Configurar Ave</h3>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 680 }}>
+            <h3 className="modal-title">Gerenciar Aves</h3>
             {(() => {
               const bird = birds.find(b => b.id === showBirdConfigModal);
               if (!bird) return null;
+              const activeCount = birdConfigForm.individuals.filter(i => i.status === 'active').length;
+              const totalCount = birdConfigForm.individuals.length;
               return (
                 <>
                   <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
-                    {bird.species} - {bird.breed} ({parseInt(bird.matrixCount) || 1} matrizes)
+                    {bird.species} - {bird.breed} — <strong style={{ color: '#10B981' }}>{activeCount} ativas</strong> de {totalCount} aves
                   </p>
-                  <div className="form-group">
-                    <label className="form-label">Potencial Anual de Ovos (por matriz) *</label>
+
+                  <div className="form-group" style={{ marginBottom: 16 }}>
+                    <label className="form-label">Potencial Anual de Ovos (por ave)</label>
                     <input className="form-input" type="number" min="0" value={birdConfigForm.annualEggPotential}
-                      onChange={e => setBirdConfigForm({ ...birdConfigForm, annualEggPotential: e.target.value })}
-                      placeholder="Ex: 180, 250, 300..."
-                    />
+                      onChange={e => setBirdConfigForm(prev => ({ ...prev, annualEggPotential: e.target.value }))}
+                      placeholder="Ex: 180, 250, 300..." />
                     <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
-                      Quantidade media de ovos que a raca produz por ano (por ave). Ex: Ganso = 40, Galinha caipira = 180
+                      Quantidade media por ave por ano. Ex: Ganso = 40, Galinha caipira = 180
                     </span>
                   </div>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">Numero da Anilha</label>
-                      <input className="form-input" type="text" value={birdConfigForm.ringNumber}
-                        onChange={e => setBirdConfigForm({ ...birdConfigForm, ringNumber: e.target.value })}
-                        placeholder="Ex: 001, A12..."
-                      />
+
+                  {/* Individual birds table */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <label className="form-label" style={{ margin: 0 }}>Aves Individuais</label>
+                      <button type="button" className="btn btn-sm btn-secondary" onClick={addIndividual} style={{ fontSize: 11, padding: '4px 8px' }}>
+                        <Plus size={12} /> Adicionar Ave
+                      </button>
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">Cor da Anilha</label>
-                      <input className="form-input" type="text" value={birdConfigForm.ringColor}
-                        onChange={e => setBirdConfigForm({ ...birdConfigForm, ringColor: e.target.value })}
-                        placeholder="Ex: Azul, Vermelho..."
-                      />
+                    <div style={{ maxHeight: 350, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: 'var(--bg-secondary)', position: 'sticky', top: 0, zIndex: 1 }}>
+                            <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 11, fontWeight: 600, width: 36 }}>#</th>
+                            <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 11, fontWeight: 600 }}>Anilha</th>
+                            <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 11, fontWeight: 600, width: 120 }}>Status</th>
+                            <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 11, fontWeight: 600 }}>Obs</th>
+                            <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 11, fontWeight: 600, width: 40 }}></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {birdConfigForm.individuals.map((ind, idx) => {
+                            const st = BIRD_STATUS[ind.status] || BIRD_STATUS.active;
+                            return (
+                              <tr key={ind.id || idx} style={{ borderBottom: '1px solid var(--border)', background: ind.status === 'dead' ? '#fef2f233' : undefined }}>
+                                <td style={{ padding: '6px 8px', textAlign: 'center', fontSize: 12, fontWeight: 600 }}>{idx + 1}</td>
+                                <td style={{ padding: '4px 6px' }}>
+                                  <input className="form-input" type="text" value={ind.ringNumber}
+                                    onChange={e => updateIndividual(idx, 'ringNumber', e.target.value)}
+                                    placeholder="Anilha" style={{ fontSize: 12, padding: '4px 8px', height: 30 }} />
+                                </td>
+                                <td style={{ padding: '4px 6px' }}>
+                                  <select className="form-input" value={ind.status}
+                                    onChange={e => updateIndividual(idx, 'status', e.target.value)}
+                                    style={{ fontSize: 12, padding: '4px 6px', height: 30, color: st.color, fontWeight: 600 }}>
+                                    {Object.entries(BIRD_STATUS).map(([key, val]) => (
+                                      <option key={key} value={key}>{val.label}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td style={{ padding: '4px 6px' }}>
+                                  <input className="form-input" type="text" value={ind.notes}
+                                    onChange={e => updateIndividual(idx, 'notes', e.target.value)}
+                                    placeholder="Obs..." style={{ fontSize: 12, padding: '4px 8px', height: 30 }} />
+                                </td>
+                                <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+                                  {birdConfigForm.individuals.length > 1 && (
+                                    <button type="button" className="btn-icon" onClick={() => removeIndividual(idx)}
+                                      style={{ color: 'var(--danger)', padding: 2 }} title="Remover">
+                                      <Trash2 size={12} />
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
+
                   <div className="form-group">
-                    <label className="form-label">Observacoes da Ave</label>
+                    <label className="form-label">Observacoes Gerais</label>
                     <input className="form-input" type="text" value={birdConfigForm.notes}
-                      onChange={e => setBirdConfigForm({ ...birdConfigForm, notes: e.target.value })}
-                      placeholder="Ex: Idade, origem, observacoes gerais..."
-                    />
+                      onChange={e => setBirdConfigForm(prev => ({ ...prev, notes: e.target.value }))}
+                      placeholder="Ex: Idade, origem, observacoes gerais..." />
                   </div>
+
                   <div className="modal-actions">
                     <button type="button" className="btn btn-secondary" onClick={() => setShowBirdConfigModal(null)}>Cancelar</button>
                     <button type="button" className="btn btn-primary" onClick={handleSaveBirdConfig}>
