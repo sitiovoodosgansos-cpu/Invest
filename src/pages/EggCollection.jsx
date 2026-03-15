@@ -8,7 +8,7 @@ import {
 import {
   Plus, Trash2, Edit2, Egg, TrendingUp, AlertTriangle, Calendar,
   ChevronDown, ChevronUp, Target, Save, X, ChevronLeft, ChevronRight,
-  Search, ArrowUpAZ, ArrowDownAZ, Heart, HeartOff
+  Search, ArrowUpAZ, ArrowDownAZ, Heart, HeartOff, Link, Copy, RefreshCw, Trash
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -59,6 +59,7 @@ export default function EggCollection() {
     birds, eggCollections, customSpecies,
     addEggCollection, updateEggCollection, deleteEggCollection,
     updateBird,
+    employeeToken, generateEmployeeToken, revokeEmployeeToken,
   } = useApp();
 
   const [showModal, setShowModal] = useState(false);
@@ -77,6 +78,8 @@ export default function EggCollection() {
   // Search/sort for bird performance
   const [birdSearch, setBirdSearch] = useState('');
   const [birdSort, setBirdSort] = useState('alpha'); // alpha | eggs
+  const [showEmployeeLink, setShowEmployeeLink] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const allCollections = eggCollections || [];
 
@@ -408,10 +411,93 @@ export default function EggCollection() {
           <h2>Coleta de Ovos</h2>
           <p>Controle diario de coleta e desempenho de postura</p>
         </div>
-        <button className="btn btn-primary" onClick={openNewCollection} style={{ whiteSpace: 'nowrap' }}>
-          <Plus size={16} /> Nova Coleta
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary" onClick={() => setShowEmployeeLink(!showEmployeeLink)} style={{ whiteSpace: 'nowrap' }}>
+            <Link size={14} /> Acesso Funcionário
+          </button>
+          <button className="btn btn-primary" onClick={openNewCollection} style={{ whiteSpace: 'nowrap' }}>
+            <Plus size={16} /> Nova Coleta
+          </button>
+        </div>
       </div>
+
+      {/* Employee Link Panel */}
+      {showEmployeeLink && (
+        <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <h4 style={{ fontSize: 14, marginBottom: 4 }}>Link de Acesso para Funcionários</h4>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+                Compartilhe este link com os funcionários para que tenham acesso às páginas: Coleta de Ovos, Chocadeiras, Pintinhos e Sanidade.
+              </p>
+            </div>
+            <button className="btn btn-sm btn-secondary" onClick={() => setShowEmployeeLink(false)}>
+              <X size={14} />
+            </button>
+          </div>
+
+          {employeeToken ? (
+            <div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input
+                  className="form-input"
+                  readOnly
+                  value={`${window.location.origin}${window.location.pathname}#/funcionario/${employeeToken}`}
+                  style={{ flex: 1, minWidth: 200, fontSize: 12, background: 'var(--bg-secondary)' }}
+                  onClick={e => e.target.select()}
+                />
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => {
+                    const url = `${window.location.origin}${window.location.pathname}#/funcionario/${employeeToken}`;
+                    navigator.clipboard.writeText(url).then(() => {
+                      setLinkCopied(true);
+                      setTimeout(() => setLinkCopied(false), 2000);
+                    });
+                  }}
+                >
+                  <Copy size={12} /> {linkCopied ? 'Copiado!' : 'Copiar'}
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    if (confirm('Gerar novo link? O link anterior será invalidado.')) {
+                      generateEmployeeToken();
+                    }
+                  }}
+                  title="Gerar novo link"
+                >
+                  <RefreshCw size={12} /> Renovar
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  style={{ color: '#ef4444' }}
+                  onClick={() => {
+                    if (confirm('Revogar acesso dos funcionários? O link atual será invalidado.')) {
+                      revokeEmployeeToken();
+                    }
+                  }}
+                  title="Revogar acesso"
+                >
+                  <Trash size={12} /> Revogar
+                </button>
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8, margin: 0 }}>
+                Os funcionários poderão editar dados de Coleta de Ovos, Chocadeiras, Pintinhos e Sanidade diretamente. As alterações aparecem na conta principal.
+              </p>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: 12 }}>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                Nenhum link de acesso gerado ainda.
+              </p>
+              <button className="btn btn-primary" onClick={() => generateEmployeeToken()}>
+                <Link size={14} /> Gerar Link de Acesso
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Summary Stats */}
       <div className="stats-grid">

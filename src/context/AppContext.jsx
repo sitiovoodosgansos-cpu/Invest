@@ -27,6 +27,7 @@ const defaultData = {
   nurseryRooms: [],
   nurseryBatches: [],
   nurseryEvents: [],
+  employeeToken: '',
 };
 
 // Count total items across all arrays in data
@@ -527,6 +528,16 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, nurseryEvents: (prev.nurseryEvents || []).filter(e => e.id !== id) }));
   };
 
+  // Employee Token
+  const generateEmployeeToken = () => {
+    const token = 'func_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+    setData(prev => ({ ...prev, employeeToken: token }));
+    return token;
+  };
+  const revokeEmployeeToken = () => {
+    setData(prev => ({ ...prev, employeeToken: '' }));
+  };
+
   const value = {
     ...data,
     loading,
@@ -548,6 +559,7 @@ export function AppProvider({ children }) {
     addNurseryRoom, updateNurseryRoom, deleteNurseryRoom,
     addNurseryBatch, updateNurseryBatch, deleteNurseryBatch,
     addNurseryEvent, updateNurseryEvent, deleteNurseryEvent,
+    generateEmployeeToken, revokeEmployeeToken,
     addCustomSpecies, deleteCustomSpecies,
   };
 
