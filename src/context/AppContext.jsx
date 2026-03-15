@@ -24,6 +24,9 @@ const defaultData = {
   infirmaryAdmissions: [],
   treatments: [],
   customTreatmentTypes: [],
+  nurseryRooms: [],
+  nurseryBatches: [],
+  nurseryEvents: [],
 };
 
 // Count total items across all arrays in data
@@ -42,7 +45,10 @@ const countItems = (d) =>
   (d.infirmaryBays?.length || 0) +
   (d.infirmaryAdmissions?.length || 0) +
   (d.treatments?.length || 0) +
-  (d.customTreatmentTypes?.length || 0);
+  (d.customTreatmentTypes?.length || 0) +
+  (d.nurseryRooms?.length || 0) +
+  (d.nurseryBatches?.length || 0) +
+  (d.nurseryEvents?.length || 0);
 
 // Default species (empty breeds - user adds breeds manually via the app)
 export const BIRD_SPECIES = [];
@@ -477,6 +483,50 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, customTreatmentTypes: (prev.customTreatmentTypes || []).filter(t => t.id !== id) }));
   };
 
+  // Nursery Rooms
+  const addNurseryRoom = (room) => {
+    const newRoom = { ...room, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    setData(prev => ({ ...prev, nurseryRooms: [...(prev.nurseryRooms || []), newRoom] }));
+    return newRoom;
+  };
+  const updateNurseryRoom = (id, updates) => {
+    setData(prev => ({ ...prev, nurseryRooms: (prev.nurseryRooms || []).map(r => r.id === id ? { ...r, ...updates } : r) }));
+  };
+  const deleteNurseryRoom = (id) => {
+    setData(prev => ({
+      ...prev,
+      nurseryRooms: (prev.nurseryRooms || []).filter(r => r.id !== id),
+      nurseryBatches: (prev.nurseryBatches || []).filter(b => b.roomId !== id),
+      nurseryEvents: (prev.nurseryEvents || []).filter(e => e.roomId !== id),
+    }));
+  };
+
+  // Nursery Batches (chick groups in rooms)
+  const addNurseryBatch = (batch) => {
+    const newBatch = { ...batch, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    setData(prev => ({ ...prev, nurseryBatches: [...(prev.nurseryBatches || []), newBatch] }));
+    return newBatch;
+  };
+  const updateNurseryBatch = (id, updates) => {
+    setData(prev => ({ ...prev, nurseryBatches: (prev.nurseryBatches || []).map(b => b.id === id ? { ...b, ...updates } : b) }));
+  };
+  const deleteNurseryBatch = (id) => {
+    setData(prev => ({ ...prev, nurseryBatches: (prev.nurseryBatches || []).filter(b => b.id !== id) }));
+  };
+
+  // Nursery Events (deaths, medications, vaccinations, bedding changes)
+  const addNurseryEvent = (event) => {
+    const newEvent = { ...event, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    setData(prev => ({ ...prev, nurseryEvents: [...(prev.nurseryEvents || []), newEvent] }));
+    return newEvent;
+  };
+  const updateNurseryEvent = (id, updates) => {
+    setData(prev => ({ ...prev, nurseryEvents: (prev.nurseryEvents || []).map(e => e.id === id ? { ...e, ...updates } : e) }));
+  };
+  const deleteNurseryEvent = (id) => {
+    setData(prev => ({ ...prev, nurseryEvents: (prev.nurseryEvents || []).filter(e => e.id !== id) }));
+  };
+
   const value = {
     ...data,
     loading,
@@ -495,6 +545,9 @@ export function AppProvider({ children }) {
     addInfirmaryAdmission, updateInfirmaryAdmission, deleteInfirmaryAdmission,
     addTreatment, updateTreatment, deleteTreatment,
     addCustomTreatmentType, deleteCustomTreatmentType,
+    addNurseryRoom, updateNurseryRoom, deleteNurseryRoom,
+    addNurseryBatch, updateNurseryBatch, deleteNurseryBatch,
+    addNurseryEvent, updateNurseryEvent, deleteNurseryEvent,
     addCustomSpecies, deleteCustomSpecies,
   };
 
