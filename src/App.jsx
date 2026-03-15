@@ -48,6 +48,7 @@ import Pintinhos from './pages/Pintinhos';
 import Login from './pages/Login';
 import InvestorPortal from './pages/InvestorPortal';
 import DirectPortal from './pages/DirectPortal';
+import EmployeePortal from './pages/EmployeePortal';
 import {
   LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut, Receipt, Egg, Thermometer, Heart, Baby
 } from 'lucide-react';
@@ -180,6 +181,7 @@ export default function App() {
           <HashRouter>
             <Routes>
               <Route path="/portal/:token" element={<DirectPortal />} />
+              <Route path="/funcionario/:token/*" element={<EmployeePortal />} />
               <Route path="*" element={<AppRouter />} />
             </Routes>
           </HashRouter>
