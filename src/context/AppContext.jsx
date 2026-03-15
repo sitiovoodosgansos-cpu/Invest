@@ -375,7 +375,7 @@ export function AppProvider({ children }) {
   const addEggCollection = (collection) => {
     const newCollection = {
       ...collection,
-      id: Date.now().toString(),
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       createdAt: new Date().toISOString(),
     };
     setData(prev => ({
