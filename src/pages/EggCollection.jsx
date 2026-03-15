@@ -2,11 +2,12 @@ import React, { useState, useMemo } from 'react';
 import { useApp, BIRD_SPECIES } from '../context/AppContext';
 import { formatDate } from '../utils/helpers';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  AreaChart, Area
 } from 'recharts';
 import {
   Plus, Trash2, Edit2, Egg, TrendingUp, AlertTriangle, Calendar,
-  ChevronDown, ChevronUp, Target, Award, Save, X
+  ChevronDown, ChevronUp, Target, Award, Save, X, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -14,22 +15,18 @@ const MONTH_NAMES = [
   'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
 ];
 
+const MONTH_NAMES_FULL = [
+  'Janeiro', 'Fevereiro', 'Marco', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
+
+const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+
 function getWeekNumber(date) {
   const d = new Date(date);
   const start = new Date(d.getFullYear(), 0, 1);
   const diff = d - start;
   return Math.ceil((diff / 86400000 + start.getDay() + 1) / 7);
-}
-
-function getWeekRange(date) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const startOfWeek = new Date(d);
-  startOfWeek.setDate(d.getDate() - day);
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 6);
-  const fmt = (dt) => `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}`;
-  return `${fmt(startOfWeek)} - ${fmt(endOfWeek)}`;
 }
 
 export default function EggCollection() {
@@ -41,21 +38,20 @@ export default function EggCollection() {
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const [filterBird, setFilterBird] = useState('all');
-  const [periodView, setPeriodView] = useState('week');
+  const [chartPeriod, setChartPeriod] = useState('weekly');
   const [expandedBird, setExpandedBird] = useState(null);
   const [showBirdConfigModal, setShowBirdConfigModal] = useState(null);
   const [birdConfigForm, setBirdConfigForm] = useState({ annualEggPotential: '', ringNumber: '', ringColor: '', notes: '' });
-  // Batch collection: date + per-bird quantities
   const [batchDate, setBatchDate] = useState(new Date().toISOString().slice(0, 10));
   const [batchEntries, setBatchEntries] = useState({});
   const [batchNotes, setBatchNotes] = useState('');
-  // Single edit form (for editing existing records)
   const [editForm, setEditForm] = useState({ date: '', birdId: '', quantity: '', cracked: '0', notes: '' });
+  // Calendar state
+  const [calendarDate, setCalendarDate] = useState(new Date());
+  const [selectedDay, setSelectedDay] = useState(null);
 
   const allCollections = eggCollections || [];
 
-  // Merge built-in + custom species for display
   const allSpecies = useMemo(() => {
     const merged = BIRD_SPECIES.map(s => {
       const custom = (customSpecies || []).find(c => c.species.toLowerCase() === s.species.toLowerCase());
@@ -71,7 +67,6 @@ export default function EggCollection() {
     return [...merged, ...extras];
   }, [customSpecies]);
 
-  // Get bird label
   const getBirdLabel = (bird) => `${bird.species} - ${bird.breed}`;
 
   // Period calculations
@@ -82,34 +77,36 @@ export default function EggCollection() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfYear = new Date(now.getFullYear(), 0, 1);
 
-  const weekCollections = useMemo(() =>
-    allCollections.filter(c => new Date(c.date) >= startOfWeek),
+  const weekTotal = useMemo(() =>
+    allCollections.filter(c => new Date(c.date) >= startOfWeek).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0),
     [allCollections, startOfWeek.getTime()]
   );
-  const monthCollections = useMemo(() =>
-    allCollections.filter(c => new Date(c.date) >= startOfMonth),
+  const weekCracked = useMemo(() =>
+    allCollections.filter(c => new Date(c.date) >= startOfWeek).reduce((s, c) => s + (parseInt(c.cracked) || 0), 0),
+    [allCollections, startOfWeek.getTime()]
+  );
+  const monthTotal = useMemo(() =>
+    allCollections.filter(c => new Date(c.date) >= startOfMonth).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0),
     [allCollections, startOfMonth.getTime()]
   );
-  const yearCollections = useMemo(() =>
-    allCollections.filter(c => new Date(c.date) >= startOfYear),
+  const monthCracked = useMemo(() =>
+    allCollections.filter(c => new Date(c.date) >= startOfMonth).reduce((s, c) => s + (parseInt(c.cracked) || 0), 0),
+    [allCollections, startOfMonth.getTime()]
+  );
+  const yearTotal = useMemo(() =>
+    allCollections.filter(c => new Date(c.date) >= startOfYear).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0),
+    [allCollections, startOfYear.getTime()]
+  );
+  const yearCracked = useMemo(() =>
+    allCollections.filter(c => new Date(c.date) >= startOfYear).reduce((s, c) => s + (parseInt(c.cracked) || 0), 0),
     [allCollections, startOfYear.getTime()]
   );
 
-  const weekTotal = weekCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
-  const weekCracked = weekCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
-  const monthTotal = monthCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
-  const monthCracked = monthCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
-  const yearTotal = yearCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
-  const yearCracked = yearCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
+  // Daily average this month
+  const dayOfMonth = now.getDate();
+  const dailyAvg = dayOfMonth > 0 ? (monthTotal / dayOfMonth).toFixed(1) : 0;
 
-  // Filtered collections for the table
-  const filteredCollections = useMemo(() => {
-    let list = [...allCollections];
-    if (filterBird !== 'all') list = list.filter(c => c.birdId === filterBird);
-    return list.sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [allCollections, filterBird]);
-
-  // Performance analysis per bird
+  // Bird performance
   const birdPerformance = useMemo(() => {
     const perf = {};
     birds.forEach(bird => {
@@ -124,28 +121,15 @@ export default function EggCollection() {
       const matrices = parseInt(bird.matrixCount) || 1;
       const totalAnnualPotential = annualPotential * matrices;
 
-      // Calculate days since first collection or bird creation
-      const firstDate = birdCollections.length > 0
-        ? new Date(birdCollections.reduce((min, c) => c.date < min ? c.date : min, birdCollections[0].date))
-        : null;
-
-      // Performance percentages based on proportion
       let weekPerf = 0, monthPerf = 0, yearPerf = 0;
       if (totalAnnualPotential > 0) {
-        const weeklyPotential = (totalAnnualPotential / 52);
-        const monthlyPotential = (totalAnnualPotential / 12);
-        weekPerf = weeklyPotential > 0 ? (weekEggs / weeklyPotential) * 100 : 0;
-        monthPerf = monthlyPotential > 0 ? (monthEggs / monthlyPotential) * 100 : 0;
-        yearPerf = totalAnnualPotential > 0 ? (yearEggs / totalAnnualPotential) * 100 : 0;
+        weekPerf = ((weekEggs / (totalAnnualPotential / 52)) * 100);
+        monthPerf = ((monthEggs / (totalAnnualPotential / 12)) * 100);
+        yearPerf = ((yearEggs / totalAnnualPotential) * 100);
       }
 
       perf[bird.id] = {
-        bird,
-        totalEggs,
-        totalCracked,
-        weekEggs,
-        monthEggs,
-        yearEggs,
+        bird, totalEggs, totalCracked, weekEggs, monthEggs, yearEggs,
         annualPotential: totalAnnualPotential,
         weekPerf: Math.min(weekPerf, 999),
         monthPerf: Math.min(monthPerf, 999),
@@ -156,60 +140,132 @@ export default function EggCollection() {
     return perf;
   }, [birds, allCollections, startOfWeek.getTime(), startOfMonth.getTime(), startOfYear.getTime()]);
 
-  // Chart data - eggs per week for the last 8 weeks
-  const chartData = useMemo(() => {
+  // ===== EVOLUTION CHART DATA =====
+  const evolutionData = useMemo(() => {
+    const data = [];
+    if (chartPeriod === 'daily') {
+      for (let i = 29; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        const dayCollections = allCollections.filter(c => c.date === key);
+        const total = dayCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+        const cracked = dayCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
+        data.push({ period: `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`, bons: total - cracked, trincados: cracked, total });
+      }
+    } else if (chartPeriod === 'weekly') {
+      for (let i = 11; i >= 0; i--) {
+        const ws = new Date(now);
+        ws.setDate(now.getDate() - now.getDay() - (i * 7));
+        ws.setHours(0, 0, 0, 0);
+        const we = new Date(ws);
+        we.setDate(ws.getDate() + 7);
+        const wc = allCollections.filter(c => { const d = new Date(c.date); return d >= ws && d < we; });
+        const total = wc.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+        const cracked = wc.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
+        data.push({ period: `S${getWeekNumber(ws)}`, bons: total - cracked, trincados: cracked, total });
+      }
+    } else if (chartPeriod === 'monthly') {
+      for (let i = 11; i >= 0; i--) {
+        const m = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const mEnd = new Date(m.getFullYear(), m.getMonth() + 1, 0);
+        const mc = allCollections.filter(c => { const d = new Date(c.date); return d >= m && d <= mEnd; });
+        const total = mc.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+        const cracked = mc.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
+        data.push({ period: `${MONTH_NAMES[m.getMonth()]}/${String(m.getFullYear()).slice(2)}`, bons: total - cracked, trincados: cracked, total });
+      }
+    } else if (chartPeriod === 'yearly') {
+      const years = new Set(allCollections.map(c => new Date(c.date).getFullYear()));
+      years.add(now.getFullYear());
+      const sorted = [...years].sort();
+      for (const year of sorted) {
+        const yc = allCollections.filter(c => new Date(c.date).getFullYear() === year);
+        const total = yc.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+        const cracked = yc.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
+        data.push({ period: String(year), bons: total - cracked, trincados: cracked, total });
+      }
+    }
+    return data;
+  }, [allCollections, chartPeriod]);
+
+  // ===== TOP 10 BIRDS CHART =====
+  const top10Data = useMemo(() => {
+    const birdEggs = birds.map(bird => {
+      let eggs = 0;
+      const birdCols = allCollections.filter(c => c.birdId === bird.id);
+      if (chartPeriod === 'daily') {
+        const today = now.toISOString().slice(0, 10);
+        eggs = birdCols.filter(c => c.date === today).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+      } else if (chartPeriod === 'weekly') {
+        eggs = birdCols.filter(c => new Date(c.date) >= startOfWeek).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+      } else if (chartPeriod === 'monthly') {
+        eggs = birdCols.filter(c => new Date(c.date) >= startOfMonth).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+      } else {
+        eggs = birdCols.filter(c => new Date(c.date) >= startOfYear).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+      }
+      return { name: `${bird.breed}`, eggs };
+    }).filter(b => b.eggs > 0).sort((a, b) => b.eggs - a.eggs).slice(0, 10);
+    return birdEggs;
+  }, [birds, allCollections, chartPeriod, startOfWeek.getTime(), startOfMonth.getTime(), startOfYear.getTime()]);
+
+  // ===== CALENDAR DATA =====
+  const calendarYear = calendarDate.getFullYear();
+  const calendarMonth = calendarDate.getMonth();
+
+  const calendarDaysData = useMemo(() => {
+    const map = {};
+    const prefix = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}`;
+    allCollections.forEach(c => {
+      if (c.date && c.date.startsWith(prefix)) {
+        const day = parseInt(c.date.slice(8, 10));
+        if (!map[day]) map[day] = { total: 0, cracked: 0, collections: [] };
+        map[day].total += parseInt(c.quantity) || 0;
+        map[day].cracked += parseInt(c.cracked) || 0;
+        map[day].collections.push(c);
+      }
+    });
+    return map;
+  }, [allCollections, calendarYear, calendarMonth]);
+
+  const calendarGrid = useMemo(() => {
+    const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
+    const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
     const weeks = [];
-    for (let i = 7; i >= 0; i--) {
-      const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - now.getDay() - (i * 7));
-      weekStart.setHours(0, 0, 0, 0);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 7);
-
-      const weekEggs = allCollections
-        .filter(c => {
-          const d = new Date(c.date);
-          return d >= weekStart && d < weekEnd;
-        });
-
-      const total = weekEggs.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
-      const cracked = weekEggs.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
-
-      weeks.push({
-        period: `S${getWeekNumber(weekStart)}`,
-        bons: total - cracked,
-        trincados: cracked,
-        total,
-      });
+    let week = new Array(firstDay).fill(null);
+    for (let d = 1; d <= daysInMonth; d++) {
+      week.push(d);
+      if (week.length === 7) { weeks.push(week); week = []; }
+    }
+    if (week.length > 0) {
+      while (week.length < 7) week.push(null);
+      weeks.push(week);
     }
     return weeks;
-  }, [allCollections]);
+  }, [calendarYear, calendarMonth]);
 
-  // Monthly chart
-  const monthlyChartData = useMemo(() => {
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const m = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const mEnd = new Date(m.getFullYear(), m.getMonth() + 1, 0);
-      const mCollections = allCollections.filter(c => {
-        const d = new Date(c.date);
-        return d >= m && d <= mEnd;
-      });
-      const total = mCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
-      const cracked = mCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
-      months.push({
-        period: MONTH_NAMES[m.getMonth()],
-        bons: total - cracked,
-        trincados: cracked,
-        total,
-      });
-    }
-    return months;
-  }, [allCollections]);
+  const selectedDayCollections = useMemo(() => {
+    if (!selectedDay) return [];
+    const key = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(selectedDay).padStart(2, '0')}`;
+    return allCollections.filter(c => c.date === key).sort((a, b) => (a.birdId || '').localeCompare(b.birdId || ''));
+  }, [selectedDay, allCollections, calendarYear, calendarMonth]);
 
+  const isToday = (day) => {
+    return day === now.getDate() && calendarMonth === now.getMonth() && calendarYear === now.getFullYear();
+  };
+
+  const navigateMonth = (delta) => {
+    setCalendarDate(new Date(calendarYear, calendarMonth + delta, 1));
+    setSelectedDay(null);
+  };
+
+  // Max eggs in a day this month (for color intensity)
+  const maxDayEggs = useMemo(() => {
+    return Math.max(1, ...Object.values(calendarDaysData).map(d => d.total));
+  }, [calendarDaysData]);
+
+  // ===== HANDLERS =====
   const handleBatchSubmit = (e) => {
     e.preventDefault();
-    // Create one collection per bird that has quantity > 0
     const entries = Object.entries(batchEntries).filter(([, v]) => (parseInt(v.quantity) || 0) > 0);
     if (entries.length === 0) return;
     entries.forEach(([birdId, entry]) => {
@@ -260,13 +316,14 @@ export default function EggCollection() {
     }));
   };
 
-  const batchTotal = useMemo(() => {
-    return Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.quantity) || 0), 0);
-  }, [batchEntries]);
-
-  const batchCrackedTotal = useMemo(() => {
-    return Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.cracked) || 0), 0);
-  }, [batchEntries]);
+  const batchTotal = useMemo(() =>
+    Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.quantity) || 0), 0),
+    [batchEntries]
+  );
+  const batchCrackedTotal = useMemo(() =>
+    Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.cracked) || 0), 0),
+    [batchEntries]
+  );
 
   const handleDelete = (id) => {
     if (window.confirm('Remover esta coleta?')) deleteEggCollection(id);
@@ -307,11 +364,25 @@ export default function EggCollection() {
     return '-';
   };
 
+  const openNewCollection = () => {
+    setBatchDate(new Date().toISOString().slice(0, 10));
+    setBatchEntries({});
+    setBatchNotes('');
+    setEditingId(null);
+    setShowModal(true);
+  };
+
   return (
     <div className="animate-in">
-      <div className="page-header">
-        <h2>Coleta de Ovos</h2>
-        <p>Controle diario de coleta e desempenho de postura</p>
+      {/* Header with Nova Coleta button */}
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h2>Coleta de Ovos</h2>
+          <p>Controle diario de coleta e desempenho de postura</p>
+        </div>
+        <button className="btn btn-primary" onClick={openNewCollection} style={{ whiteSpace: 'nowrap' }}>
+          <Plus size={16} /> Nova Coleta
+        </button>
       </div>
 
       {/* Summary Stats */}
@@ -336,52 +407,227 @@ export default function EggCollection() {
         </div>
         <div className="stat-card">
           <div className="stat-card-icon purple"><Target size={20} /></div>
-          <div className="stat-label">Total Coletas</div>
-          <div className="stat-value">{allCollections.length}</div>
+          <div className="stat-label">Media/Dia (Mes)</div>
+          <div className="stat-value">{dailyAvg}</div>
         </div>
       </div>
 
-      {/* Charts */}
+      {/* Evolution Chart */}
       {allCollections.length > 0 && (
-        <div className="grid-2" style={{ marginBottom: 24 }}>
-          <div className="card">
-            <div className="card-header">
-              <span className="card-title">Coleta Semanal</span>
-            </div>
-            <div className="chart-container">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="period" fontSize={11} />
-                  <YAxis fontSize={11} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="bons" name="Bons" fill="#10B981" stackId="a" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="trincados" name="Trincados" fill="#EF4444" stackId="a" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="card-header">
+            <span className="card-title">Evolucao de Coletas</span>
+            <div className="period-selector">
+              {[
+                { key: 'daily', label: 'Diario' },
+                { key: 'weekly', label: 'Semanal' },
+                { key: 'monthly', label: 'Mensal' },
+                { key: 'yearly', label: 'Anual' },
+              ].map(p => (
+                <button
+                  key={p.key}
+                  className={`period-btn ${chartPeriod === p.key ? 'active' : ''}`}
+                  onClick={() => setChartPeriod(p.key)}
+                >
+                  {p.label}
+                </button>
+              ))}
             </div>
           </div>
-          <div className="card">
-            <div className="card-header">
-              <span className="card-title">Coleta Mensal</span>
-            </div>
-            <div className="chart-container">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyChartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="period" fontSize={11} />
-                  <YAxis fontSize={11} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="bons" name="Bons" fill="#3B82F6" stackId="a" radius={[0, 0, 0, 0]} />
-                  <Bar dataKey="trincados" name="Trincados" fill="#EF4444" stackId="a" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+          <div className="chart-container">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={evolutionData}>
+                <defs>
+                  <linearGradient id="colorOvos" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10B981" stopOpacity={0.2} />
+                    <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="period" fontSize={11} />
+                <YAxis fontSize={11} />
+                <Tooltip />
+                <Legend />
+                <Area type="monotone" dataKey="bons" name="Bons" stroke="#10B981" fill="url(#colorOvos)" strokeWidth={2} />
+                <Area type="monotone" dataKey="trincados" name="Trincados" stroke="#EF4444" fill="none" strokeWidth={2} strokeDasharray="5 5" />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
         </div>
       )}
+
+      {/* Top 10 Birds Chart */}
+      {top10Data.length > 0 && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="card-header">
+            <span className="card-title">Top 10 Aves - Maior Postura ({
+              { daily: 'Hoje', weekly: 'Semana', monthly: 'Mes', yearly: 'Ano' }[chartPeriod]
+            })</span>
+          </div>
+          <div style={{ padding: '16px 16px 8px', height: Math.max(200, top10Data.length * 40 + 40) }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={top10Data} layout="vertical" margin={{ left: 10, right: 30 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                <XAxis type="number" fontSize={11} />
+                <YAxis type="category" dataKey="name" fontSize={11} width={120} tick={{ fill: 'var(--text)' }} />
+                <Tooltip formatter={v => [`${v} ovos`, 'Quantidade']} />
+                <Bar dataKey="eggs" name="Ovos" fill="#6C2BD9" radius={[0, 4, 4, 0]} barSize={24} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Calendar View */}
+      <div className="card" style={{ marginBottom: 24 }}>
+        <div className="card-header">
+          <span className="card-title">Calendario de Coletas</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button className="btn btn-sm btn-secondary" onClick={() => navigateMonth(-1)} style={{ padding: '4px 8px' }}>
+              <ChevronLeft size={16} />
+            </button>
+            <span style={{ fontWeight: 600, fontSize: 14, minWidth: 140, textAlign: 'center' }}>
+              {MONTH_NAMES_FULL[calendarMonth]} {calendarYear}
+            </span>
+            <button className="btn btn-sm btn-secondary" onClick={() => navigateMonth(1)} style={{ padding: '4px 8px' }}>
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+        <div style={{ padding: 16 }}>
+          {/* Calendar grid */}
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+            <thead>
+              <tr>
+                {DAY_NAMES.map(d => (
+                  <th key={d} style={{ padding: '8px 4px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textAlign: 'center' }}>{d}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {calendarGrid.map((week, wi) => (
+                <tr key={wi}>
+                  {week.map((day, di) => {
+                    const dayData = day ? calendarDaysData[day] : null;
+                    const selected = day === selectedDay;
+                    const today = day && isToday(day);
+                    const intensity = dayData ? Math.min(dayData.total / maxDayEggs, 1) : 0;
+
+                    return (
+                      <td
+                        key={di}
+                        onClick={() => day && setSelectedDay(selected ? null : day)}
+                        style={{
+                          padding: 4,
+                          textAlign: 'center',
+                          verticalAlign: 'top',
+                          height: 68,
+                          cursor: day ? 'pointer' : 'default',
+                          border: selected ? '2px solid var(--primary)' : '1px solid var(--border)',
+                          borderRadius: 'var(--radius-sm)',
+                          background: selected ? 'var(--primary-bg)' : dayData ? `rgba(16, 185, 129, ${0.05 + intensity * 0.2})` : 'transparent',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {day && (
+                          <>
+                            <div style={{
+                              fontSize: 12,
+                              fontWeight: today ? 700 : 400,
+                              color: today ? 'var(--primary)' : 'var(--text)',
+                              marginBottom: 2,
+                            }}>
+                              {day}
+                            </div>
+                            {dayData ? (
+                              <div>
+                                <div style={{
+                                  fontSize: 16,
+                                  fontWeight: 700,
+                                  color: '#10B981',
+                                  lineHeight: 1.2,
+                                }}>
+                                  {dayData.total}
+                                </div>
+                                <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>
+                                  {dayData.total === 1 ? 'ovo' : 'ovos'}
+                                </div>
+                                {dayData.cracked > 0 && (
+                                  <div style={{ fontSize: 9, color: 'var(--danger)', fontWeight: 600 }}>
+                                    {dayData.cracked} trinc.
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>-</div>
+                            )}
+                          </>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Selected day detail */}
+          {selectedDay && (
+            <div style={{ marginTop: 16, padding: 16, background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <h4 style={{ margin: 0, fontSize: 14 }}>
+                  Coletas em {String(selectedDay).padStart(2, '0')}/{String(calendarMonth + 1).padStart(2, '0')}/{calendarYear}
+                </h4>
+                <button className="btn btn-sm btn-secondary" onClick={() => setSelectedDay(null)}>
+                  <X size={14} />
+                </button>
+              </div>
+              {selectedDayCollections.length > 0 ? (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 12 }}>Ave / Raca</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 12 }}>Ovos</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 12 }}>Trincados</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 12 }}>Bons</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 12 }}>Obs</th>
+                      <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 12, width: 70 }}>Acoes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedDayCollections.map(c => {
+                      const bird = birds.find(b => b.id === c.birdId);
+                      return (
+                        <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '6px 8px', fontSize: 13 }}>
+                            <strong>{bird ? getBirdLabel(bird) : 'Ave removida'}</strong>
+                          </td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>{c.quantity}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600, color: (parseInt(c.cracked) || 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                            {c.cracked || 0}
+                          </td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600, color: 'var(--success)' }}>
+                            {(parseInt(c.quantity) || 0) - (parseInt(c.cracked) || 0)}
+                          </td>
+                          <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--text-secondary)' }}>{c.notes || '-'}</td>
+                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                              <button className="btn-icon" title="Editar" onClick={() => handleEdit(c)}><Edit2 size={13} /></button>
+                              <button className="btn-icon" title="Excluir" onClick={() => handleDelete(c.id)} style={{ color: 'var(--danger)' }}><Trash2 size={13} /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>Nenhuma coleta neste dia.</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Bird Performance Cards */}
       {birds.length > 0 && (
@@ -410,7 +656,7 @@ export default function EggCollection() {
                       <div style={{
                         width: 36, height: 36, borderRadius: '50%',
                         background: 'var(--primary-bg)', color: 'var(--primary)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
                         <Egg size={18} />
                       </div>
@@ -420,11 +666,7 @@ export default function EggCollection() {
                           {matrices} {matrices > 1 ? 'matrizes' : 'matriz'}
                           {bird.ringNumber && (
                             <span style={{
-                              marginLeft: 6,
-                              padding: '1px 6px',
-                              borderRadius: 8,
-                              fontSize: 10,
-                              fontWeight: 600,
+                              marginLeft: 6, padding: '1px 6px', borderRadius: 8, fontSize: 10, fontWeight: 600,
                               background: bird.ringColor ? bird.ringColor + '30' : '#e2e8f0',
                               color: bird.ringColor || 'var(--text-secondary)',
                               border: bird.ringColor ? `1px solid ${bird.ringColor}` : '1px solid var(--border)',
@@ -475,11 +717,8 @@ export default function EggCollection() {
                       </div>
                       <div style={{ width: '100%', height: 6, background: 'var(--bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
                         <div style={{
-                          width: `${Math.min(perf.yearPerf, 100)}%`,
-                          height: '100%',
-                          background: getPerfColor(perf.yearPerf),
-                          borderRadius: 3,
-                          transition: 'width 0.3s',
+                          width: `${Math.min(perf.yearPerf, 100)}%`, height: '100%',
+                          background: getPerfColor(perf.yearPerf), borderRadius: 3, transition: 'width 0.3s',
                         }} />
                       </div>
                     </div>
@@ -548,87 +787,7 @@ export default function EggCollection() {
         </div>
       )}
 
-      {/* Collection Records */}
-      <div className="filter-bar">
-        <select className="form-input" style={{ width: 'auto', minWidth: 200 }} value={filterBird} onChange={e => setFilterBird(e.target.value)}>
-          <option value="all">Todas as aves</option>
-          {birds.map(b => <option key={b.id} value={b.id}>{getBirdLabel(b)}</option>)}
-        </select>
-        <div style={{ flex: 1 }} />
-        <button className="btn btn-primary" onClick={() => {
-          setBatchDate(new Date().toISOString().slice(0, 10));
-          setBatchEntries({});
-          setBatchNotes('');
-          setEditingId(null);
-          setShowModal(true);
-        }}>
-          <Plus size={16} /> Nova Coleta
-        </button>
-      </div>
-
-      {filteredCollections.length > 0 ? (
-        <div className="card">
-          <div className="card-header">
-            <span className="card-title">Registro de Coletas ({filteredCollections.length})</span>
-          </div>
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  <th>Ave / Raca</th>
-                  <th>Ovos</th>
-                  <th>Trincados</th>
-                  <th>Bons</th>
-                  <th>Obs</th>
-                  <th style={{ width: 80, textAlign: 'center' }}>Acoes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredCollections.map(c => {
-                  const bird = birds.find(b => b.id === c.birdId);
-                  return (
-                    <tr key={c.id}>
-                      <td>{formatDate(c.date)}</td>
-                      <td>
-                        <strong>{bird ? getBirdLabel(bird) : 'Ave removida'}</strong>
-                        {bird?.ringNumber && (
-                          <span style={{
-                            marginLeft: 6, fontSize: 10, padding: '1px 5px', borderRadius: 6,
-                            background: bird.ringColor ? bird.ringColor + '20' : '#e2e8f0',
-                            color: bird.ringColor || 'var(--text-muted)',
-                            fontWeight: 600,
-                          }}>
-                            {bird.ringNumber}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ fontWeight: 600 }}>{c.quantity}</td>
-                      <td style={{ color: (parseInt(c.cracked) || 0) > 0 ? 'var(--danger)' : 'var(--text-muted)', fontWeight: 600 }}>
-                        {c.cracked || 0}
-                      </td>
-                      <td style={{ color: 'var(--success)', fontWeight: 600 }}>{(parseInt(c.quantity) || 0) - (parseInt(c.cracked) || 0)}</td>
-                      <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {c.notes || '-'}
-                      </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                          <button className="btn-icon" title="Editar" onClick={() => handleEdit(c)}>
-                            <Edit2 size={14} />
-                          </button>
-                          <button className="btn-icon" title="Excluir" onClick={() => handleDelete(c.id)} style={{ color: 'var(--danger)' }}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
+      {allCollections.length === 0 && (
         <div className="empty-state">
           <Egg size={48} />
           <h3>Nenhuma coleta registrada</h3>
@@ -735,9 +894,7 @@ export default function EggCollection() {
                                 </td>
                                 <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                                   <input
-                                    className="form-input"
-                                    type="number"
-                                    min="0"
+                                    className="form-input" type="number" min="0"
                                     value={entry.quantity}
                                     onChange={e => updateBatchEntry(bird.id, 'quantity', e.target.value)}
                                     placeholder="0"
@@ -746,9 +903,7 @@ export default function EggCollection() {
                                 </td>
                                 <td style={{ padding: '6px 8px', textAlign: 'center' }}>
                                   <input
-                                    className="form-input"
-                                    type="number"
-                                    min="0"
+                                    className="form-input" type="number" min="0"
                                     value={entry.cracked}
                                     onChange={e => updateBatchEntry(bird.id, 'cracked', e.target.value)}
                                     placeholder="0"
@@ -780,7 +935,7 @@ export default function EggCollection() {
         </div>
       )}
 
-      {/* Bird Config Modal (annual potential, ring, notes) */}
+      {/* Bird Config Modal */}
       {showBirdConfigModal && (
         <div className="modal-overlay" onClick={() => setShowBirdConfigModal(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
