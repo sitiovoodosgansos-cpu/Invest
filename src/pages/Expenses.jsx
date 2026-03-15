@@ -4,7 +4,7 @@ import { formatCurrency, formatDate, getMonthsDifference, calculateCompoundInter
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
 import {
   Plus, Trash2, Edit2, Save, X, Image, Eye, FileDown, Receipt,
@@ -64,7 +64,10 @@ export default function Expenses() {
   const [editingExpense, setEditingExpense] = useState(null);
   const [viewImage, setViewImage] = useState(null);
   const [filterCategory, setFilterCategory] = useState('all');
-  const [filterMonth, setFilterMonth] = useState('all');
+  const [filterMonth, setFilterMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
   const [sortField, setSortField] = useState('date');
   const [sortDir, setSortDir] = useState('desc');
   const [currentPage, setCurrentPage] = useState(1);
@@ -194,17 +197,36 @@ export default function Expenses() {
     return Object.values(months).sort((a, b) => a.month.localeCompare(b.month));
   }, [allExpenses, sales]);
 
-  // Chart data for last 12 months
-  const chartData = useMemo(() => {
-    return monthlyComparison.slice(-12).map(m => {
-      const [y, mo] = m.month.split('-');
-      return {
-        ...m,
-        label: `${MONTH_NAMES[parseInt(mo) - 1]?.slice(0, 3)} ${y.slice(2)}`,
-        resultado: m.revenue - m.expenses,
-      };
-    });
-  }, [monthlyComparison]);
+  // Chart data for the selected month (category breakdown)
+  const monthChartData = useMemo(() => {
+    const targetMonth = filterMonth !== 'all' ? filterMonth : (() => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    })();
+    const monthData = monthlyComparison.find(m => m.month === targetMonth);
+    if (!monthData || !monthData.categories) return [];
+    return Object.entries(monthData.categories)
+      .map(([cat, total]) => ({
+        name: cat,
+        valor: total,
+        fill: allCategoryColors[cat] || '#94A3B8',
+      }))
+      .sort((a, b) => b.valor - a.valor);
+  }, [monthlyComparison, filterMonth, allCategoryColors]);
+
+  // Revenue for selected month
+  const monthRevenue = useMemo(() => {
+    const targetMonth = filterMonth !== 'all' ? filterMonth : (() => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    })();
+    const monthData = monthlyComparison.find(m => m.month === targetMonth);
+    return monthData ? monthData.revenue : 0;
+  }, [monthlyComparison, filterMonth]);
+
+  const monthExpensesTotal = useMemo(() => {
+    return monthChartData.reduce((s, d) => s + d.valor, 0);
+  }, [monthChartData]);
 
   const toggleSort = (field) => {
     if (sortField === field) setSortDir(prev => prev === 'desc' ? 'asc' : 'desc');
@@ -578,15 +600,18 @@ export default function Expenses() {
     URL.revokeObjectURL(url);
   };
 
-  // Category stats for summary
+  // Category stats for summary (respects month filter)
   const categoryStats = useMemo(() => {
     const stats = {};
-    allExpenses.forEach(e => {
+    const source = filterMonth !== 'all'
+      ? allExpenses.filter(e => e.date && e.date.startsWith(filterMonth))
+      : allExpenses;
+    source.forEach(e => {
       const cat = e.category || 'Outros';
       stats[cat] = (stats[cat] || 0) + (parseFloat(e.amount) || 0);
     });
     return Object.entries(stats).sort(([, a], [, b]) => b - a);
-  }, [allExpenses]);
+  }, [allExpenses, filterMonth]);
 
   const totalExpenses = allExpenses.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const totalRevenue = (sales || []).reduce((s, e) => s + (parseFloat(e.totalValue) || 0), 0);
@@ -720,51 +745,67 @@ export default function Expenses() {
         </button>
       </div>
 
-      {/* Monthly Comparison Chart */}
-      {chartData.length > 0 && (
-        <div className="card" style={{ marginBottom: 24 }}>
-          <div className="card-header">
-            <span className="card-title">Comparativo Mensal: Receitas x Despesas</span>
+      {/* Month Summary: Chart + Category Breakdown */}
+      {monthChartData.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 16, marginBottom: 24 }}>
+          {/* Category bar chart */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">Despesas por Categoria</span>
+            </div>
+            <div style={{ padding: '16px 16px 8px', height: Math.max(200, monthChartData.length * 36 + 40) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthChartData} layout="vertical" margin={{ left: 10, right: 30 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                  <XAxis type="number" fontSize={11} tickFormatter={v => `R$${v.toFixed(0)}`} />
+                  <YAxis type="category" dataKey="name" fontSize={11} width={140} tick={{ fill: 'var(--text)' }} />
+                  <Tooltip formatter={v => formatCurrency(v)} />
+                  <Bar dataKey="valor" name="Valor" radius={[0, 4, 4, 0]} barSize={22}>
+                    {monthChartData.map((entry, idx) => (
+                      <Cell key={idx} fill={entry.fill} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-          <div className="chart-container">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="label" fontSize={11} />
-                <YAxis fontSize={11} tickFormatter={v => `R$${v.toFixed(0)}`} />
-                <Tooltip formatter={v => formatCurrency(v)} />
-                <Legend />
-                <Bar dataKey="revenue" name="Receitas" fill="#10B981" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="expenses" name="Despesas" fill="#EF4444" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
 
-      {/* Category breakdown */}
-      {categoryStats.length > 0 && (
-        <div className="card" style={{ marginBottom: 24 }}>
-          <div className="card-header">
-            <span className="card-title">Despesas por Categoria</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, padding: '0 0 4px' }}>
-            {categoryStats.map(([cat, total]) => (
-              <div key={cat} style={{
-                padding: '12px 16px',
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--bg-secondary)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: allCategoryColors[cat] || '#94A3B8' }} />
-                  <span style={{ fontSize: 13 }}>{cat}</span>
-                </div>
-                <strong style={{ fontSize: 13, color: 'var(--danger)' }}>{formatCurrency(total)}</strong>
+          {/* Month resume card */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">Resumo do Mes</span>
+            </div>
+            <div style={{ padding: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Despesas</span>
+                <strong style={{ fontSize: 18, color: 'var(--danger)' }}>{formatCurrency(monthExpensesTotal)}</strong>
               </div>
-            ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ fontSize: 14, color: 'var(--text-secondary)' }}>Receitas</span>
+                <strong style={{ fontSize: 18, color: 'var(--success)' }}>{formatCurrency(monthRevenue)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', marginBottom: 16 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Resultado</span>
+                <strong style={{ fontSize: 20, color: (monthRevenue - monthExpensesTotal) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                  {formatCurrency(monthRevenue - monthExpensesTotal)}
+                </strong>
+              </div>
+
+              {/* Category list */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {categoryStats.map(([cat, total]) => {
+                  const pct = monthExpensesTotal > 0 ? (total / monthExpensesTotal * 100) : 0;
+                  return (
+                    <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: allCategoryColors[cat] || '#94A3B8', flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, flex: 1 }}>{cat}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 36, textAlign: 'right' }}>{pct.toFixed(0)}%</span>
+                      <strong style={{ fontSize: 12, color: 'var(--danger)', minWidth: 80, textAlign: 'right' }}>{formatCurrency(total)}</strong>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}
