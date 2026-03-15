@@ -331,7 +331,7 @@ export function AppProvider({ children }) {
   const addExpense = (expense) => {
     const newExpense = {
       ...expense,
-      id: Date.now().toString(),
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       createdAt: new Date().toISOString(),
     };
     setData(prev => ({
@@ -339,6 +339,20 @@ export function AppProvider({ children }) {
       expenses: [...(prev.expenses || []), newExpense],
     }));
     return newExpense;
+  };
+
+  const bulkAddExpenses = (expensesArray) => {
+    const now = new Date().toISOString();
+    const newExpenses = expensesArray.map((expense, i) => ({
+      ...expense,
+      id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 9)}`,
+      createdAt: now,
+    }));
+    setData(prev => ({
+      ...prev,
+      expenses: [...(prev.expenses || []), ...newExpenses],
+    }));
+    return newExpenses;
   };
 
   const updateExpense = (id, updates) => {
@@ -547,7 +561,7 @@ export function AppProvider({ children }) {
     addSales, clearSales, deleteSale, updateSale,
     addFinancialInvestment, deleteFinancialInvestment,
     addPayment, deletePayment,
-    addExpense, updateExpense, deleteExpense,
+    addExpense, bulkAddExpenses, updateExpense, deleteExpense,
     addCustomExpenseCategory, deleteCustomExpenseCategory,
     addEggCollection, updateEggCollection, deleteEggCollection,
     addIncubator, updateIncubator, deleteIncubator,

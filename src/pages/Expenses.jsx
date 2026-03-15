@@ -8,7 +8,7 @@ import {
 } from 'recharts';
 import {
   Plus, Trash2, Edit2, Save, X, Image, Eye, FileDown, Receipt,
-  ArrowUp, ArrowDown, ArrowUpDown, TrendingUp
+  ArrowUp, ArrowDown, ArrowUpDown, TrendingUp, Upload, FileSpreadsheet, AlertCircle, CheckCircle
 } from 'lucide-react';
 
 const DEFAULT_EXPENSE_CATEGORIES = [
@@ -59,7 +59,7 @@ function fileToBase64(file) {
 }
 
 export default function Expenses() {
-  const { expenses, sales, financialInvestments, investors, customExpenseCategories, addExpense, updateExpense, deleteExpense, addCustomExpenseCategory, deleteCustomExpenseCategory } = useApp();
+  const { expenses, sales, financialInvestments, investors, customExpenseCategories, addExpense, bulkAddExpenses, updateExpense, deleteExpense, addCustomExpenseCategory, deleteCustomExpenseCategory } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [viewImage, setViewImage] = useState(null);
@@ -79,6 +79,11 @@ export default function Expenses() {
     imageData: null,
     imageName: '',
   });
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importPreview, setImportPreview] = useState(null);
+  const [importResult, setImportResult] = useState(null);
+  const csvInputRef = useRef(null);
   const imageInputRef = useRef(null);
 
   // Merge default + custom categories
@@ -271,6 +276,163 @@ export default function Expenses() {
     setShowModal(false);
     setEditingExpense(null);
     setForm({ date: new Date().toISOString().slice(0, 10), amount: '', item: '', category: '', imageData: null, imageName: '' });
+  };
+
+  // ===== IMPORT FUNCTIONS =====
+  const CATEGORY_KEYWORDS = {
+    'Alimentacao Animal': ['racao', 'ração', 'milho', 'farelo', 'alimenta', 'alimento', 'soja', 'trigo', 'quirera', 'sorgo', 'sal mineral', 'comedouro', 'bebedouro', 'feno'],
+    'Remedios e Vacinas': ['remedio', 'remédio', 'vacina', 'medicamento', 'vermifugo', 'vermífugo', 'antibiotico', 'antibiótico', 'vitamina', 'suplemento', 'piolhicida', 'veterinar'],
+    'Estrutura e Manutencao': ['estrutura', 'manutencao', 'manutenção', 'cerca', 'tela', 'arame', 'madeira', 'tabua', 'tábua', 'prego', 'parafuso', 'cimento', 'areia', 'telha', 'reforma', 'construc', 'portão', 'portao', 'pintura', 'tinta'],
+    'Funcionarios': ['funcionario', 'funcionário', 'salario', 'salário', 'pagamento func', 'diaria', 'diária', 'mao de obra', 'mão de obra'],
+    'Transporte e Frete': ['transporte', 'frete', 'combustivel', 'combustível', 'gasolina', 'diesel', 'pedagio', 'pedágio', 'uber', 'viagem'],
+    'Embalagens': ['embalagem', 'caixa', 'bandeja', 'sacola', 'saco', 'etiqueta', 'rotulo', 'rótulo'],
+    'Energia e Agua': ['energia', 'luz', 'eletric', 'agua', 'água', 'conta de luz', 'conta de agua', 'esgoto', 'saneamento', 'copasa', 'cemig', 'celpe', 'enel', 'equatorial'],
+    'Equipamentos': ['equipamento', 'ferramenta', 'chocadeira', 'incubadora', 'lampada', 'lâmpada', 'motor', 'bomba', 'maquina', 'máquina', 'ventilador'],
+    'Impostos e Taxas': ['imposto', 'taxa', 'tributo', 'icms', 'issqn', 'iptu', 'inss', 'fgts', 'dar', 'darf', 'guia', 'licença', 'licenca', 'alvara', 'alvará'],
+  };
+
+  const classifyExpense = (description) => {
+    const lower = (description || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+      for (const kw of keywords) {
+        const kwNorm = kw.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        if (lower.includes(kwNorm)) return category;
+      }
+    }
+    for (const cat of customCats) {
+      if (lower.includes(cat.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))) return cat.name;
+    }
+    return 'Outros';
+  };
+
+  const parseAmount = (str) => {
+    if (!str || typeof str !== 'string') return 0;
+    let clean = str.replace(/[R$\s]/g, '').trim();
+    if (clean.includes(',')) {
+      clean = clean.replace(/\./g, '').replace(',', '.');
+    }
+    return parseFloat(clean) || 0;
+  };
+
+  const parseDate = (str) => {
+    if (!str) return '';
+    const s = str.trim();
+    const brMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if (brMatch) {
+      const day = brMatch[1].padStart(2, '0');
+      const month = brMatch[2].padStart(2, '0');
+      let year = brMatch[3];
+      if (year.length === 2) year = `20${year}`;
+      return `${year}-${month}-${day}`;
+    }
+    const isoMatch = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (isoMatch) return `${isoMatch[1]}-${isoMatch[2].padStart(2, '0')}-${isoMatch[3].padStart(2, '0')}`;
+    const monthYearMatch = s.match(/^(\d{1,2})[\/\-](\d{2,4})$/);
+    if (monthYearMatch) {
+      let year = monthYearMatch[2];
+      if (year.length === 2) year = `20${year}`;
+      return `${year}-${monthYearMatch[1].padStart(2, '0')}-01`;
+    }
+    return '';
+  };
+
+  const parseImportData = (text) => {
+    if (!text.trim()) return [];
+    const lines = text.trim().split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length === 0) return [];
+
+    const results = [];
+    const firstLine = lines[0];
+    let separator = '\t';
+    if (!firstLine.includes('\t')) {
+      separator = firstLine.includes(';') ? ';' : ',';
+    }
+
+    const firstCols = firstLine.split(separator).map(c => c.trim().toLowerCase());
+    const headerKeywords = ['data', 'date', 'valor', 'value', 'amount', 'descri', 'item', 'categoria', 'category', 'despesa'];
+    const isHeader = firstCols.some(c => headerKeywords.some(k => c.includes(k)));
+
+    let dateCol = -1, amountCol = -1, descCol = -1, catCol = -1;
+    if (isHeader) {
+      firstCols.forEach((c, i) => {
+        if (dateCol < 0 && (c.includes('data') || c.includes('date') || c.includes('mes') || c.includes('mês'))) dateCol = i;
+        if (amountCol < 0 && (c.includes('valor') || c.includes('value') || c.includes('amount') || c.includes('total') || c.includes('preco') || c.includes('preço') || c.includes('custo'))) amountCol = i;
+        if (descCol < 0 && (c.includes('descri') || c.includes('item') || c.includes('despesa') || c.includes('produto') || c.includes('observ') || c.includes('detalhe'))) descCol = i;
+        if (catCol < 0 && (c.includes('categori') || c.includes('tipo') || c.includes('classif'))) catCol = i;
+      });
+    }
+
+    const dataLines = isHeader ? lines.slice(1) : lines;
+
+    for (const line of dataLines) {
+      const cols = line.split(separator).map(c => c.trim().replace(/^"|"$/g, ''));
+      if (cols.length < 2) continue;
+
+      let date = '', amount = 0, description = '', category = '';
+
+      if (dateCol >= 0 || amountCol >= 0 || descCol >= 0) {
+        if (dateCol >= 0 && cols[dateCol]) date = parseDate(cols[dateCol]);
+        if (amountCol >= 0 && cols[amountCol]) amount = parseAmount(cols[amountCol]);
+        if (descCol >= 0 && cols[descCol]) description = cols[descCol];
+        if (catCol >= 0 && cols[catCol]) category = cols[catCol];
+        if (!description) {
+          const usedCols = new Set([dateCol, amountCol, catCol].filter(c => c >= 0));
+          description = cols.filter((_, i) => !usedCols.has(i)).join(' ').trim();
+        }
+      } else {
+        for (let i = 0; i < cols.length; i++) {
+          const parsed = parseDate(cols[i]);
+          if (parsed && !date) { date = parsed; continue; }
+          const amt = parseAmount(cols[i]);
+          if (amt > 0 && !amount && /[\d,.]/.test(cols[i]) && cols[i].match(/\d/g)?.length >= 2) { amount = amt; continue; }
+          if (cols[i] && !description) description = cols[i];
+          else if (cols[i] && description && !category) category = cols[i];
+        }
+      }
+
+      if (!amount || amount <= 0) continue;
+
+      if (category) {
+        const catLower = category.toLowerCase();
+        const match = allCategories.find(c => c.toLowerCase() === catLower);
+        if (match) category = match;
+        else category = classifyExpense(category + ' ' + description);
+      } else {
+        category = classifyExpense(description);
+      }
+
+      if (!date) date = new Date().toISOString().slice(0, 10);
+
+      results.push({ date, amount, item: description || 'Despesa importada', category });
+    }
+    return results;
+  };
+
+  const handleImportPreview = () => {
+    const parsed = parseImportData(importText);
+    setImportPreview(parsed);
+    setImportResult(null);
+  };
+
+  const handleImportConfirm = () => {
+    if (!importPreview || importPreview.length === 0) return;
+    bulkAddExpenses(importPreview);
+    setImportResult({ count: importPreview.length });
+    setImportPreview(null);
+    setImportText('');
+  };
+
+  const handleCsvFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setImportText(ev.target.result);
+      setImportPreview(null);
+      setImportResult(null);
+    };
+    reader.readAsText(file, 'UTF-8');
+    e.target.value = '';
   };
 
   // PDF Export - Monthly comparison
@@ -550,6 +712,9 @@ export default function Expenses() {
             <FileDown size={16} /> Exportar Comparativo PDF
           </button>
         )}
+        <button className="btn btn-secondary" onClick={() => { setShowImportModal(true); setImportText(''); setImportPreview(null); setImportResult(null); }}>
+          <Upload size={16} /> Importar
+        </button>
         <button className="btn btn-primary" onClick={() => setShowModal(true)}>
           <Plus size={16} /> Nova Despesa
         </button>
@@ -863,6 +1028,183 @@ export default function Expenses() {
               alt="Comprovante"
               style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 'var(--radius-sm)' }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="modal-overlay" onClick={() => setShowImportModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 800 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 className="modal-title" style={{ margin: 0 }}>
+                <FileSpreadsheet size={20} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+                Importar Despesas
+              </h3>
+              <button className="btn btn-sm btn-secondary" onClick={() => setShowImportModal(false)} style={{ padding: '4px 6px' }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            {importResult ? (
+              <div style={{ textAlign: 'center', padding: 32 }}>
+                <CheckCircle size={48} color="var(--success)" style={{ marginBottom: 16 }} />
+                <h3 style={{ fontSize: 18, marginBottom: 8 }}>Importacao Concluida!</h3>
+                <p style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
+                  {importResult.count} despesa{importResult.count !== 1 ? 's' : ''} importada{importResult.count !== 1 ? 's' : ''} com sucesso.
+                </p>
+                <button className="btn btn-primary" onClick={() => setShowImportModal(false)} style={{ marginTop: 16 }}>
+                  Fechar
+                </button>
+              </div>
+            ) : importPreview && importPreview.length > 0 ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '8px 12px', background: '#f0fdf4', borderRadius: 'var(--radius-sm)', border: '1px solid #bbf7d0' }}>
+                  <CheckCircle size={16} color="#16a34a" />
+                  <span style={{ fontSize: 13, color: '#166534' }}>
+                    {importPreview.length} despesa{importPreview.length !== 1 ? 's' : ''} encontrada{importPreview.length !== 1 ? 's' : ''}. Revise e confirme abaixo.
+                  </span>
+                </div>
+
+                {/* Category summary */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  {Object.entries(importPreview.reduce((acc, e) => { acc[e.category] = (acc[e.category] || 0) + 1; return acc; }, {}))
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([cat, count]) => (
+                      <span key={cat} style={{
+                        fontSize: 11, padding: '3px 8px', borderRadius: 12,
+                        background: allCategoryColors[cat] ? `${allCategoryColors[cat]}20` : '#f1f5f9',
+                        color: allCategoryColors[cat] || 'var(--text)',
+                        fontWeight: 600, border: `1px solid ${allCategoryColors[cat] || '#e2e8f0'}`,
+                      }}>
+                        {cat}: {count}
+                      </span>
+                    ))
+                  }
+                </div>
+
+                <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-secondary)', position: 'sticky', top: 0, zIndex: 1 }}>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 600 }}>Data</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 600 }}>Descricao</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 11, fontWeight: 600 }}>Categoria</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right', fontSize: 11, fontWeight: 600 }}>Valor</th>
+                        <th style={{ padding: '8px 6px', textAlign: 'center', fontSize: 11, fontWeight: 600, width: 36 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '6px 10px', fontSize: 12 }}>{formatDate(item.date)}</td>
+                          <td style={{ padding: '6px 10px', fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.item}</td>
+                          <td style={{ padding: '6px 10px' }}>
+                            <select
+                              className="form-input"
+                              value={item.category}
+                              onChange={e => {
+                                setImportPreview(prev => prev.map((p, i) => i === idx ? { ...p, category: e.target.value } : p));
+                              }}
+                              style={{ fontSize: 11, padding: '3px 6px', height: 28, color: allCategoryColors[item.category] || 'var(--text)', fontWeight: 600 }}
+                            >
+                              {allCategories.filter(c => c !== 'Rendimento Investidores').map(c => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontSize: 12, fontWeight: 600, color: 'var(--danger)', whiteSpace: 'nowrap' }}>
+                            {formatCurrency(item.amount)}
+                          </td>
+                          <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+                            <button
+                              className="btn-icon"
+                              onClick={() => setImportPreview(prev => prev.filter((_, i) => i !== idx))}
+                              style={{ color: 'var(--danger)', padding: 2 }}
+                              title="Remover"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ background: 'var(--bg-secondary)' }}>
+                        <td colSpan={3} style={{ padding: '8px 10px', fontSize: 12, fontWeight: 700 }}>Total</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontSize: 14, fontWeight: 700, color: 'var(--danger)' }}>
+                          {formatCurrency(importPreview.reduce((s, e) => s + e.amount, 0))}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                <div className="modal-actions">
+                  <button className="btn btn-secondary" onClick={() => { setImportPreview(null); }}>
+                    Voltar
+                  </button>
+                  <button className="btn btn-primary" onClick={handleImportConfirm}>
+                    <Save size={14} /> Importar {importPreview.length} Despesa{importPreview.length !== 1 ? 's' : ''}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ marginBottom: 16, padding: 12, background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)', fontSize: 12, color: 'var(--text-secondary)' }}>
+                  <p style={{ margin: '0 0 8px', fontWeight: 600, color: 'var(--text)' }}>Como importar:</p>
+                  <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
+                    <li>Abra sua planilha no Google Sheets</li>
+                    <li>Selecione as linhas com as despesas (com ou sem cabecalho)</li>
+                    <li>Copie (Ctrl+C) e cole na area abaixo</li>
+                    <li>Ou envie um arquivo CSV clicando no botao abaixo</li>
+                  </ol>
+                  <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                    Formatos aceitos: Data (DD/MM/AAAA ou AAAA-MM-DD), Valor (R$ 1.234,56 ou 1234.56), Descricao, Categoria (opcional).
+                    As categorias serao classificadas automaticamente pela descricao.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                  <input
+                    ref={csvInputRef}
+                    type="file"
+                    accept=".csv,.tsv,.txt"
+                    style={{ display: 'none' }}
+                    onChange={handleCsvFileUpload}
+                  />
+                  <button className="btn btn-secondary btn-sm" onClick={() => csvInputRef.current?.click()}>
+                    <FileSpreadsheet size={14} /> Enviar Arquivo CSV
+                  </button>
+                </div>
+
+                <textarea
+                  className="form-input"
+                  value={importText}
+                  onChange={e => { setImportText(e.target.value); setImportPreview(null); }}
+                  placeholder={"Cole os dados da planilha aqui...\n\nExemplo:\nData\tDescricao\tValor\n15/01/2025\tRacao para aves\tR$ 350,00\n20/01/2025\tConta de energia\tR$ 180,50"}
+                  rows={10}
+                  style={{ width: '100%', fontFamily: 'monospace', fontSize: 12, resize: 'vertical' }}
+                />
+
+                {importText.trim() && importPreview !== null && importPreview.length === 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, padding: '8px 12px', background: '#fef2f2', borderRadius: 'var(--radius-sm)', border: '1px solid #fecaca' }}>
+                    <AlertCircle size={16} color="#dc2626" />
+                    <span style={{ fontSize: 12, color: '#991b1b' }}>
+                      Nenhuma despesa encontrada nos dados colados. Verifique o formato e tente novamente.
+                    </span>
+                  </div>
+                )}
+
+                <div className="modal-actions">
+                  <button className="btn btn-secondary" onClick={() => setShowImportModal(false)}>Cancelar</button>
+                  <button className="btn btn-primary" onClick={handleImportPreview} disabled={!importText.trim()}>
+                    <Eye size={14} /> Visualizar Dados
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
