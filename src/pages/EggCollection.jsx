@@ -923,7 +923,7 @@ export default function EggCollection() {
                       <label className="form-label">Ave / Raca *</label>
                       <select className="form-input" required value={editForm.birdId} onChange={e => setEditForm({ ...editForm, birdId: e.target.value })}>
                         <option value="">Selecione a ave</option>
-                        {birds.map(b => <option key={b.id} value={b.id}>{getBirdLabel(b)}</option>)}
+                        {[...birds].sort((a, b) => getBirdLabel(a).localeCompare(getBirdLabel(b))).map(b => <option key={b.id} value={b.id}>{getBirdLabel(b)}</option>)}
                       </select>
                     </div>
                   </div>
@@ -980,7 +980,7 @@ export default function EggCollection() {
                           </tr>
                         </thead>
                         <tbody>
-                          {birds.map(bird => {
+                          {[...birds].sort((a, b) => getBirdLabel(a).localeCompare(getBirdLabel(b))).map(bird => {
                             const entry = batchEntries[bird.id] || { quantity: '', cracked: '' };
                             const active = getActiveBirdCount(bird);
                             const total = (getIndividuals(bird)).length;
