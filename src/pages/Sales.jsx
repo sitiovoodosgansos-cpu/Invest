@@ -24,6 +24,8 @@ export default function Sales() {
   const [editingSale, setEditingSale] = useState(null);
   const [sortField, setSortField] = useState('date'); // date | totalValue | orderNumber
   const [sortDir, setSortDir] = useState('desc'); // asc | desc
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 50;
   const fileInputRef = useRef(null);
 
   const distribution = useMemo(
@@ -211,7 +213,11 @@ export default function Sales() {
     return sorted;
   }, [validSales, filterType, sortField, sortDir]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredSales.length / ITEMS_PER_PAGE));
+  const paginatedSales = filteredSales.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
   const toggleSort = (field) => {
+    setCurrentPage(1);
     if (sortField === field) {
       setSortDir(prev => prev === 'desc' ? 'asc' : 'desc');
     } else {
@@ -561,7 +567,7 @@ export default function Sales() {
                 <button
                   key={tab.key}
                   className={`tab ${filterType === tab.key ? 'active' : ''}`}
-                  onClick={() => setFilterType(tab.key)}
+                  onClick={() => { setFilterType(tab.key); setCurrentPage(1); }}
                 >
                   {tab.label}
                 </button>
@@ -585,7 +591,7 @@ export default function Sales() {
                 </tr>
               </thead>
               <tbody>
-                {filteredSales.slice(0, 100).map((sale, idx) => (
+                {paginatedSales.map((sale, idx) => (
                   <tr key={sale.id || idx}>
                     <td>{formatDate(sale.date)}</td>
                     <td style={{ fontSize: 12 }}>{sale.orderNumber || '-'}</td>
@@ -634,10 +640,44 @@ export default function Sales() {
                 ))}
               </tbody>
             </table>
-            {filteredSales.length > 100 && (
-              <p style={{ textAlign: 'center', padding: 12, color: 'var(--text-muted)', fontSize: 13 }}>
-                Exibindo 100 de {filteredSales.length} vendas
-              </p>
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 0', flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-sm btn-secondary"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(1)}
+                  style={{ padding: '4px 8px', fontSize: 12 }}
+                >
+                  &laquo;
+                </button>
+                <button
+                  className="btn btn-sm btn-secondary"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => p - 1)}
+                  style={{ padding: '4px 8px', fontSize: 12 }}
+                >
+                  &lsaquo; Anterior
+                </button>
+                <span style={{ fontSize: 13, color: 'var(--text-secondary)', minWidth: 120, textAlign: 'center' }}>
+                  Pagina {currentPage} de {totalPages} ({filteredSales.length} vendas)
+                </span>
+                <button
+                  className="btn btn-sm btn-secondary"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(p => p + 1)}
+                  style={{ padding: '4px 8px', fontSize: 12 }}
+                >
+                  Proximo &rsaquo;
+                </button>
+                <button
+                  className="btn btn-sm btn-secondary"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                  style={{ padding: '4px 8px', fontSize: 12 }}
+                >
+                  &raquo;
+                </button>
+              </div>
             )}
           </div>
         </div>
