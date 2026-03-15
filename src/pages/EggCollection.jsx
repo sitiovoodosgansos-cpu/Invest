@@ -102,35 +102,39 @@ export default function EggCollection() {
 
   // Period calculations
   const now = new Date();
+  const toDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const startOfWeek = new Date(now);
   startOfWeek.setDate(now.getDate() - now.getDay());
   startOfWeek.setHours(0, 0, 0, 0);
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfYear = new Date(now.getFullYear(), 0, 1);
+  const startOfWeekStr = toDateStr(startOfWeek);
+  const startOfMonthStr = toDateStr(startOfMonth);
+  const startOfYearStr = toDateStr(startOfYear);
 
   const weekTotal = useMemo(() =>
-    allCollections.filter(c => new Date(c.date) >= startOfWeek).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0),
-    [allCollections, startOfWeek.getTime()]
+    allCollections.filter(c => c.date >= startOfWeekStr).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0),
+    [allCollections, startOfWeekStr]
   );
   const weekCracked = useMemo(() =>
-    allCollections.filter(c => new Date(c.date) >= startOfWeek).reduce((s, c) => s + (parseInt(c.cracked) || 0), 0),
-    [allCollections, startOfWeek.getTime()]
+    allCollections.filter(c => c.date >= startOfWeekStr).reduce((s, c) => s + (parseInt(c.cracked) || 0), 0),
+    [allCollections, startOfWeekStr]
   );
   const monthTotal = useMemo(() =>
-    allCollections.filter(c => new Date(c.date) >= startOfMonth).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0),
-    [allCollections, startOfMonth.getTime()]
+    allCollections.filter(c => c.date >= startOfMonthStr).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0),
+    [allCollections, startOfMonthStr]
   );
   const monthCracked = useMemo(() =>
-    allCollections.filter(c => new Date(c.date) >= startOfMonth).reduce((s, c) => s + (parseInt(c.cracked) || 0), 0),
-    [allCollections, startOfMonth.getTime()]
+    allCollections.filter(c => c.date >= startOfMonthStr).reduce((s, c) => s + (parseInt(c.cracked) || 0), 0),
+    [allCollections, startOfMonthStr]
   );
   const yearTotal = useMemo(() =>
-    allCollections.filter(c => new Date(c.date) >= startOfYear).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0),
-    [allCollections, startOfYear.getTime()]
+    allCollections.filter(c => c.date >= startOfYearStr).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0),
+    [allCollections, startOfYearStr]
   );
   const yearCracked = useMemo(() =>
-    allCollections.filter(c => new Date(c.date) >= startOfYear).reduce((s, c) => s + (parseInt(c.cracked) || 0), 0),
-    [allCollections, startOfYear.getTime()]
+    allCollections.filter(c => c.date >= startOfYearStr).reduce((s, c) => s + (parseInt(c.cracked) || 0), 0),
+    [allCollections, startOfYearStr]
   );
 
   const dayOfMonth = now.getDate();
@@ -143,9 +147,9 @@ export default function EggCollection() {
       const birdCollections = allCollections.filter(c => c.birdId === bird.id);
       const totalEggs = birdCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
       const totalCracked = birdCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
-      const weekEggs = birdCollections.filter(c => new Date(c.date) >= startOfWeek).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
-      const monthEggs = birdCollections.filter(c => new Date(c.date) >= startOfMonth).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
-      const yearEggs = birdCollections.filter(c => new Date(c.date) >= startOfYear).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+      const weekEggs = birdCollections.filter(c => c.date >= startOfWeekStr).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+      const monthEggs = birdCollections.filter(c => c.date >= startOfMonthStr).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+      const yearEggs = birdCollections.filter(c => c.date >= startOfYearStr).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
 
       const annualPotential = parseInt(bird.annualEggPotential) || 0;
       const totalBirds = parseInt(bird.matrixCount) || 1;
@@ -172,7 +176,7 @@ export default function EggCollection() {
       };
     });
     return perf;
-  }, [birds, allCollections, startOfWeek.getTime(), startOfMonth.getTime(), startOfYear.getTime()]);
+  }, [birds, allCollections, startOfWeekStr, startOfMonthStr, startOfYearStr]);
 
   // Filtered & sorted birds for cards
   const filteredBirds = useMemo(() => {
@@ -247,18 +251,18 @@ export default function EggCollection() {
       const birdCols = allCollections.filter(c => c.birdId === bird.id);
       let eggs = 0;
       if (chartPeriod === 'daily') {
-        const today = now.toISOString().slice(0, 10);
+        const today = toDateStr(now);
         eggs = birdCols.filter(c => c.date === today).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
       } else if (chartPeriod === 'weekly') {
-        eggs = birdCols.filter(c => new Date(c.date) >= startOfWeek).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+        eggs = birdCols.filter(c => c.date >= startOfWeekStr).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
       } else if (chartPeriod === 'monthly') {
-        eggs = birdCols.filter(c => new Date(c.date) >= startOfMonth).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+        eggs = birdCols.filter(c => c.date >= startOfMonthStr).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
       } else {
-        eggs = birdCols.filter(c => new Date(c.date) >= startOfYear).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
+        eggs = birdCols.filter(c => c.date >= startOfYearStr).reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
       }
       return { name: bird.breed, eggs };
     }).filter(b => b.eggs > 0).sort((a, b) => b.eggs - a.eggs).slice(0, 10);
-  }, [birds, allCollections, chartPeriod, startOfWeek.getTime(), startOfMonth.getTime(), startOfYear.getTime()]);
+  }, [birds, allCollections, chartPeriod, startOfWeekStr, startOfMonthStr, startOfYearStr]);
 
   // ===== CALENDAR DATA =====
   const calendarYear = calendarDate.getFullYear();
