@@ -20,6 +20,10 @@ const defaultData = {
   eggCollections: [],
   incubators: [],
   incubatorBatches: [],
+  infirmaryBays: [],
+  infirmaryAdmissions: [],
+  treatments: [],
+  customTreatmentTypes: [],
 };
 
 // Count total items across all arrays in data
@@ -34,7 +38,11 @@ const countItems = (d) =>
   (d.customExpenseCategories?.length || 0) +
   (d.eggCollections?.length || 0) +
   (d.incubators?.length || 0) +
-  (d.incubatorBatches?.length || 0);
+  (d.incubatorBatches?.length || 0) +
+  (d.infirmaryBays?.length || 0) +
+  (d.infirmaryAdmissions?.length || 0) +
+  (d.treatments?.length || 0) +
+  (d.customTreatmentTypes?.length || 0);
 
 // Default species (empty breeds - user adds breeds manually via the app)
 export const BIRD_SPECIES = [];
@@ -414,6 +422,61 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, incubatorBatches: (prev.incubatorBatches || []).filter(b => b.id !== id) }));
   };
 
+  // Infirmary Bays
+  const addInfirmaryBay = (bay) => {
+    const newBay = { ...bay, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    setData(prev => ({ ...prev, infirmaryBays: [...(prev.infirmaryBays || []), newBay] }));
+    return newBay;
+  };
+  const updateInfirmaryBay = (id, updates) => {
+    setData(prev => ({ ...prev, infirmaryBays: (prev.infirmaryBays || []).map(b => b.id === id ? { ...b, ...updates } : b) }));
+  };
+  const deleteInfirmaryBay = (id) => {
+    setData(prev => ({
+      ...prev,
+      infirmaryBays: (prev.infirmaryBays || []).filter(b => b.id !== id),
+      infirmaryAdmissions: (prev.infirmaryAdmissions || []).filter(a => a.bayId !== id),
+    }));
+  };
+
+  // Infirmary Admissions
+  const addInfirmaryAdmission = (admission) => {
+    const newAdmission = { ...admission, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    setData(prev => ({ ...prev, infirmaryAdmissions: [...(prev.infirmaryAdmissions || []), newAdmission] }));
+    return newAdmission;
+  };
+  const updateInfirmaryAdmission = (id, updates) => {
+    setData(prev => ({ ...prev, infirmaryAdmissions: (prev.infirmaryAdmissions || []).map(a => a.id === id ? { ...a, ...updates } : a) }));
+  };
+  const deleteInfirmaryAdmission = (id) => {
+    setData(prev => ({ ...prev, infirmaryAdmissions: (prev.infirmaryAdmissions || []).filter(a => a.id !== id) }));
+  };
+
+  // Treatments (per bird house / breed)
+  const addTreatment = (treatment) => {
+    const newTreatment = { ...treatment, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    setData(prev => ({ ...prev, treatments: [...(prev.treatments || []), newTreatment] }));
+    return newTreatment;
+  };
+  const updateTreatment = (id, updates) => {
+    setData(prev => ({ ...prev, treatments: (prev.treatments || []).map(t => t.id === id ? { ...t, ...updates } : t) }));
+  };
+  const deleteTreatment = (id) => {
+    setData(prev => ({ ...prev, treatments: (prev.treatments || []).filter(t => t.id !== id) }));
+  };
+
+  // Custom Treatment Types
+  const addCustomTreatmentType = (type) => {
+    setData(prev => {
+      const existing = prev.customTreatmentTypes || [];
+      if (existing.some(t => t.name.toLowerCase() === type.name.toLowerCase())) return prev;
+      return { ...prev, customTreatmentTypes: [...existing, { ...type, id: Date.now().toString() }] };
+    });
+  };
+  const deleteCustomTreatmentType = (id) => {
+    setData(prev => ({ ...prev, customTreatmentTypes: (prev.customTreatmentTypes || []).filter(t => t.id !== id) }));
+  };
+
   const value = {
     ...data,
     loading,
@@ -428,6 +491,10 @@ export function AppProvider({ children }) {
     addEggCollection, updateEggCollection, deleteEggCollection,
     addIncubator, updateIncubator, deleteIncubator,
     addIncubatorBatch, updateIncubatorBatch, deleteIncubatorBatch,
+    addInfirmaryBay, updateInfirmaryBay, deleteInfirmaryBay,
+    addInfirmaryAdmission, updateInfirmaryAdmission, deleteInfirmaryAdmission,
+    addTreatment, updateTreatment, deleteTreatment,
+    addCustomTreatmentType, deleteCustomTreatmentType,
     addCustomSpecies, deleteCustomSpecies,
   };
 
