@@ -67,6 +67,8 @@ export default function Expenses() {
   const [filterMonth, setFilterMonth] = useState('all');
   const [sortField, setSortField] = useState('date');
   const [sortDir, setSortDir] = useState('desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 50;
   const [showNewCategoryInput, setShowNewCategoryInput] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [form, setForm] = useState({
@@ -427,50 +429,115 @@ export default function Expenses() {
   const totalExpenses = allExpenses.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const totalRevenue = (sales || []).reduce((s, e) => s + (parseFloat(e.totalValue) || 0), 0);
 
+  // Yearly breakdown for stats
+  const yearlyStats = useMemo(() => {
+    const years = {};
+    allExpenses.forEach(e => {
+      if (!e.date) return;
+      const y = e.date.slice(0, 4);
+      if (!years[y]) years[y] = { expenses: 0, revenue: 0 };
+      years[y].expenses += parseFloat(e.amount) || 0;
+    });
+    (sales || []).forEach(s => {
+      if (!s.date) return;
+      const y = s.date.slice(0, 4);
+      if (!years[y]) years[y] = { expenses: 0, revenue: 0 };
+      years[y].revenue += parseFloat(s.totalValue) || 0;
+    });
+    return Object.entries(years).sort(([a], [b]) => b.localeCompare(a));
+  }, [allExpenses, sales]);
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filteredExpenses.length / ITEMS_PER_PAGE));
+  const paginatedExpenses = filteredExpenses.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  // Group paginated expenses by month
+  const groupedByMonth = useMemo(() => {
+    const groups = [];
+    let currentMonth = '';
+    for (const exp of paginatedExpenses) {
+      const m = exp.date ? exp.date.slice(0, 7) : 'sem-data';
+      if (m !== currentMonth) {
+        currentMonth = m;
+        groups.push({ month: m, items: [] });
+      }
+      groups[groups.length - 1].items.push(exp);
+    }
+    return groups;
+  }, [paginatedExpenses]);
+
+  const getMonthLabel = (key) => {
+    if (key === 'sem-data') return 'Sem Data';
+    const [y, mo] = key.split('-');
+    return `${MONTH_NAMES[parseInt(mo) - 1]} ${y}`;
+  };
+
   return (
     <div className="animate-in">
-      <div className="page-header">
-        <h2>Saidas Financeiras</h2>
-        <p>Controle de custos operacionais do sitio</p>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h2>Saidas Financeiras</h2>
+          <p>Controle de custos operacionais do sitio</p>
+        </div>
+        {/* Accumulated total badge */}
+        <div style={{
+          padding: '10px 20px', borderRadius: 'var(--radius-md)',
+          background: 'var(--bg-card)', border: '1px solid var(--border)',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>Acumulado Total</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--danger)', marginTop: 2 }}>{formatCurrency(totalExpenses)}</div>
+          <div style={{ fontSize: 11, color: (totalRevenue - totalExpenses) >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
+            Resultado: {formatCurrency(totalRevenue - totalExpenses)}
+          </div>
+        </div>
       </div>
 
-      {/* Summary Stats */}
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-card-icon" style={{ background: 'var(--danger-bg, #fef2f2)', color: 'var(--danger)' }}><Receipt size={20} /></div>
-          <div className="stat-label">Total Despesas</div>
-          <div className="stat-value" style={{ color: 'var(--danger)' }}>{formatCurrency(totalExpenses)}</div>
+      {/* Yearly Stats */}
+      {yearlyStats.length > 0 && (
+        <div style={{ display: 'flex', gap: 12, marginBottom: 24, overflowX: 'auto', paddingBottom: 4 }}>
+          {yearlyStats.map(([year, data]) => {
+            const result = data.revenue - data.expenses;
+            return (
+              <div key={year} style={{
+                minWidth: 200, flex: '1 0 200px', padding: 16,
+                borderRadius: 'var(--radius-md)', background: 'var(--bg-card)',
+                border: '1px solid var(--border)',
+              }}>
+                <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8, color: 'var(--text)' }}>{year}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Despesas</span>
+                  <strong style={{ color: 'var(--danger)' }}>{formatCurrency(data.expenses)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Receitas</span>
+                  <strong style={{ color: 'var(--success)' }}>{formatCurrency(data.revenue)}</strong>
+                </div>
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, marginTop: 4, display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Resultado</span>
+                  <strong style={{ color: result >= 0 ? 'var(--success)' : 'var(--danger)' }}>{formatCurrency(result)}</strong>
+                </div>
+                {totalYieldCost > 0 && (() => {
+                  const yearYield = yieldExpenses.filter(e => e.date && e.date.startsWith(year)).reduce((s, e) => s + e.amount, 0);
+                  return yearYield > 0 ? (
+                    <div style={{ fontSize: 10, color: '#D946EF', marginTop: 4, fontWeight: 600 }}>
+                      Rendimento inv.: {formatCurrency(yearYield)}
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+            );
+          })}
         </div>
-        <div className="stat-card">
-          <div className="stat-card-icon green"><ArrowUp size={20} /></div>
-          <div className="stat-label">Total Receitas</div>
-          <div className="stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(totalRevenue)}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-icon" style={{ background: (totalRevenue - totalExpenses) >= 0 ? 'var(--success-bg, #ecfdf5)' : 'var(--danger-bg, #fef2f2)', color: (totalRevenue - totalExpenses) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-            {(totalRevenue - totalExpenses) >= 0 ? <ArrowUp size={20} /> : <ArrowDown size={20} />}
-          </div>
-          <div className="stat-label">Resultado</div>
-          <div className="stat-value" style={{ color: (totalRevenue - totalExpenses) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-            {formatCurrency(totalRevenue - totalExpenses)}
-          </div>
-        </div>
-        {totalYieldCost > 0 && (
-          <div className="stat-card">
-            <div className="stat-card-icon" style={{ background: '#fae8ff', color: '#D946EF' }}><TrendingUp size={20} /></div>
-            <div className="stat-label">Rendimento Investidores</div>
-            <div className="stat-value" style={{ color: '#D946EF' }}>{formatCurrency(totalYieldCost)}</div>
-          </div>
-        )}
-      </div>
+      )}
 
       {/* Action Bar */}
       <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 10 }}>
-        <select className="form-input" style={{ width: 'auto', minWidth: 180 }} value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+        <select className="form-input" style={{ width: 'auto', minWidth: 180 }} value={filterCategory} onChange={e => { setFilterCategory(e.target.value); setCurrentPage(1); }}>
           <option value="all">Todas as categorias</option>
           {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select className="form-input" style={{ width: 'auto', minWidth: 160 }} value={filterMonth} onChange={e => setFilterMonth(e.target.value)}>
+        <select className="form-input" style={{ width: 'auto', minWidth: 160 }} value={filterMonth} onChange={e => { setFilterMonth(e.target.value); setCurrentPage(1); }}>
           <option value="all">Todos os meses</option>
           {availableMonths.map(m => {
             const [y, mo] = m.split('-');
@@ -537,7 +604,7 @@ export default function Expenses() {
         </div>
       )}
 
-      {/* Expenses Table */}
+      {/* Expenses List - Grouped by Month */}
       {filteredExpenses.length > 0 ? (
         <div className="card">
           <div className="card-header">
@@ -548,77 +615,97 @@ export default function Expenses() {
               </span>
             ) : null}
           </div>
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('date')}>
-                    Data <SortIcon field="date" />
-                  </th>
-                  <th>Item</th>
-                  <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('category')}>
-                    Categoria <SortIcon field="category" />
-                  </th>
-                  <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('amount')}>
-                    Valor <SortIcon field="amount" />
-                  </th>
-                  <th style={{ width: 50, textAlign: 'center' }}>Img</th>
-                  <th style={{ width: 80, textAlign: 'center' }}>Acoes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredExpenses.map(expense => (
-                  <tr key={expense.id}>
-                    <td>{formatDate(expense.date)}</td>
-                    <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {expense.item}
-                    </td>
-                    <td>
-                      <span style={{
-                        fontSize: 11,
-                        padding: '2px 8px',
-                        borderRadius: 10,
-                        background: (allCategoryColors[expense.category] || '#94A3B8') + '20',
-                        color: allCategoryColors[expense.category] || '#94A3B8',
-                        fontWeight: 600,
-                      }}>
-                        {expense.category || '-'}
-                      </span>
-                    </td>
-                    <td style={{ color: 'var(--danger)', fontWeight: 600 }}>{formatCurrency(expense.amount)}</td>
-                    <td style={{ textAlign: 'center' }}>
-                      {expense.imageData ? (
-                        <button
-                          className="btn-icon"
-                          title="Ver comprovante"
-                          onClick={() => setViewImage(expense)}
-                          style={{ color: 'var(--primary)' }}
-                        >
-                          <Eye size={16} />
-                        </button>
-                      ) : (
-                        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>-</span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      {expense.isAutomatic ? (
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Auto</span>
-                      ) : (
-                        <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                          <button className="btn-icon" title="Editar" onClick={() => handleEdit(expense)}>
-                            <Edit2 size={14} />
-                          </button>
-                          <button className="btn-icon" title="Excluir" onClick={() => handleDelete(expense)} style={{ color: 'var(--danger)' }}>
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+
+          {groupedByMonth.map(group => {
+            const monthTotal = group.items.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+            return (
+              <div key={group.month}>
+                {/* Month header */}
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '10px 16px', background: 'var(--bg-secondary)',
+                  borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)',
+                }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{getMonthLabel(group.month)}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger)' }}>{formatCurrency(monthTotal)}</span>
+                </div>
+                <div className="table-container" style={{ margin: 0 }}>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => { toggleSort('date'); setCurrentPage(1); }}>
+                          Data <SortIcon field="date" />
+                        </th>
+                        <th>Item</th>
+                        <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => { toggleSort('category'); setCurrentPage(1); }}>
+                          Categoria <SortIcon field="category" />
+                        </th>
+                        <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => { toggleSort('amount'); setCurrentPage(1); }}>
+                          Valor <SortIcon field="amount" />
+                        </th>
+                        <th style={{ width: 50, textAlign: 'center' }}>Img</th>
+                        <th style={{ width: 80, textAlign: 'center' }}>Acoes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.items.map(expense => (
+                        <tr key={expense.id}>
+                          <td>{formatDate(expense.date)}</td>
+                          <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {expense.item}
+                          </td>
+                          <td>
+                            <span style={{
+                              fontSize: 11, padding: '2px 8px', borderRadius: 10,
+                              background: (allCategoryColors[expense.category] || '#94A3B8') + '20',
+                              color: allCategoryColors[expense.category] || '#94A3B8',
+                              fontWeight: 600,
+                            }}>
+                              {expense.category || '-'}
+                            </span>
+                          </td>
+                          <td style={{ color: 'var(--danger)', fontWeight: 600 }}>{formatCurrency(expense.amount)}</td>
+                          <td style={{ textAlign: 'center' }}>
+                            {expense.imageData ? (
+                              <button className="btn-icon" title="Ver comprovante" onClick={() => setViewImage(expense)} style={{ color: 'var(--primary)' }}>
+                                <Eye size={16} />
+                              </button>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>-</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {expense.isAutomatic ? (
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic' }}>Auto</span>
+                            ) : (
+                              <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                                <button className="btn-icon" title="Editar" onClick={() => handleEdit(expense)}><Edit2 size={14} /></button>
+                                <button className="btn-icon" title="Excluir" onClick={() => handleDelete(expense)} style={{ color: 'var(--danger)' }}><Trash2 size={14} /></button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 0', flexWrap: 'wrap' }}>
+              <button className="btn btn-sm btn-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage(1)} style={{ padding: '4px 8px', fontSize: 12 }}>&laquo;</button>
+              <button className="btn btn-sm btn-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} style={{ padding: '4px 8px', fontSize: 12 }}>&lsaquo; Anterior</button>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)', minWidth: 140, textAlign: 'center' }}>
+                Pagina {currentPage} de {totalPages} ({filteredExpenses.length} lancamentos)
+              </span>
+              <button className="btn btn-sm btn-secondary" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)} style={{ padding: '4px 8px', fontSize: 12 }}>Proximo &rsaquo;</button>
+              <button className="btn btn-sm btn-secondary" disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)} style={{ padding: '4px 8px', fontSize: 12 }}>&raquo;</button>
+            </div>
+          )}
+
           <div style={{ padding: '12px 16px', background: 'var(--danger-bg, #fef2f2)', borderRadius: 'var(--radius-sm)', marginTop: 12, textAlign: 'right' }}>
             <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--danger)' }}>Total: {formatCurrency(totalFiltered)}</span>
           </div>
