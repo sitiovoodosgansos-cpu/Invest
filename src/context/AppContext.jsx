@@ -62,6 +62,13 @@ export function AppProvider({ children }) {
   const dataLoadedFromFirestore = useRef(false);
   const firestoreItemCount = useRef(0);
   const pendingWriteCount = useRef(0);
+  // Track local deletes so onSnapshot won't reject fewer items after intentional deletes
+  const localDeleteCount = useRef(0);
+  // Keep a ref to latest data for use in event handlers (beforeunload, visibilitychange)
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
 
   // Listen to Firestore in real-time
   useEffect(() => {
@@ -71,12 +78,40 @@ export function AppProvider({ children }) {
         // Ignore Firestore snapshots while we have pending writes or shortly after a write
         // to prevent onSnapshot from overwriting local state with stale data
         const timeSinceWrite = Date.now() - lastLocalWriteTime.current;
-        if (pendingWriteCount.current > 0 || timeSinceWrite < 5000) {
+        if (pendingWriteCount.current > 0 || timeSinceWrite < 10000) {
           setLoading(false);
           return;
         }
         const firestoreData = { ...defaultData, ...snapshot.data() };
-        firestoreItemCount.current = countItems(firestoreData);
+        const incomingCount = countItems(firestoreData);
+        const currentCount = countItems(dataRef.current);
+
+        // PROTECTION: Never accept Firestore data with fewer items than local state
+        // unless we recently did local deletes (tracked via localDeleteCount)
+        if (dataLoadedFromFirestore.current && incomingCount < currentCount) {
+          const allowedDrop = localDeleteCount.current;
+          localDeleteCount.current = 0; // reset after checking
+          if (currentCount - incomingCount > allowedDrop) {
+            console.warn(
+              `Blocked: onSnapshot tried to overwrite ${currentCount} items with ${incomingCount} items (allowed drop: ${allowedDrop}). Pushing local data to Firestore instead.`
+            );
+            // Push our local data back to Firestore to fix the discrepancy
+            const sanitized = JSON.parse(JSON.stringify(dataRef.current));
+            lastLocalWriteTime.current = Date.now();
+            pendingWriteCount.current += 1;
+            setDoc(FIRESTORE_DOC, sanitized)
+              .catch(err => console.error('Re-push error:', err))
+              .finally(() => {
+                pendingWriteCount.current = Math.max(0, pendingWriteCount.current - 1);
+                lastLocalWriteTime.current = Date.now();
+              });
+            setLoading(false);
+            return;
+          }
+        }
+        localDeleteCount.current = 0;
+
+        firestoreItemCount.current = incomingCount;
         dataLoadedFromFirestore.current = true;
         setData(firestoreData);
       } else {
@@ -109,6 +144,50 @@ export function AppProvider({ children }) {
     });
 
     return () => unsubscribe();
+  }, []);
+
+  // PROTECTION: Save data before page closes or tab switches
+  useEffect(() => {
+    const saveToLocalStorage = () => {
+      if (loadingRef.current) return;
+      const currentData = dataRef.current;
+      if (countItems(currentData) === 0) return;
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(currentData));
+      } catch {
+        // ignore storage errors
+      }
+    };
+
+    const handleBeforeUnload = (e) => {
+      saveToLocalStorage();
+      // Also attempt Firestore save (best-effort, may not complete)
+      if (pendingWriteCount.current > 0 || !dataLoadedFromFirestore.current) return;
+      try {
+        const sanitized = JSON.parse(JSON.stringify(dataRef.current));
+        setDoc(FIRESTORE_DOC, sanitized).catch(() => {});
+      } catch {
+        // ignore
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        saveToLocalStorage();
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Periodic auto-save to localStorage every 30 seconds as safety net
+    const autoSaveInterval = setInterval(saveToLocalStorage, 30000);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(autoSaveInterval);
+    };
   }, []);
 
   // Save to Firestore when data changes (with protection against empty overwrites)
@@ -166,6 +245,18 @@ export function AppProvider({ children }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data, loading]);
 
+  // Helper: setData for delete operations - tracks the count drop so onSnapshot won't reject it
+  const setDataWithDelete = (updater) => {
+    setData(prev => {
+      const next = updater(prev);
+      const drop = countItems(prev) - countItems(next);
+      if (drop > 0) {
+        localDeleteCount.current += drop;
+      }
+      return next;
+    });
+  };
+
   // Investors
   const addInvestor = (investor) => {
     const newInvestor = {
@@ -185,7 +276,7 @@ export function AppProvider({ children }) {
   };
 
   const deleteInvestor = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       investors: prev.investors.filter(i => i.id !== id),
       birds: prev.birds.filter(b => b.investorId !== id),
@@ -211,7 +302,7 @@ export function AppProvider({ children }) {
   };
 
   const deleteBird = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       birds: prev.birds.filter(b => b.id !== id),
     }));
@@ -230,11 +321,11 @@ export function AppProvider({ children }) {
   };
 
   const clearSales = () => {
-    setData(prev => ({ ...prev, sales: [] }));
+    setDataWithDelete(prev => ({ ...prev, sales: [] }));
   };
 
   const deleteSale = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       sales: prev.sales.filter(s => s.id !== id),
     }));
@@ -279,7 +370,7 @@ export function AppProvider({ children }) {
   };
 
   const deleteCustomSpecies = (speciesName) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       customSpecies: prev.customSpecies.filter(s => s.species !== speciesName),
     }));
@@ -300,7 +391,7 @@ export function AppProvider({ children }) {
   };
 
   const deleteFinancialInvestment = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       financialInvestments: prev.financialInvestments.filter(i => i.id !== id),
     }));
@@ -321,7 +412,7 @@ export function AppProvider({ children }) {
   };
 
   const deletePayment = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       payments: (prev.payments || []).filter(p => p.id !== id),
     }));
@@ -363,7 +454,7 @@ export function AppProvider({ children }) {
   };
 
   const deleteExpense = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       expenses: (prev.expenses || []).filter(e => e.id !== id),
     }));
@@ -379,7 +470,7 @@ export function AppProvider({ children }) {
   };
 
   const deleteCustomExpenseCategory = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       customExpenseCategories: (prev.customExpenseCategories || []).filter(c => c.id !== id),
     }));
@@ -407,7 +498,7 @@ export function AppProvider({ children }) {
   };
 
   const deleteEggCollection = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       eggCollections: (prev.eggCollections || []).filter(c => c.id !== id),
     }));
@@ -423,7 +514,7 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, incubators: (prev.incubators || []).map(i => i.id === id ? { ...i, ...updates } : i) }));
   };
   const deleteIncubator = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       incubators: (prev.incubators || []).filter(i => i.id !== id),
       incubatorBatches: (prev.incubatorBatches || []).filter(b => b.incubatorId !== id),
@@ -440,7 +531,7 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, incubatorBatches: (prev.incubatorBatches || []).map(b => b.id === id ? { ...b, ...updates } : b) }));
   };
   const deleteIncubatorBatch = (id) => {
-    setData(prev => ({ ...prev, incubatorBatches: (prev.incubatorBatches || []).filter(b => b.id !== id) }));
+    setDataWithDelete(prev => ({ ...prev, incubatorBatches: (prev.incubatorBatches || []).filter(b => b.id !== id) }));
   };
 
   // Infirmary Bays
@@ -453,7 +544,7 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, infirmaryBays: (prev.infirmaryBays || []).map(b => b.id === id ? { ...b, ...updates } : b) }));
   };
   const deleteInfirmaryBay = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       infirmaryBays: (prev.infirmaryBays || []).filter(b => b.id !== id),
       infirmaryAdmissions: (prev.infirmaryAdmissions || []).filter(a => a.bayId !== id),
@@ -470,7 +561,7 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, infirmaryAdmissions: (prev.infirmaryAdmissions || []).map(a => a.id === id ? { ...a, ...updates } : a) }));
   };
   const deleteInfirmaryAdmission = (id) => {
-    setData(prev => ({ ...prev, infirmaryAdmissions: (prev.infirmaryAdmissions || []).filter(a => a.id !== id) }));
+    setDataWithDelete(prev => ({ ...prev, infirmaryAdmissions: (prev.infirmaryAdmissions || []).filter(a => a.id !== id) }));
   };
 
   // Treatments (per bird house / breed)
@@ -483,7 +574,7 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, treatments: (prev.treatments || []).map(t => t.id === id ? { ...t, ...updates } : t) }));
   };
   const deleteTreatment = (id) => {
-    setData(prev => ({ ...prev, treatments: (prev.treatments || []).filter(t => t.id !== id) }));
+    setDataWithDelete(prev => ({ ...prev, treatments: (prev.treatments || []).filter(t => t.id !== id) }));
   };
 
   // Custom Treatment Types
@@ -495,7 +586,7 @@ export function AppProvider({ children }) {
     });
   };
   const deleteCustomTreatmentType = (id) => {
-    setData(prev => ({ ...prev, customTreatmentTypes: (prev.customTreatmentTypes || []).filter(t => t.id !== id) }));
+    setDataWithDelete(prev => ({ ...prev, customTreatmentTypes: (prev.customTreatmentTypes || []).filter(t => t.id !== id) }));
   };
 
   // Nursery Rooms
@@ -508,7 +599,7 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, nurseryRooms: (prev.nurseryRooms || []).map(r => r.id === id ? { ...r, ...updates } : r) }));
   };
   const deleteNurseryRoom = (id) => {
-    setData(prev => ({
+    setDataWithDelete(prev => ({
       ...prev,
       nurseryRooms: (prev.nurseryRooms || []).filter(r => r.id !== id),
       nurseryBatches: (prev.nurseryBatches || []).filter(b => b.roomId !== id),
@@ -526,7 +617,7 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, nurseryBatches: (prev.nurseryBatches || []).map(b => b.id === id ? { ...b, ...updates } : b) }));
   };
   const deleteNurseryBatch = (id) => {
-    setData(prev => ({ ...prev, nurseryBatches: (prev.nurseryBatches || []).filter(b => b.id !== id) }));
+    setDataWithDelete(prev => ({ ...prev, nurseryBatches: (prev.nurseryBatches || []).filter(b => b.id !== id) }));
   };
 
   // Nursery Events (deaths, medications, vaccinations, bedding changes)
@@ -539,7 +630,22 @@ export function AppProvider({ children }) {
     setData(prev => ({ ...prev, nurseryEvents: (prev.nurseryEvents || []).map(e => e.id === id ? { ...e, ...updates } : e) }));
   };
   const deleteNurseryEvent = (id) => {
-    setData(prev => ({ ...prev, nurseryEvents: (prev.nurseryEvents || []).filter(e => e.id !== id) }));
+    setDataWithDelete(prev => ({ ...prev, nurseryEvents: (prev.nurseryEvents || []).filter(e => e.id !== id) }));
+  };
+
+  // Force save current data to both Firestore and localStorage (can be called by pages)
+  const forceSync = () => {
+    if (countItems(dataRef.current) === 0) return;
+    const sanitized = JSON.parse(JSON.stringify(dataRef.current));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataRef.current));
+    lastLocalWriteTime.current = Date.now();
+    pendingWriteCount.current += 1;
+    setDoc(FIRESTORE_DOC, sanitized)
+      .catch(err => console.error('Force sync error:', err))
+      .finally(() => {
+        pendingWriteCount.current = Math.max(0, pendingWriteCount.current - 1);
+        lastLocalWriteTime.current = Date.now();
+      });
   };
 
   // Employee Token
@@ -575,6 +681,7 @@ export function AppProvider({ children }) {
     addNurseryEvent, updateNurseryEvent, deleteNurseryEvent,
     generateEmployeeToken, revokeEmployeeToken,
     addCustomSpecies, deleteCustomSpecies,
+    forceSync,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
