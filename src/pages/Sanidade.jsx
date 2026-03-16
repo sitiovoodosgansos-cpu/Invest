@@ -904,7 +904,7 @@ export default function Sanidade() {
                     {allCustomTypes.map(t => (
                       <span key={t.id} style={{ fontSize: 12, padding: '2px 8px', borderRadius: 12, background: '#f3e8ff', color: '#6C2BD9', display: 'flex', alignItems: 'center', gap: 4 }}>
                         {t.name}
-                        <button onClick={() => deleteCustomTreatmentType(t.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#ef4444' }}>
+                        <button onClick={() => { if (window.confirm(`Excluir tipo "${t.name}"?`)) deleteCustomTreatmentType(t.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#ef4444' }}>
                           <X size={10} />
                         </button>
                       </span>
