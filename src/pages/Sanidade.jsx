@@ -6,7 +6,7 @@ import {
 } from 'recharts';
 import {
   Plus, Trash2, Edit2, Search, Save, X, Heart, Activity, AlertTriangle,
-  ChevronDown, ChevronUp, Pill, Shield, Bug, Eye, Skull
+  ChevronDown, ChevronUp, Pill, Shield, Bug, Eye, Skull, ArrowRightLeft
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -65,6 +65,7 @@ export default function Sanidade() {
   const [admissionForm, setAdmissionForm] = useState({
     bayId: '', birdId: '', birdLabel: '', disease: '', symptoms: '',
     dateIn: '', dateOut: '', status: 'active', medications: '', notes: '',
+    transferToBayId: '',
   });
 
   // Treatment modal
@@ -116,10 +117,12 @@ export default function Sanidade() {
 
   // ── Stats ──
   const stats = useMemo(() => {
+    // Exclude admissions that were created via transfer (to avoid double-counting sick birds)
+    const originalAdmissions = allAdmissions.filter(a => !a.transferredFromAdmissionId);
     const activeAdmissions = allAdmissions.filter(a => a.status === 'active');
-    const recovered = allAdmissions.filter(a => a.status === 'recovered');
-    const died = allAdmissions.filter(a => a.status === 'died');
-    const total = allAdmissions.length;
+    const recovered = originalAdmissions.filter(a => a.status === 'recovered');
+    const died = originalAdmissions.filter(a => a.status === 'died');
+    const total = originalAdmissions.length;
     const recoveryRate = total > 0 ? Math.round((recovered.length / (recovered.length + died.length || 1)) * 100) : 0;
 
     // Deaths per month (last 12 months)
@@ -214,14 +217,14 @@ export default function Sanidade() {
         disease: admission.disease || '', symptoms: admission.symptoms || '',
         dateIn: admission.dateIn || '', dateOut: admission.dateOut || '',
         status: admission.status || 'active', medications: admission.medications || '',
-        notes: admission.notes || '',
+        notes: admission.notes || '', transferToBayId: admission.transferToBayId || '',
       });
     } else {
       setEditingAdmission(null);
       setAdmissionForm({
         bayId: bayId || '', birdId: '', birdLabel: '', disease: '', symptoms: '',
         dateIn: new Date().toISOString().slice(0, 10), dateOut: '', status: 'active',
-        medications: '', notes: '',
+        medications: '', notes: '', transferToBayId: '',
       });
     }
     setShowAdmissionModal(true);
@@ -237,8 +240,33 @@ export default function Sanidade() {
     if (data.status === 'recovered' || data.status === 'died' || data.status === 'transferred') {
       if (!data.dateOut) data.dateOut = new Date().toISOString().slice(0, 10);
     }
+
+    // Handle transfer: validate destination bay is selected
+    if (data.status === 'transferred' && !data.transferToBayId) {
+      alert('Selecione a baia de destino para a transferência.');
+      return;
+    }
+
     if (editingAdmission) {
       updateInfirmaryAdmission(editingAdmission.id, data);
+
+      // If transferring, auto-create a new linked admission in the destination bay
+      if (data.status === 'transferred' && data.transferToBayId && data.transferToBayId !== editingAdmission.transferToBayId) {
+        const today = new Date().toISOString().slice(0, 10);
+        addInfirmaryAdmission({
+          bayId: data.transferToBayId,
+          birdId: data.birdId,
+          birdLabel: data.birdLabel,
+          disease: data.disease,
+          symptoms: data.symptoms,
+          medications: data.medications,
+          dateIn: today,
+          dateOut: '',
+          status: 'active',
+          notes: `Transferida da baia "${getBayName(data.bayId)}" em ${today}`,
+          transferredFromAdmissionId: editingAdmission.id,
+        });
+      }
     } else {
       addInfirmaryAdmission(data);
     }
@@ -555,6 +583,16 @@ export default function Sanidade() {
                                       )}
                                       {adm.symptoms && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2 }}>Sintomas: {adm.symptoms}</div>}
                                       {adm.medications && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2 }}>Medicamentos: {adm.medications}</div>}
+                                      {adm.transferredFromAdmissionId && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, fontSize: 12, color: '#6366f1' }}>
+                                          <ArrowRightLeft size={11} /> Transferida de outra baia
+                                        </div>
+                                      )}
+                                      {adm.transferToBayId && adm.status === 'transferred' && (
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2, fontSize: 12, color: '#6366f1' }}>
+                                          <ArrowRightLeft size={11} /> Transferida para: {getBayName(adm.transferToBayId)}
+                                        </div>
+                                      )}
                                       {adm.notes && <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>{adm.notes}</div>}
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -708,6 +746,16 @@ export default function Sanidade() {
                         {adm.disease && <div style={{ fontSize: 12 }}><Bug size={11} style={{ color: '#ef4444' }} /> {adm.disease}</div>}
                         {adm.symptoms && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Sintomas: {adm.symptoms}</div>}
                         {adm.medications && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Medicamentos: {adm.medications}</div>}
+                        {adm.transferredFromAdmissionId && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, fontSize: 12, color: '#6366f1' }}>
+                            <ArrowRightLeft size={11} /> Transferida de outra baia
+                          </div>
+                        )}
+                        {adm.transferToBayId && adm.status === 'transferred' && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, fontSize: 12, color: '#6366f1' }}>
+                            <ArrowRightLeft size={11} /> Transferida para: {getBayName(adm.transferToBayId)}
+                          </div>
+                        )}
                         {adm.notes && <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic', marginTop: 2 }}>{adm.notes}</div>}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
@@ -794,13 +842,37 @@ export default function Sanidade() {
                 </div>
                 <div className="form-group">
                   <label>Status</label>
-                  <select className="form-input" value={admissionForm.status} onChange={e => setAdmissionForm({ ...admissionForm, status: e.target.value })}>
+                  <select className="form-input" value={admissionForm.status} onChange={e => {
+                    const newStatus = e.target.value;
+                    setAdmissionForm({ ...admissionForm, status: newStatus, transferToBayId: newStatus === 'transferred' ? admissionForm.transferToBayId : '' });
+                  }}>
                     {Object.entries(ADMISSION_STATUS).map(([key, val]) => (
                       <option key={key} value={key}>{val.label}</option>
                     ))}
                   </select>
                 </div>
               </div>
+              {admissionForm.status === 'transferred' && (
+                <div className="form-group" style={{ background: '#e0e7ff', padding: 12, borderRadius: 8, border: '1px solid #c7d2fe' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4338ca', fontWeight: 600 }}>
+                    <ArrowRightLeft size={14} /> Baia de Destino *
+                  </label>
+                  <select
+                    className="form-input"
+                    value={admissionForm.transferToBayId}
+                    onChange={e => setAdmissionForm({ ...admissionForm, transferToBayId: e.target.value })}
+                    style={{ borderColor: '#818cf8' }}
+                  >
+                    <option value="">Selecione a baia de destino</option>
+                    {allBays.filter(b => b.id !== admissionForm.bayId).map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                  <p style={{ fontSize: 11, color: '#6366f1', marginTop: 4 }}>
+                    A ave será automaticamente internada na baia de destino sem duplicar a contagem.
+                  </p>
+                </div>
+              )}
               <div className="form-group">
                 <label>Sintomas</label>
                 <input className="form-input" value={admissionForm.symptoms} onChange={e => setAdmissionForm({ ...admissionForm, symptoms: e.target.value })} placeholder="Descreva os sintomas observados" />
