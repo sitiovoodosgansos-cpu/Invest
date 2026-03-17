@@ -135,9 +135,9 @@ export default function Sanidade() {
       monthlyDeaths.push({ month: `${MONTH_NAMES[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`, deaths: count });
     }
 
-    // Disease frequency
+    // Disease frequency (exclude transfers to avoid double-counting)
     const diseaseMap = {};
-    for (const a of allAdmissions) {
+    for (const a of originalAdmissions) {
       if (a.disease) {
         diseaseMap[a.disease] = (diseaseMap[a.disease] || 0) + 1;
       }
