@@ -145,7 +145,14 @@ export default function Dashboard() {
     birds.forEach(b => {
       counts[b.species] = (counts[b.species] || 0) + (parseInt(b.matrixCount) || 0) + (parseInt(b.breederCount) || 0);
     });
-    return Object.entries(counts).map(([name, value]) => ({ name, value }));
+    const sorted = Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+    if (sorted.length <= 5) return sorted;
+    const top5 = sorted.slice(0, 5);
+    const othersValue = sorted.slice(5).reduce((s, d) => s + d.value, 0);
+    if (othersValue > 0) top5.push({ name: 'Outros', value: othersValue });
+    return top5;
   }, [birds]);
 
   // ── Sales timeline ──
