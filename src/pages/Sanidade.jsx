@@ -153,9 +153,17 @@ export default function Sanidade() {
       const type = t.treatmentType || 'Outro';
       treatmentMap[type] = (treatmentMap[type] || 0) + 1;
     }
-    const treatmentChart = Object.entries(treatmentMap)
+    const treatmentSorted = Object.entries(treatmentMap)
       .sort((a, b) => b[1] - a[1])
       .map(([name, value]) => ({ name, value }));
+    let treatmentChart;
+    if (treatmentSorted.length <= 5) {
+      treatmentChart = treatmentSorted;
+    } else {
+      treatmentChart = treatmentSorted.slice(0, 5);
+      const othersVal = treatmentSorted.slice(5).reduce((s, d) => s + d.value, 0);
+      if (othersVal > 0) treatmentChart.push({ name: 'Outros', value: othersVal });
+    }
 
     // Medications per bay
     const medsPerBay = {};
