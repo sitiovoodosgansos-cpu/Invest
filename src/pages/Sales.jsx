@@ -8,15 +8,20 @@ import { parseCSV, readFileAsText } from '../utils/csvParser';
 import { parseWixOrderText } from '../utils/pdfParser';
 import {
   Upload, Trash2, CheckCircle, AlertCircle, ShoppingCart,
-  FileText, ClipboardPaste, PlusCircle, X, Edit2, Save
+  FileText, ClipboardPaste, PlusCircle, X, Edit2, Save, Copy
 } from 'lucide-react';
 
 const EMPTY_MANUAL_ITEM = { itemDescription: '', quantity: 1, price: '' };
 
 export default function Sales() {
-  const { investors, birds, sales, addSales, clearSales, deleteSale, updateSale } = useApp();
+  const {
+    investors, birds, sales,
+    addSales, clearSales, deleteSale, updateSale, removeDuplicateSales,
+  } = useApp();
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [dedupeRunning, setDedupeRunning] = useState(false);
+  const [dedupeResult, setDedupeResult] = useState(null);
   const [filterType, setFilterType] = useState('all');
   const [importTab, setImportTab] = useState('file'); // file | paste | manual
   const [pasteText, setPasteText] = useState('');
@@ -35,8 +40,11 @@ export default function Sales() {
 
   const validSales = useMemo(() => filterValidTransactions(sales), [sales]);
 
-  // Process parsed rows (from CSV or PDF) into sales with profit distribution
-  const processAndAddSales = (parsed) => {
+  // Process parsed rows (from CSV or PDF) into sales with profit distribution.
+  // Now async because addSales writes directly to the /sales collection in
+  // batches of 400 — a large CSV can take a few seconds to flush. Callers
+  // must await before clearing importing state.
+  const processAndAddSales = async (parsed) => {
     const valid = parsed.filter(row => {
       const status = (row.transactionStatus || '').toUpperCase();
       return !status.includes('RECUSAD') && !status.includes('REEMBOLSAD');
@@ -68,7 +76,7 @@ export default function Sales() {
       };
     });
 
-    addSales(processedSales);
+    await addSales(processedSales);
 
     const matched = processedSales.filter(s => s.matchedInvestorId).length;
     const unmatched = processedSales.length - matched;
@@ -96,7 +104,7 @@ export default function Sales() {
     try {
       const text = await readFileAsText(file);
       const parsed = await parseCSV(text);
-      const result = processAndAddSales(parsed);
+      const result = await processAndAddSales(parsed);
       result.source = 'CSV';
       setImportResult(result);
     } catch (err) {
@@ -108,7 +116,7 @@ export default function Sales() {
   };
 
   // PASTE TEXT (supports multiple orders, up to 50 at once)
-  const handlePasteImport = () => {
+  const handlePasteImport = async () => {
     if (!pasteText.trim()) return;
 
     setImporting(true);
@@ -119,7 +127,7 @@ export default function Sales() {
       if (!pdfData.items || pdfData.items.length === 0) {
         throw new Error('Nenhum item encontrado no texto colado. Verifique o formato do recibo.');
       }
-      const result = processAndAddSales(pdfData.items);
+      const result = await processAndAddSales(pdfData.items);
       result.source = pdfData.multipleOrders ? `Texto (${pdfData.orderCount} pedidos)` : 'Texto';
       result.orderNumber = pdfData.orderNumber;
       result.buyerName = pdfData.buyerName;
@@ -158,7 +166,7 @@ export default function Sales() {
     }));
   };
 
-  const handleManualSubmit = () => {
+  const handleManualSubmit = async () => {
     const validItems = manualOrder.items.filter(item =>
       item.itemDescription.trim() && parseFloat(item.price) > 0
     );
@@ -169,6 +177,7 @@ export default function Sales() {
     }
 
     setImportResult(null);
+    setImporting(true);
 
     const parsed = validItems.map(item => {
       const qty = parseInt(item.quantity, 10) || 1;
@@ -185,10 +194,36 @@ export default function Sales() {
       };
     });
 
-    const result = processAndAddSales(parsed);
-    result.source = 'Manual';
-    setImportResult(result);
-    setManualOrder({ orderNumber: '', buyerName: '', date: '', items: [{ ...EMPTY_MANUAL_ITEM }] });
+    try {
+      const result = await processAndAddSales(parsed);
+      result.source = 'Manual';
+      setImportResult(result);
+      setManualOrder({ orderNumber: '', buyerName: '', date: '', items: [{ ...EMPTY_MANUAL_ITEM }] });
+    } catch (err) {
+      setImportResult({ success: false, error: err.message });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // Run the dedupe helper from AppContext, which finds sales with the same
+  // (orderNumber + itemDescription + totalValue + quantity) and deletes all
+  // but the oldest occurrence.
+  const handleRemoveDuplicates = async () => {
+    if (dedupeRunning) return;
+    if (!window.confirm(
+      'Remover vendas duplicadas? Isso apaga itens com mesmo numero de pedido, descricao, valor e quantidade. A copia mais antiga de cada grupo e mantida.'
+    )) return;
+    setDedupeRunning(true);
+    setDedupeResult(null);
+    try {
+      const result = await removeDuplicateSales();
+      setDedupeResult(result);
+    } catch (err) {
+      setDedupeResult({ error: err?.message || 'Erro ao remover duplicatas' });
+    } finally {
+      setDedupeRunning(false);
+    }
   };
 
   const filteredSales = useMemo(() => {
@@ -233,9 +268,13 @@ export default function Sales() {
 
   const getInvestorName = (id) => investors.find(i => i.id === id)?.name || '-';
 
-  const handleDeleteSale = (sale) => {
+  const handleDeleteSale = async (sale) => {
     if (window.confirm(`Excluir venda "${sale.itemDescription || sale.item || 'sem descricao'}"?`)) {
-      deleteSale(sale.id);
+      try {
+        await deleteSale(sale.id);
+      } catch {
+        // saveError banner in the shell already surfaces the reason.
+      }
     }
   };
 
@@ -250,7 +289,7 @@ export default function Sales() {
     });
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editingSale) return;
     const description = editingSale.itemDescription;
     const totalValue = parseFloat(editingSale.totalValue) || 0;
@@ -262,20 +301,25 @@ export default function Sales() {
     const matchedInvestorId = matchedBird ? matchedBird.investorId : null;
     const matchedBreed = matchedBird ? matchedBird.breed : null;
 
-    updateSale(editingSale.id, {
-      itemDescription: description,
-      quantity: parseInt(editingSale.quantity, 10) || 1,
-      totalValue,
-      date: editingSale.date,
-      orderNumber: editingSale.orderNumber,
-      isEgg,
-      profitRate: rate,
-      profit: totalValue * rate,
-      matchedBirdId,
-      matchedInvestorId,
-      matchedBreed,
-    });
-    setEditingSale(null);
+    try {
+      await updateSale(editingSale.id, {
+        itemDescription: description,
+        quantity: parseInt(editingSale.quantity, 10) || 1,
+        totalValue,
+        date: editingSale.date,
+        orderNumber: editingSale.orderNumber,
+        isEgg,
+        profitRate: rate,
+        profit: totalValue * rate,
+        matchedBirdId,
+        matchedInvestorId,
+        matchedBreed,
+      });
+      setEditingSale(null);
+    } catch {
+      // saveError banner shows the reason; keep the modal open so the
+      // admin can retry without losing what they typed.
+    }
   };
 
   return (
@@ -290,13 +334,67 @@ export default function Sales() {
         <div className="card-header">
           <span className="card-title">Importar Vendas</span>
           {sales.length > 0 && (
-            <button className="btn btn-sm btn-secondary" style={{ color: 'var(--danger)' }} onClick={() => {
-              if (window.confirm('Limpar todas as vendas importadas?')) clearSales();
-            }}>
-              <Trash2 size={14} /> Limpar Vendas
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="btn btn-sm btn-secondary"
+                onClick={handleRemoveDuplicates}
+                disabled={dedupeRunning}
+                title="Remover vendas duplicadas (mesmo pedido + item + valor + qtd)"
+              >
+                <Copy size={14} /> {dedupeRunning ? 'Removendo...' : 'Remover Duplicados'}
+              </button>
+              <button
+                className="btn btn-sm btn-secondary"
+                style={{ color: 'var(--danger)' }}
+                onClick={async () => {
+                  if (window.confirm('Limpar todas as vendas importadas?')) {
+                    try {
+                      await clearSales();
+                    } catch {
+                      // saveError banner surfaces the reason
+                    }
+                  }
+                }}
+              >
+                <Trash2 size={14} /> Limpar Vendas
+              </button>
+            </div>
           )}
         </div>
+
+        {dedupeResult && (
+          <div style={{
+            marginBottom: 16,
+            padding: 12,
+            borderRadius: 'var(--radius-sm)',
+            background: dedupeResult.error ? 'var(--danger-bg)' : 'var(--success-bg)',
+            color: dedupeResult.error ? 'var(--danger)' : 'var(--success)',
+            display: 'flex', alignItems: 'center', gap: 8, fontSize: 13,
+          }}>
+            {dedupeResult.error ? (
+              <>
+                <AlertCircle size={18} /> <span>{dedupeResult.error}</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle size={18} />
+                <span>
+                  {dedupeResult.removed === 0
+                    ? 'Nenhuma venda duplicada encontrada.'
+                    : `${dedupeResult.removed} venda${dedupeResult.removed === 1 ? '' : 's'} duplicada${dedupeResult.removed === 1 ? '' : 's'} removida${dedupeResult.removed === 1 ? '' : 's'}. ${dedupeResult.kept} venda${dedupeResult.kept === 1 ? '' : 's'} mantida${dedupeResult.kept === 1 ? '' : 's'}.`}
+                </span>
+                <button
+                  className="btn btn-sm btn-secondary"
+                  style={{ marginLeft: 'auto', padding: '2px 6px' }}
+                  onClick={() => setDedupeResult(null)}
+                  title="Fechar"
+                >
+                  <X size={12} />
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Import Method Tabs */}
         <div className="tabs" style={{ marginBottom: 16 }}>
