@@ -1,5 +1,7 @@
-import React, { useState, useMemo, Component } from 'react';
+import React, { useState, useMemo, useEffect, Component } from 'react';
 import { useParams } from 'react-router-dom';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 import { useApp } from '../context/AppContext';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
@@ -55,8 +57,53 @@ function DirectPortalContent() {
   const loading = appData.loading;
   const firestoreError = appData.firestoreError;
 
-  // Find investor by token (token = investor.id)
-  const investor = investors.find(i => i.id === token) || null;
+  // Phase 2B: resolve the URL token against /shareTokens first. If the lookup
+  // succeeds and the doc is tagged type=='investor', we use the stored
+  // investorId to find the investor record. If the lookup fails we keep the
+  // raw token value for the legacy fallback path below, so links generated
+  // before Phase 2B (which used investor.id as the token) keep working until
+  // the admin explicitly generates a new portal token for that investor.
+  const [resolvedInvestorId, setResolvedInvestorId] = useState(null);
+  const [tokenChecked, setTokenChecked] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!token) {
+      setTokenChecked(true);
+      return undefined;
+    }
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'shareTokens', token));
+        if (cancelled) return;
+        if (snap.exists() && snap.data().type === 'investor') {
+          setResolvedInvestorId(snap.data().investorId || null);
+        } else {
+          setResolvedInvestorId(null);
+        }
+      } catch {
+        if (!cancelled) setResolvedInvestorId(null);
+      } finally {
+        if (!cancelled) setTokenChecked(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  // Resolve the investor record. Order of preference:
+  //   1) Canonical path — /shareTokens/{token}.investorId matches an investor.
+  //   2) Legacy fallback — token matches investor.id AND that investor has
+  //      never been migrated to a portalTokenId. Once the admin generates a
+  //      portal token the legacy URL stops working for that investor.
+  const investor = useMemo(() => {
+    if (!tokenChecked) return null;
+    if (resolvedInvestorId) {
+      return investors.find(i => i.id === resolvedInvestorId) || null;
+    }
+    const legacyMatch = investors.find(i => i.id === token);
+    if (legacyMatch && !legacyMatch.portalTokenId) return legacyMatch;
+    return null;
+  }, [tokenChecked, resolvedInvestorId, investors, token]);
 
   const distribution = useMemo(() => {
     try {
@@ -127,7 +174,7 @@ function DirectPortalContent() {
 
   // === EARLY RETURNS (after all hooks) ===
 
-  if (loading) {
+  if (loading || !tokenChecked) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: 12, background: '#f8fafc' }}>
         <div style={{ width: 36, height: 36, border: '3px solid #E2E8F0', borderTopColor: '#6C2BD9', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />

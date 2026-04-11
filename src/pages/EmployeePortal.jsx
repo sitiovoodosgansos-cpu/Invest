@@ -1,5 +1,7 @@
-import React, { useState, Component } from 'react';
+import React, { useState, useEffect, Component } from 'react';
 import { Routes, Route, NavLink, Navigate, useParams } from 'react-router-dom';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../firebase';
 import { useApp } from '../context/AppContext';
 import EggCollection from './EggCollection';
 import Incubators from './Incubators';
@@ -39,14 +41,51 @@ function EmployeePortalContent() {
   const { token } = useParams();
   const appData = useApp();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // tokenChecked: has the /shareTokens lookup finished? We block the
+  // "Link inválido" screen until we know, so a valid token doesn't flash
+  // the error state on first paint.
+  const [tokenChecked, setTokenChecked] = useState(false);
+  const [shareTokenValid, setShareTokenValid] = useState(false);
 
   const loading = appData.loading;
   const firestoreError = appData.firestoreError;
 
-  // Validate token
-  const employeeToken = appData.employeeToken || '';
+  // Legacy employee token still persisted in /config/appData.employeeToken
+  // for deployments that haven't rotated to /shareTokens yet. Accept either.
+  const legacyEmployeeToken = appData.employeeToken || '';
 
-  if (loading) {
+  // Look the token up in /shareTokens first. This collection is admin-only
+  // for list, but `get` is open so any client holding the token can
+  // validate it. Legacy fallback below handles pre-Phase-2B links.
+  useEffect(() => {
+    let cancelled = false;
+    if (!token) {
+      setTokenChecked(true);
+      setShareTokenValid(false);
+      return () => { cancelled = true; };
+    }
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'shareTokens', token));
+        if (cancelled) return;
+        if (snap.exists() && snap.data().type === 'employee') {
+          setShareTokenValid(true);
+        } else {
+          setShareTokenValid(false);
+        }
+      } catch {
+        if (!cancelled) setShareTokenValid(false);
+      } finally {
+        if (!cancelled) setTokenChecked(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const tokenValid = shareTokenValid
+    || (!!legacyEmployeeToken && token === legacyEmployeeToken);
+
+  if (loading || !tokenChecked) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: 12, background: '#f8fafc' }}>
         <div style={{ width: 36, height: 36, border: '3px solid #E2E8F0', borderTopColor: '#6C2BD9', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
@@ -71,7 +110,7 @@ function EmployeePortalContent() {
     );
   }
 
-  if (!employeeToken || token !== employeeToken) {
+  if (!tokenValid) {
     return (
       <div className="login-page">
         <div className="login-card" style={{ textAlign: 'center' }}>
