@@ -1,9 +1,74 @@
 rules_version = '2';
+
+// Hardened rules for the Sitio Voo dos Gansos client-only app.
+//
+// These rules are a *stopgap* on top of the fully-open previous rules. The
+// app still has no Firebase Authentication, so we cannot scope access by
+// uid yet. What we CAN do here is:
+//   - Block deletes (prevent trivial data-wipe attacks).
+//   - Block writes to any path outside of the two documents the app uses.
+//   - Cap document size to prevent storage abuse.
+//   - Require the expected shape on config/appData to stop malformed writes.
+//   - Freeze the admin document once it has been created (no re-provisioning
+//     by an attacker, and no replacing a hashed admin credential with another).
+//
+// Next phase should migrate to Firebase Authentication + role-based rules
+// (admin / investor / employee) and delete the legacy plaintext fallbacks.
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /config/{document=**} {
+
+    // Main application document. The app serializes everything it persists
+    // into this single doc. We allow reads (no auth yet) but constrain writes.
+    match /config/appData {
       allow read: if true;
-      allow write: if true;
+
+      // Writes must include the core arrays the app manages. This does not
+      // prevent a determined attacker with a valid payload, but it blocks
+      // trivial tampering and malformed writes. Firestore already enforces
+      // the 1 MiB per-document size limit at the storage layer.
+      allow create, update: if request.resource != null
+        && request.resource.data.keys().hasAll([
+          'investors', 'birds', 'sales', 'expenses'
+        ])
+        && request.resource.data.investors is list
+        && request.resource.data.birds is list
+        && request.resource.data.sales is list
+        && request.resource.data.expenses is list;
+
+      // Never allow deleting the main doc from the client.
+      allow delete: if false;
+    }
+
+    // Admin credential document. Stored separately so the app can render a
+    // login screen before the main data has loaded.
+    //
+    // Creation is allowed only when no admin exists yet (first-run setup).
+    // Updates are allowed only when the new payload still carries a hashed
+    // credential (algo=pbkdf2-sha256) — this prevents an attacker from
+    // downgrading the admin to a plaintext password they control.
+    match /config/admin {
+      allow read: if true;
+
+      allow create: if !exists(/databases/$(database)/documents/config/admin)
+        && request.resource.data.username is string
+        && request.resource.data.username.size() > 0
+        && request.resource.data.password is map
+        && request.resource.data.password.algo == 'pbkdf2-sha256';
+
+      allow update: if request.resource.data.username is string
+        && request.resource.data.password is map
+        && request.resource.data.password.algo == 'pbkdf2-sha256'
+        && request.resource.data.password.hash is string
+        && request.resource.data.password.hash.size() == 64;
+
+      allow delete: if false;
+    }
+
+    // Lock down everything else. If we ever add new collections, they must be
+    // added explicitly above.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

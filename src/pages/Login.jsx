@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { hashPassword } from '../utils/crypto';
 import { Bird, LogIn, UserPlus, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 
 export default function Login() {
   const { adminExists, login, setupAdmin } = useAuth();
-  const { investors, firestoreError } = useApp();
+  const { investors, firestoreError, updateInvestor } = useApp();
   // Always show login form by default - never show setup automatically
   const [showSetup, setShowSetup] = useState(false);
   const [username, setUsername] = useState('');
@@ -17,35 +18,58 @@ export default function Login() {
   // Only allow setup if admin doesn't exist AND user explicitly requested it
   const isSetup = showSetup && !adminExists;
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
     if (firestoreError && (!investors || investors.length === 0)) {
       setError('Nao foi possivel carregar os dados. Verifique sua conexao ou entre em contato com o administrador.');
       return;
     }
-    const result = login(username, password, investors);
-    if (!result.success) {
-      setError(result.error);
+    try {
+      const result = await login(username, password, investors);
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      // Silently upgrade legacy plaintext investor passwords to a hash on first
+      // successful login after the security rollout.
+      if (result.legacyInvestorId) {
+        try {
+          const newHash = await hashPassword(password.trim());
+          updateInvestor(result.legacyInvestorId, { loginPassword: newHash });
+        } catch {
+          // Do not block login on upgrade failure.
+        }
+      }
+    } catch {
+      setError('Erro ao fazer login. Tente novamente.');
     }
   };
 
-  const handleSetup = (e) => {
+  const handleSetup = async (e) => {
     e.preventDefault();
     setError('');
     if (!username.trim()) {
       setError('Digite um nome de usuario');
       return;
     }
-    if (password.length < 4) {
-      setError('A senha deve ter pelo menos 4 caracteres');
+    if (password.length < 8) {
+      setError('A senha deve ter pelo menos 8 caracteres');
+      return;
+    }
+    if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+      setError('A senha deve conter pelo menos uma letra e um numero');
       return;
     }
     if (password !== confirmPassword) {
       setError('As senhas nao coincidem');
       return;
     }
-    setupAdmin(username, password);
+    try {
+      await setupAdmin(username, password);
+    } catch {
+      setError('Erro ao configurar administrador. Tente novamente.');
+    }
   };
 
   return (
@@ -64,8 +88,7 @@ export default function Login() {
             <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
             <div>
               <strong>Erro de conexao com o banco de dados.</strong><br />
-              O administrador precisa liberar o acesso no Firebase Console → Firestore → Regras.
-              <br /><span style={{ fontSize: 11, opacity: 0.8 }}>Erro: {firestoreError}</span>
+              Verifique sua conexao ou entre em contato com o administrador.
             </div>
           </div>
         )}
@@ -159,7 +182,7 @@ export default function Login() {
           v1.0 - Sitio Voo dos Gansos
           <br />
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-            {firestoreError ? '⚠ Offline' : `✓ ${investors.length} inv.`}
+            {firestoreError ? '⚠ Offline' : '✓ Online'}
           </span>
         </p>
       </div>

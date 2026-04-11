@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatCurrency, getInitials, calculateProfitDistribution } from '../utils/helpers';
+import { hashPassword } from '../utils/crypto';
 import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff, Link, Check } from 'lucide-react';
 import Portal from '../components/Portal';
 
@@ -9,6 +10,9 @@ export default function Investors() {
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState('');
+  // loginPassword in the form is always the plaintext value the admin just typed.
+  // On save we hash it before persisting. On edit we never pre-fill the field
+  // (since we only store the hash) — an empty value means "keep the existing password".
   const [form, setForm] = useState({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
@@ -27,12 +31,28 @@ export default function Investors() {
     [sales, birds]
   );
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    // Hash any newly-typed plaintext password before persisting. Empty string
+    // on edit means "keep the existing password" and we strip the field.
+    const { loginPassword, ...rest } = form;
+    const payload = { ...rest };
+    const typedPassword = (loginPassword || '').trim();
+    if (typedPassword) {
+      try {
+        payload.loginPassword = await hashPassword(typedPassword);
+      } catch {
+        // If hashing fails for any reason, fail closed: do not save plaintext.
+        return;
+      }
+    } else if (!editingId) {
+      // New investor with no password: persist empty string for consistency.
+      payload.loginPassword = '';
+    }
     if (editingId) {
-      updateInvestor(editingId, form);
+      updateInvestor(editingId, payload);
     } else {
-      addInvestor(form);
+      addInvestor(payload);
     }
     setForm({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
     setEditingId(null);
@@ -41,7 +61,16 @@ export default function Investors() {
   };
 
   const handleEdit = (investor) => {
-    setForm({ name: investor.name, email: investor.email || '', phone: investor.phone || '', document: investor.document || '', loginUsername: investor.loginUsername || '', loginPassword: investor.loginPassword || '' });
+    // Never pre-fill loginPassword on edit: we only have the hash, and we do
+    // not want the admin to accidentally overwrite it with the hash string.
+    setForm({
+      name: investor.name,
+      email: investor.email || '',
+      phone: investor.phone || '',
+      document: investor.document || '',
+      loginUsername: investor.loginUsername || '',
+      loginPassword: '',
+    });
     setEditingId(investor.id);
     setShowModal(true);
   };
@@ -213,7 +242,15 @@ export default function Investors() {
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">Senha</label>
                     <div style={{ position: 'relative' }}>
-                      <input className="form-input" type={showPassword ? 'text' : 'password'} value={form.loginPassword} onChange={e => setForm({ ...form, loginPassword: e.target.value })} placeholder="Senha de acesso" style={{ paddingRight: 40 }} />
+                      <input
+                        className="form-input"
+                        type={showPassword ? 'text' : 'password'}
+                        value={form.loginPassword}
+                        onChange={e => setForm({ ...form, loginPassword: e.target.value })}
+                        placeholder={editingId ? 'Deixe em branco para manter' : 'Senha de acesso'}
+                        autoComplete="new-password"
+                        style={{ paddingRight: 40 }}
+                      />
                       <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', padding: 4 }}>
                         {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                       </button>
@@ -222,6 +259,7 @@ export default function Investors() {
                 </div>
                 <p style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 8 }}>
                   O investidor usara esses dados para acessar o painel e acompanhar seus investimentos.
+                  {editingId && ' A senha atual e armazenada de forma criptografada e nao pode ser exibida.'}
                 </p>
               </div>
               <div className="modal-actions">

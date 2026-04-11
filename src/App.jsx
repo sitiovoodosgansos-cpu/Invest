@@ -4,26 +4,34 @@ import { useApp } from './context/AppContext';
 import { AppProvider } from './context/AppContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
-// Global ErrorBoundary to prevent blank pages on crash
+// Global ErrorBoundary to prevent blank pages on crash. The raw error message
+// is intentionally NOT shown to the user: it can contain internal state or
+// hint at implementation details useful to an attacker.
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false };
   }
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
+  static getDerivedStateFromError() {
+    return { hasError: true };
   }
   componentDidCatch(error, info) {
-    console.error('App crash:', error, info);
+    if (import.meta.env.DEV) {
+      // Only log details in development; avoid leaking them in production builds.
+      // eslint-disable-next-line no-console
+      console.error('App crash:', error, info);
+    }
   }
   render() {
     if (this.state.hasError) {
       return (
         <div style={{ padding: 40, textAlign: 'center', fontFamily: 'sans-serif' }}>
           <h2 style={{ color: '#e53e3e' }}>Algo deu errado</h2>
-          <p style={{ color: '#666', marginBottom: 16 }}>{this.state.error?.message}</p>
+          <p style={{ color: '#666', marginBottom: 16 }}>
+            Ocorreu um erro inesperado. Recarregue a pagina para tentar novamente.
+          </p>
           <button
-            onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+            onClick={() => { this.setState({ hasError: false }); window.location.reload(); }}
             style={{ padding: '10px 24px', background: '#6C2BD9', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14 }}
           >
             Recarregar Pagina
