@@ -67,8 +67,10 @@ export default function Login() {
     }
     try {
       await setupAdmin(username, password);
-    } catch {
-      setError('Erro ao configurar administrador. Tente novamente.');
+    } catch (err) {
+      // setupAdmin surfaces user-actionable messages (e.g. "Firebase Auth
+      // nao habilitado"). Fall back to a generic message if none was set.
+      setError(err?.message || 'Erro ao configurar administrador. Tente novamente.');
     }
   };
 

@@ -1,33 +1,47 @@
 rules_version = '2';
 
-// Hardened rules for the Sitio Voo dos Gansos client-only app.
+// Phase 2A rules for the Sitio Voo dos Gansos client-only app.
 //
-// These rules are a *stopgap* on top of the fully-open previous rules. The
-// app still has no Firebase Authentication, so we cannot scope access by
-// uid yet. What we CAN do here is:
-//   - Block deletes (prevent trivial data-wipe attacks).
-//   - Block writes to any path outside of the two documents the app uses.
-//   - Cap document size to prevent storage abuse.
-//   - Require the expected shape on config/appData to stop malformed writes.
-//   - Freeze the admin document once it has been created (no re-provisioning
-//     by an attacker, and no replacing a hashed admin credential with another).
+// These rules build on Phase 1 by tying WRITES to a real Firebase Auth
+// admin account. Reads stay open because the app still filters data
+// client-side (investor portals, direct-link portals, employee portals).
 //
-// Next phase should migrate to Firebase Authentication + role-based rules
-// (admin / investor / employee) and delete the legacy plaintext fallbacks.
+// DEPLOY ORDER MATTERS. Do NOT publish these rules before every admin has
+// logged in at least once with the Phase 2 code, or the admin will lock
+// themselves out of writes:
+//
+//   1. Deploy the Phase 2A app code. Legacy admin login still works because
+//      the app falls back to the hashed /config/admin credential and then
+//      transparently creates a Firebase Auth account + /users/{uid} doc.
+//   2. Admin logs in once from the new build. This provisions Firebase Auth
+//      and the /users/{uid} profile.
+//   3. Publish THESE rules.
+//
+// Phase 2B (planned) will add a /shareTokens collection for revocable portal
+// links and tighten /config/appData reads to authenticated callers only.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Main application document. The app serializes everything it persists
-    // into this single doc. We allow reads (no auth yet) but constrain writes.
+    // Helper: is the caller an authenticated admin, according to their
+    // /users/{uid} profile? We rely on the profile doc because Firebase Auth
+    // alone has no concept of roles.
+    function isAdmin() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Main application data blob. The app serializes everything it persists
+    // into this single doc. Reads stay public so investor / portal flows
+    // keep working client-side; writes now require an authenticated admin.
+    // This closes the Phase 1 gap where any anonymous client with a
+    // valid-shape payload could overwrite the entire DB.
     match /config/appData {
       allow read: if true;
 
-      // Writes must include the core arrays the app manages. This does not
-      // prevent a determined attacker with a valid payload, but it blocks
-      // trivial tampering and malformed writes. Firestore already enforces
-      // the 1 MiB per-document size limit at the storage layer.
-      allow create, update: if request.resource != null
+      allow create, update: if isAdmin()
+        && request.resource != null
         && request.resource.data.keys().hasAll([
           'investors', 'birds', 'sales', 'expenses'
         ])
@@ -36,17 +50,18 @@ service cloud.firestore {
         && request.resource.data.sales is list
         && request.resource.data.expenses is list;
 
-      // Never allow deleting the main doc from the client.
       allow delete: if false;
     }
 
-    // Admin credential document. Stored separately so the app can render a
-    // login screen before the main data has loaded.
+    // Legacy admin credential document. Phase 2A still uses it as:
+    //   - an adminExists signal on the login screen,
+    //   - the source of truth for the admin username at login time,
+    //   - the fallback hash verified during the first-login Firebase Auth
+    //     migration.
     //
-    // Creation is allowed only when no admin exists yet (first-run setup).
-    // Updates are allowed only when the new payload still carries a hashed
-    // credential (algo=pbkdf2-sha256) — this prevents an attacker from
-    // downgrading the admin to a plaintext password they control.
+    // Create is still allowed on first-run setup. Updates require admin
+    // Firebase Auth and must keep the hashed shape intact, so a leaked
+    // session cookie can't downgrade the stored credential to plaintext.
     match /config/admin {
       allow read: if true;
 
@@ -56,7 +71,8 @@ service cloud.firestore {
         && request.resource.data.password is map
         && request.resource.data.password.algo == 'pbkdf2-sha256';
 
-      allow update: if request.resource.data.username is string
+      allow update: if isAdmin()
+        && request.resource.data.username is string
         && request.resource.data.password is map
         && request.resource.data.password.algo == 'pbkdf2-sha256'
         && request.resource.data.password.hash is string
@@ -65,8 +81,26 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Lock down everything else. If we ever add new collections, they must be
-    // added explicitly above.
+    // Firebase Auth user profile. One doc per authenticated user, keyed by
+    // uid. Holds the role ('admin' in Phase 2A, 'employee' / 'investor'
+    // later). Users can self-create on first login as long as they stamp
+    // their own uid and a minimal profile; updates and deletes stay
+    // admin-only.
+    match /users/{uid} {
+      allow read: if request.auth != null
+        && (request.auth.uid == uid || isAdmin());
+
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && !exists(/databases/$(database)/documents/users/$(uid))
+        && request.resource.data.role is string
+        && request.resource.data.username is string;
+
+      allow update, delete: if isAdmin();
+    }
+
+    // Lock down everything else. Any new collections must be added
+    // explicitly above.
     match /{document=**} {
       allow read, write: if false;
     }
