@@ -8,6 +8,7 @@ import {
   Plus, Trash2, Edit2, Thermometer, TrendingUp, Calendar, Egg,
   ChevronDown, ChevronUp, Save, AlertTriangle, Baby, CheckCircle, X
 } from 'lucide-react';
+import Portal from '../components/Portal';
 
 const MONTH_NAMES = [
   'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
@@ -726,7 +727,7 @@ export default function Incubators() {
 
       {/* Incubator Modal (add/edit) */}
       {showIncubatorModal && (
-        <div className="modal-overlay" onClick={() => setShowIncubatorModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowIncubatorModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3 className="modal-title">{editingIncubator ? 'Editar Chocadeira' : 'Nova Chocadeira'}</h3>
             <form onSubmit={handleSaveIncubator}>
@@ -759,12 +760,12 @@ export default function Incubators() {
               </div>
             </form>
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* Batch Modal (add eggs to incubator) */}
       {showBatchModal && (
-        <div className="modal-overlay" onClick={() => setShowBatchModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowBatchModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 620 }}>
             <h3 className="modal-title">{editingBatch ? 'Editar Chocagem' : 'Nova Chocagem'}</h3>
             <form onSubmit={handleSaveBatch}>
@@ -845,7 +846,7 @@ export default function Incubators() {
               </div>
             </form>
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* Hatch Results Modal */}
@@ -853,7 +854,7 @@ export default function Incubators() {
         const batch = allBatches.find(b => b.id === hatchBatchId);
         if (!batch) return null;
         return (
-          <div className="modal-overlay" onClick={() => setShowHatchModal(false)}>
+          <Portal><div className="modal-overlay" onClick={() => setShowHatchModal(false)}>
             <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 780 }}>
               <h3 className="modal-title">Registrar Eclosao</h3>
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
@@ -957,7 +958,7 @@ export default function Incubators() {
                 </div>
               </form>
             </div>
-          </div>
+          </div></Portal>
         );
       })()}
     </div>

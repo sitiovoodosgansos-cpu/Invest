@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp, BIRD_SPECIES } from '../context/AppContext';
 import { formatCurrency, getInitials } from '../utils/helpers';
 import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X } from 'lucide-react';
+import Portal from '../components/Portal';
 
 const SPECIES_EMOJI = {
   'Galinha': '🐔', 'Faisão': '🪶', 'Pavão': '🦚', 'Pato': '🦆',
@@ -198,7 +199,7 @@ export default function Plantel() {
 
       {/* Modal Cadastrar no Plantel */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3 className="modal-title">{editingId ? 'Editar Animal' : 'Cadastrar no Plantel'}</h3>
             <form onSubmit={handleSubmit}>
@@ -284,12 +285,12 @@ export default function Plantel() {
               </div>
             </form>
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* Modal Cadastrar Novo Animal */}
       {showNewAnimalModal && (
-        <div className="modal-overlay" onClick={() => setShowNewAnimalModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowNewAnimalModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3 className="modal-title">Cadastrar Novo Tipo de Animal</h3>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
@@ -358,7 +359,7 @@ export default function Plantel() {
               </div>
             </form>
           </div>
-        </div>
+        </div></Portal>
       )}
     </div>
   );

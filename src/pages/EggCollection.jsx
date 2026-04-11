@@ -10,6 +10,7 @@ import {
   ChevronDown, ChevronUp, Target, Save, X, ChevronLeft, ChevronRight,
   Search, ArrowUpAZ, ArrowDownAZ, Heart, HeartOff, Link, Copy, RefreshCw, Trash
 } from 'lucide-react';
+import Portal from '../components/Portal';
 
 const MONTH_NAMES = [
   'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
@@ -912,7 +913,7 @@ export default function EggCollection() {
 
       {/* Add/Edit Collection Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={!editingId ? { maxWidth: 620 } : undefined}>
             {editingId ? (
               <>
@@ -1027,12 +1028,12 @@ export default function EggCollection() {
               </>
             )}
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* Bird Config Modal - Individual bird management */}
       {showBirdConfigModal && (
-        <div className="modal-overlay" onClick={() => setShowBirdConfigModal(null)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowBirdConfigModal(null)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 680 }}>
             <h3 className="modal-title">Gerenciar Aves</h3>
             {(() => {
@@ -1133,7 +1134,7 @@ export default function EggCollection() {
               );
             })()}
           </div>
-        </div>
+        </div></Portal>
       )}
     </div>
   );

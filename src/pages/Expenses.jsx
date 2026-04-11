@@ -10,6 +10,7 @@ import {
   Plus, Trash2, Edit2, Save, X, Image, Eye, FileDown, Receipt,
   ArrowUp, ArrowDown, ArrowUpDown, TrendingUp, Upload, FileSpreadsheet, AlertCircle, CheckCircle
 } from 'lucide-react';
+import Portal from '../components/Portal';
 
 const DEFAULT_EXPENSE_CATEGORIES = [
   'Alimentacao Animal',
@@ -926,7 +927,7 @@ export default function Expenses() {
 
       {/* New/Edit Expense Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={handleCloseModal}>
+        <Portal><div className="modal-overlay" onClick={handleCloseModal}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <h3 className="modal-title">{editingExpense ? 'Editar Despesa' : 'Nova Despesa'}</h3>
             <form onSubmit={handleSubmit}>
@@ -1042,12 +1043,12 @@ export default function Expenses() {
               </div>
             </form>
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* Image Viewer Modal */}
       {viewImage && (
-        <div className="modal-overlay" onClick={() => setViewImage(null)}>
+        <Portal><div className="modal-overlay" onClick={() => setViewImage(null)}>
           <div style={{
             background: 'var(--bg)', borderRadius: 'var(--radius)', padding: 16,
             maxWidth: '90vw', maxHeight: '90vh', margin: 16, overflow: 'auto',
@@ -1070,12 +1071,12 @@ export default function Expenses() {
               style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 'var(--radius-sm)' }}
             />
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* Import Modal */}
       {showImportModal && (
-        <div className="modal-overlay" onClick={() => setShowImportModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowImportModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 800 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 className="modal-title" style={{ margin: 0 }}>
@@ -1247,7 +1248,7 @@ export default function Expenses() {
               </>
             )}
           </div>
-        </div>
+        </div></Portal>
       )}
     </div>
   );
