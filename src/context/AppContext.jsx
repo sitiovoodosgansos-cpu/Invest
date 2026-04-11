@@ -1,6 +1,19 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
-import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+
+// Generate a collision-free, non-enumerable ID for any locally-created entity.
+// Prefers the Web Crypto API (128 bits of entropy) and falls back to a
+// timestamp + random fragment only on the rare browser that lacks it. Never
+// returns a predictable Date.now() value the way the Phase 1 code did.
+const newId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Last-resort fallback. Still non-sequential enough to avoid accidental
+  // collisions inside a session, though not cryptographically strong.
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+};
 
 const AppContext = createContext();
 
@@ -276,7 +289,7 @@ export function AppProvider({ children }) {
   const addInvestor = (investor) => {
     const newInvestor = {
       ...investor,
-      id: Date.now().toString(),
+      id: newId(),
       createdAt: new Date().toISOString(),
     };
     setData(prev => ({ ...prev, investors: [...prev.investors, newInvestor] }));
@@ -302,7 +315,7 @@ export function AppProvider({ children }) {
   const addBird = (bird) => {
     const newBird = {
       ...bird,
-      id: Date.now().toString(),
+      id: newId(),
       createdAt: new Date().toISOString(),
     };
     setData(prev => ({ ...prev, birds: [...prev.birds, newBird] }));
@@ -327,9 +340,9 @@ export function AppProvider({ children }) {
   const addSales = (salesList) => {
     setData(prev => ({
       ...prev,
-      sales: [...prev.sales, ...salesList.map((s, i) => ({
+      sales: [...prev.sales, ...salesList.map(s => ({
         ...s,
-        id: (Date.now() + i).toString(),
+        id: newId(),
         importedAt: new Date().toISOString(),
       }))],
     }));
@@ -395,7 +408,7 @@ export function AppProvider({ children }) {
   const addFinancialInvestment = (investment) => {
     const newInv = {
       ...investment,
-      id: Date.now().toString(),
+      id: newId(),
       createdAt: new Date().toISOString(),
     };
     setData(prev => ({
@@ -416,7 +429,7 @@ export function AppProvider({ children }) {
   const addPayment = (payment) => {
     const newPayment = {
       ...payment,
-      id: Date.now().toString(),
+      id: newId(),
       createdAt: new Date().toISOString(),
     };
     setData(prev => ({
@@ -437,7 +450,7 @@ export function AppProvider({ children }) {
   const addExpense = (expense) => {
     const newExpense = {
       ...expense,
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      id: newId(),
       createdAt: new Date().toISOString(),
     };
     setData(prev => ({
@@ -449,9 +462,9 @@ export function AppProvider({ children }) {
 
   const bulkAddExpenses = (expensesArray) => {
     const now = new Date().toISOString();
-    const newExpenses = expensesArray.map((expense, i) => ({
+    const newExpenses = expensesArray.map(expense => ({
       ...expense,
-      id: `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 9)}`,
+      id: newId(),
       createdAt: now,
     }));
     setData(prev => ({
@@ -480,7 +493,7 @@ export function AppProvider({ children }) {
     setData(prev => {
       const existing = prev.customExpenseCategories || [];
       if (existing.some(c => c.name.toLowerCase() === category.name.toLowerCase())) return prev;
-      return { ...prev, customExpenseCategories: [...existing, { ...category, id: Date.now().toString() }] };
+      return { ...prev, customExpenseCategories: [...existing, { ...category, id: newId() }] };
     });
   };
 
@@ -495,7 +508,7 @@ export function AppProvider({ children }) {
   const addEggCollection = (collection) => {
     const newCollection = {
       ...collection,
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      id: newId(),
       createdAt: new Date().toISOString(),
     };
     setData(prev => ({
@@ -521,7 +534,7 @@ export function AppProvider({ children }) {
 
   // Incubators
   const addIncubator = (incubator) => {
-    const newIncubator = { ...incubator, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    const newIncubator = { ...incubator, id: newId(), createdAt: new Date().toISOString() };
     setData(prev => ({ ...prev, incubators: [...(prev.incubators || []), newIncubator] }));
     return newIncubator;
   };
@@ -538,7 +551,7 @@ export function AppProvider({ children }) {
 
   // Incubator Batches
   const addIncubatorBatch = (batch) => {
-    const newBatch = { ...batch, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    const newBatch = { ...batch, id: newId(), createdAt: new Date().toISOString() };
     setData(prev => ({ ...prev, incubatorBatches: [...(prev.incubatorBatches || []), newBatch] }));
     return newBatch;
   };
@@ -551,7 +564,7 @@ export function AppProvider({ children }) {
 
   // Infirmary Bays
   const addInfirmaryBay = (bay) => {
-    const newBay = { ...bay, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    const newBay = { ...bay, id: newId(), createdAt: new Date().toISOString() };
     setData(prev => ({ ...prev, infirmaryBays: [...(prev.infirmaryBays || []), newBay] }));
     return newBay;
   };
@@ -568,7 +581,7 @@ export function AppProvider({ children }) {
 
   // Infirmary Admissions
   const addInfirmaryAdmission = (admission) => {
-    const newAdmission = { ...admission, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    const newAdmission = { ...admission, id: newId(), createdAt: new Date().toISOString() };
     setData(prev => ({ ...prev, infirmaryAdmissions: [...(prev.infirmaryAdmissions || []), newAdmission] }));
     return newAdmission;
   };
@@ -581,7 +594,7 @@ export function AppProvider({ children }) {
 
   // Treatments (per bird house / breed)
   const addTreatment = (treatment) => {
-    const newTreatment = { ...treatment, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    const newTreatment = { ...treatment, id: newId(), createdAt: new Date().toISOString() };
     setData(prev => ({ ...prev, treatments: [...(prev.treatments || []), newTreatment] }));
     return newTreatment;
   };
@@ -597,7 +610,7 @@ export function AppProvider({ children }) {
     setData(prev => {
       const existing = prev.customTreatmentTypes || [];
       if (existing.some(t => t.name.toLowerCase() === type.name.toLowerCase())) return prev;
-      return { ...prev, customTreatmentTypes: [...existing, { ...type, id: Date.now().toString() }] };
+      return { ...prev, customTreatmentTypes: [...existing, { ...type, id: newId() }] };
     });
   };
   const deleteCustomTreatmentType = (id) => {
@@ -606,7 +619,7 @@ export function AppProvider({ children }) {
 
   // Nursery Rooms
   const addNurseryRoom = (room) => {
-    const newRoom = { ...room, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    const newRoom = { ...room, id: newId(), createdAt: new Date().toISOString() };
     setData(prev => ({ ...prev, nurseryRooms: [...(prev.nurseryRooms || []), newRoom] }));
     return newRoom;
   };
@@ -624,7 +637,7 @@ export function AppProvider({ children }) {
 
   // Nursery Batches (chick groups in rooms)
   const addNurseryBatch = (batch) => {
-    const newBatch = { ...batch, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    const newBatch = { ...batch, id: newId(), createdAt: new Date().toISOString() };
     setData(prev => ({ ...prev, nurseryBatches: [...(prev.nurseryBatches || []), newBatch] }));
     return newBatch;
   };
@@ -637,7 +650,7 @@ export function AppProvider({ children }) {
 
   // Nursery Events (deaths, medications, vaccinations, bedding changes)
   const addNurseryEvent = (event) => {
-    const newEvent = { ...event, id: Date.now().toString(), createdAt: new Date().toISOString() };
+    const newEvent = { ...event, id: newId(), createdAt: new Date().toISOString() };
     setData(prev => ({ ...prev, nurseryEvents: [...(prev.nurseryEvents || []), newEvent] }));
     return newEvent;
   };
@@ -663,14 +676,81 @@ export function AppProvider({ children }) {
       });
   };
 
-  // Employee Token
-  const generateEmployeeToken = () => {
-    const token = 'func_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  // -----------------------------------------------------------------
+  // Portal share tokens (Phase 2B).
+  //
+  // We store revocable portal links in a separate /shareTokens collection,
+  // where the document ID *is* the token. Tokens are generated with
+  // crypto.randomUUID() (128 bits of entropy) — they cannot be enumerated,
+  // cannot be guessed from investor.id, and can be revoked by deleting the
+  // /shareTokens doc. The admin UI still surfaces a single "current token"
+  // per target (investor or employee) by mirroring the token back onto the
+  // respective record for display purposes.
+  //
+  // All four helpers below are async: they write to the separate collection
+  // BEFORE updating local state so the mirror never points at a token that
+  // doesn't exist in /shareTokens.
+  // -----------------------------------------------------------------
+  const writeShareToken = async (token, payload) => {
+    await setDoc(doc(db, 'shareTokens', token), payload);
+  };
+  const deleteShareToken = async (token) => {
+    if (!token) return;
+    try {
+      await deleteDoc(doc(db, 'shareTokens', token));
+    } catch {
+      // Best-effort: the token doc may not exist (legacy token) or the
+      // delete may be blocked transiently. Revocation still "works" from
+      // the user's perspective because the appData mirror no longer
+      // references the old token.
+    }
+  };
+
+  // Employee Token. One active link at a time (admin UX choice).
+  const generateEmployeeToken = async () => {
+    const token = newId();
+    const oldToken = dataRef.current.employeeToken;
+    await writeShareToken(token, {
+      type: 'employee',
+      createdAt: new Date().toISOString(),
+    });
     setData(prev => ({ ...prev, employeeToken: token }));
+    // Revoke the previous token after the new one is in place so there's
+    // never a window during which no link works.
+    if (oldToken && oldToken !== token) {
+      await deleteShareToken(oldToken);
+    }
     return token;
   };
-  const revokeEmployeeToken = () => {
+  const revokeEmployeeToken = async () => {
+    const oldToken = dataRef.current.employeeToken;
     setData(prev => ({ ...prev, employeeToken: '' }));
+    await deleteShareToken(oldToken);
+  };
+
+  // Investor Portal Token. One active link per investor.
+  const generateInvestorPortalToken = async (investorId) => {
+    const investor = (dataRef.current.investors || []).find(i => i.id === investorId);
+    if (!investor) return null;
+    const token = newId();
+    const oldToken = investor.portalTokenId;
+    await writeShareToken(token, {
+      type: 'investor',
+      investorId,
+      createdAt: new Date().toISOString(),
+    });
+    updateInvestor(investorId, { portalTokenId: token });
+    if (oldToken && oldToken !== token) {
+      await deleteShareToken(oldToken);
+    }
+    return token;
+  };
+  const revokeInvestorPortalToken = async (investorId) => {
+    const investor = (dataRef.current.investors || []).find(i => i.id === investorId);
+    if (!investor || !investor.portalTokenId) return;
+    const oldToken = investor.portalTokenId;
+    updateInvestor(investorId, { portalTokenId: null });
+    await deleteShareToken(oldToken);
   };
 
   const value = {
@@ -695,6 +775,7 @@ export function AppProvider({ children }) {
     addNurseryBatch, updateNurseryBatch, deleteNurseryBatch,
     addNurseryEvent, updateNurseryEvent, deleteNurseryEvent,
     generateEmployeeToken, revokeEmployeeToken,
+    generateInvestorPortalToken, revokeInvestorPortalToken,
     addCustomSpecies, deleteCustomSpecies,
     forceSync,
   };

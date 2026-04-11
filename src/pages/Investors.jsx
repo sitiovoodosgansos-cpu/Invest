@@ -2,11 +2,15 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { formatCurrency, getInitials, calculateProfitDistribution } from '../utils/helpers';
 import { hashPassword } from '../utils/crypto';
-import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff, Link, Check } from 'lucide-react';
+import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff, Link, Check, XCircle } from 'lucide-react';
 import Portal from '../components/Portal';
 
 export default function Investors() {
-  const { investors, birds, sales, addInvestor, updateInvestor, deleteInvestor } = useApp();
+  const {
+    investors, birds, sales,
+    addInvestor, updateInvestor, deleteInvestor,
+    generateInvestorPortalToken, revokeInvestorPortalToken,
+  } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState('');
@@ -16,14 +20,49 @@ export default function Investors() {
   const [form, setForm] = useState({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  // Track which investor is currently waiting on a generate/revoke round-trip.
+  // Used to disable the button while the Firestore write is in flight so the
+  // admin can't double-click and create orphaned tokens.
+  const [pendingTokenId, setPendingTokenId] = useState(null);
 
-  const copyInvestorLink = (investorId) => {
+  const buildPortalLink = (token) => {
     const baseUrl = window.location.origin + window.location.pathname;
-    const link = `${baseUrl}#/portal/${investorId}`;
-    navigator.clipboard.writeText(link).then(() => {
+    return `${baseUrl}#/portal/${token}`;
+  };
+
+  const copyPortalLink = (token, investorId) => {
+    if (!token) return;
+    navigator.clipboard.writeText(buildPortalLink(token)).then(() => {
       setCopiedId(investorId);
       setTimeout(() => setCopiedId(null), 2000);
     });
+  };
+
+  const handleGeneratePortalToken = async (investorId) => {
+    if (pendingTokenId) return;
+    setPendingTokenId(investorId);
+    try {
+      await generateInvestorPortalToken(investorId);
+    } catch {
+      window.alert('Nao foi possivel gerar o link. Verifique sua conexao e tente novamente.');
+    } finally {
+      setPendingTokenId(null);
+    }
+  };
+
+  const handleRevokePortalToken = async (investorId) => {
+    if (pendingTokenId) return;
+    if (!window.confirm('Revogar o link deste investidor? O link atual deixara de funcionar imediatamente.')) {
+      return;
+    }
+    setPendingTokenId(investorId);
+    try {
+      await revokeInvestorPortalToken(investorId);
+    } catch {
+      window.alert('Nao foi possivel revogar o link. Tente novamente.');
+    } finally {
+      setPendingTokenId(null);
+    }
   };
 
   const distribution = useMemo(
@@ -170,29 +209,93 @@ export default function Investors() {
                 </div>
               </div>
 
-              <button
-                onClick={() => copyInvestorLink(investor.id)}
-                style={{
-                  width: '100%',
-                  marginTop: 12,
-                  padding: '10px 16px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  border: copiedId === investor.id ? '2px solid var(--success)' : '2px dashed var(--primary)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: copiedId === investor.id ? 'var(--success-bg)' : 'var(--primary-bg)',
-                  color: copiedId === investor.id ? 'var(--success)' : 'var(--primary)',
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-              >
-                {copiedId === investor.id ? <Check size={16} /> : <Link size={16} />}
-                {copiedId === investor.id ? 'Link copiado!' : 'Copiar link do relatorio'}
-              </button>
+              {investor.portalTokenId ? (
+                <div style={{ marginTop: 12 }}>
+                  <button
+                    onClick={() => copyPortalLink(investor.portalTokenId, investor.id)}
+                    disabled={pendingTokenId === investor.id}
+                    style={{
+                      width: '100%',
+                      padding: '10px 16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      border: copiedId === investor.id ? '2px solid var(--success)' : '2px solid var(--primary)',
+                      borderRadius: 'var(--radius-sm)',
+                      background: copiedId === investor.id ? 'var(--success-bg)' : 'var(--primary-bg)',
+                      color: copiedId === investor.id ? 'var(--success)' : 'var(--primary)',
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    {copiedId === investor.id ? <Check size={16} /> : <Link size={16} />}
+                    {copiedId === investor.id ? 'Link copiado!' : 'Copiar link do relatorio'}
+                  </button>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 6 }}>
+                    <button
+                      onClick={() => handleGeneratePortalToken(investor.id)}
+                      disabled={pendingTokenId === investor.id}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-secondary)',
+                        fontSize: 11,
+                        cursor: pendingTokenId === investor.id ? 'wait' : 'pointer',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      Renovar link
+                    </button>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>|</span>
+                    <button
+                      onClick={() => handleRevokePortalToken(investor.id)}
+                      disabled={pendingTokenId === investor.id}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--danger)',
+                        fontSize: 11,
+                        cursor: pendingTokenId === investor.id ? 'wait' : 'pointer',
+                        textDecoration: 'underline',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <XCircle size={11} /> Revogar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleGeneratePortalToken(investor.id)}
+                  disabled={pendingTokenId === investor.id}
+                  style={{
+                    width: '100%',
+                    marginTop: 12,
+                    padding: '10px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    border: '2px dashed var(--primary)',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--primary-bg)',
+                    color: 'var(--primary)',
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: pendingTokenId === investor.id ? 'wait' : 'pointer',
+                    opacity: pendingTokenId === investor.id ? 0.6 : 1,
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <Link size={16} />
+                  {pendingTokenId === investor.id ? 'Gerando...' : 'Gerar link do relatorio'}
+                </button>
+              )}
             </div>
           );
         })}

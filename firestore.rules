@@ -99,6 +99,42 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // Phase 2B: revocable portal link tokens. Each document's ID IS the
+    // token — we generate it with crypto.randomUUID() (128-bit unguessable).
+    //
+    //   /shareTokens/{tokenId}
+    //     type:        'investor' | 'employee'
+    //     investorId:  string (only when type == 'investor')
+    //     createdAt:   ISO string
+    //
+    // GET is open: anyone holding a valid token can fetch the doc to
+    // validate their portal link. Because UUIDs are random, there is no
+    // meaningful way to enumerate — and LIST (collection query) is
+    // explicitly admin-only so you cannot walk the collection.
+    //
+    // CREATE is admin-only and shape-checked. DELETE is admin-only. UPDATE
+    // is forbidden — tokens are immutable; to "rotate" a token the admin
+    // deletes the old doc and creates a new one.
+    match /shareTokens/{tokenId} {
+      allow get: if true;
+      allow list: if isAdmin();
+
+      allow create: if isAdmin()
+        && request.resource.data.type in ['investor', 'employee']
+        && request.resource.data.createdAt is string
+        && (
+          request.resource.data.type == 'employee'
+          || (
+            request.resource.data.type == 'investor'
+            && request.resource.data.investorId is string
+            && request.resource.data.investorId.size() > 0
+          )
+        );
+
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
     // Lock down everything else. Any new collections must be added
     // explicitly above.
     match /{document=**} {
