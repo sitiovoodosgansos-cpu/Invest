@@ -8,6 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
 import { Plus, Trash2, Wallet, TrendingUp, DollarSign, Send } from 'lucide-react';
+import Portal from '../components/Portal';
 
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
@@ -311,7 +312,7 @@ export default function Financial() {
 
       {/* New Investment Modal */}
       {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3 className="modal-title">Novo Aporte Financeiro</h3>
             <form onSubmit={handleSubmit}>
@@ -343,12 +344,12 @@ export default function Financial() {
               </div>
             </form>
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* Payment Modal */}
       {showPaymentModal && (
-        <div className="modal-overlay" onClick={() => setShowPaymentModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowPaymentModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3 className="modal-title">Registrar Pagamento</h3>
             <form onSubmit={handlePaymentSubmit}>
@@ -401,7 +402,7 @@ export default function Financial() {
               </div>
             </form>
           </div>
-        </div>
+        </div></Portal>
       )}
     </div>
   );

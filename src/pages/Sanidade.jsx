@@ -8,6 +8,7 @@ import {
   Plus, Trash2, Edit2, Search, Save, X, Heart, Activity, AlertTriangle,
   ChevronDown, ChevronUp, Pill, Shield, Bug, Eye, Skull, ArrowRightLeft
 } from 'lucide-react';
+import Portal from '../components/Portal';
 
 const MONTH_NAMES = [
   'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
@@ -792,7 +793,7 @@ export default function Sanidade() {
 
       {/* ════════ MODAL: Bay ════════ */}
       {showBayModal && (
-        <div className="modal-overlay" onClick={() => setShowBayModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowBayModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
             <div className="modal-header">
               <h3>{editingBay ? 'Editar Baia' : 'Nova Baia de Enfermaria'}</h3>
@@ -817,12 +818,12 @@ export default function Sanidade() {
               <button className="btn btn-primary" onClick={saveBay}><Save size={14} /> Salvar</button>
             </div>
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* ════════ MODAL: Admission ════════ */}
       {showAdmissionModal && (
-        <div className="modal-overlay" onClick={() => setShowAdmissionModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowAdmissionModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <div className="modal-header">
               <h3>{editingAdmission ? 'Editar Internação' : 'Nova Internação'}</h3>
@@ -909,12 +910,12 @@ export default function Sanidade() {
               <button className="btn btn-primary" onClick={saveAdmission}><Save size={14} /> Salvar</button>
             </div>
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* ════════ MODAL: Treatment ════════ */}
       {showTreatmentModal && (
-        <div className="modal-overlay" onClick={() => setShowTreatmentModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowTreatmentModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
             <div className="modal-header">
               <h3>{editingTreatment ? 'Editar Tratamento' : 'Novo Tratamento'}</h3>
@@ -961,12 +962,12 @@ export default function Sanidade() {
               <button className="btn btn-primary" onClick={saveTreatment}><Save size={14} /> Salvar</button>
             </div>
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* ════════ MODAL: Custom Treatment Type ════════ */}
       {showTypeModal && (
-        <div className="modal-overlay" onClick={() => setShowTypeModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowTypeModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 380 }}>
             <div className="modal-header">
               <h3>Novo Tipo de Tratamento</h3>
@@ -998,7 +999,7 @@ export default function Sanidade() {
               <button className="btn btn-primary" onClick={saveCustomType}><Save size={14} /> Adicionar</button>
             </div>
           </div>
-        </div>
+        </div></Portal>
       )}
     </div>
   );

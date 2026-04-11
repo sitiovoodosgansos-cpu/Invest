@@ -8,6 +8,7 @@ import {
   Plus, Trash2, Edit2, Save, X, ChevronDown, ChevronUp,
   Home, Baby, Skull, Pill, Calendar, TrendingUp, AlertTriangle, RefreshCw, Layers
 } from 'lucide-react';
+import Portal from '../components/Portal';
 
 const MONTH_NAMES = [
   'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
@@ -740,7 +741,7 @@ export default function Pintinhos() {
 
       {/* ════════ MODAL: Room ════════ */}
       {showRoomModal && (
-        <div className="modal-overlay" onClick={() => setShowRoomModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowRoomModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
             <div className="modal-header">
               <h3>{editingRoom ? 'Editar Sala' : 'Nova Sala de Criação'}</h3>
@@ -771,12 +772,12 @@ export default function Pintinhos() {
               <button className="btn btn-primary" onClick={saveRoom}><Save size={14} /> Salvar</button>
             </div>
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* ════════ MODAL: Batch ════════ */}
       {showBatchModal && (
-        <div className="modal-overlay" onClick={() => setShowBatchModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowBatchModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <div className="modal-header">
               <h3>{editingBatch ? 'Editar Lote' : 'Novo Lote de Pintinhos'}</h3>
@@ -847,12 +848,12 @@ export default function Pintinhos() {
               <button className="btn btn-primary" onClick={saveBatch}><Save size={14} /> Salvar</button>
             </div>
           </div>
-        </div>
+        </div></Portal>
       )}
 
       {/* ════════ MODAL: Event ════════ */}
       {showEventModal && (
-        <div className="modal-overlay" onClick={() => setShowEventModal(false)}>
+        <Portal><div className="modal-overlay" onClick={() => setShowEventModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
             <div className="modal-header">
               <h3>{editingEvent ? 'Editar Evento' : 'Novo Evento'}</h3>
@@ -923,7 +924,7 @@ export default function Pintinhos() {
               <button className="btn btn-primary" onClick={saveEvent}><Save size={14} /> Salvar</button>
             </div>
           </div>
-        </div>
+        </div></Portal>
       )}
     </div>
   );
