@@ -8,6 +8,21 @@ const STORAGE_KEY = 'sitio_voo_dos_gansos_data';
 const BACKUP_KEY = 'sitio_voo_dos_gansos_backup';
 const FIRESTORE_DOC = doc(db, 'config', 'appData');
 
+// Dev-only logger. Avoids leaking internal sync state to the browser console
+// in production, which would help attackers reverse-engineer the app.
+const devWarn = (...args) => {
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.warn(...args);
+  }
+};
+const devError = (...args) => {
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.error(...args);
+  }
+};
+
 const defaultData = {
   investors: [],
   birds: [],
@@ -92,7 +107,7 @@ export function AppProvider({ children }) {
           const allowedDrop = localDeleteCount.current;
           localDeleteCount.current = 0; // reset after checking
           if (currentCount - incomingCount > allowedDrop) {
-            console.warn(
+            devWarn(
               `Blocked: onSnapshot tried to overwrite ${currentCount} items with ${incomingCount} items (allowed drop: ${allowedDrop}). Pushing local data to Firestore instead.`
             );
             // Push our local data back to Firestore to fix the discrepancy
@@ -100,7 +115,7 @@ export function AppProvider({ children }) {
             lastLocalWriteTime.current = Date.now();
             pendingWriteCount.current += 1;
             setDoc(FIRESTORE_DOC, sanitized)
-              .catch(err => console.error('Re-push error:', err))
+              .catch(err => devError('Re-push error:', err))
               .finally(() => {
                 pendingWriteCount.current = Math.max(0, pendingWriteCount.current - 1);
                 lastLocalWriteTime.current = Date.now();
@@ -131,8 +146,8 @@ export function AppProvider({ children }) {
       }
       setLoading(false);
     }, (error) => {
-      console.error('Firestore error:', error);
-      setFirestoreError(error.code || error.message || 'Erro de conexao');
+      devError('Firestore error:', error);
+      setFirestoreError(error.code || 'Erro de conexao');
       // Fallback to localStorage if Firestore fails
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
@@ -206,7 +221,7 @@ export function AppProvider({ children }) {
     // PROTECTION: Block saving empty data if Firestore had data
     // (prevents accidental wipe from race conditions or bugs)
     if (newCount === 0 && firestoreItemCount.current > 0) {
-      console.warn('Blocked: tentativa de salvar dados vazios no Firestore (havia', firestoreItemCount.current, 'itens)');
+      devWarn('Blocked: tentativa de salvar dados vazios no Firestore (havia', firestoreItemCount.current, 'itens)');
       return;
     }
 
@@ -234,7 +249,7 @@ export function AppProvider({ children }) {
     pendingWriteCount.current += 1;
     setDoc(FIRESTORE_DOC, sanitized)
       .catch(err => {
-        console.error('Firestore save error:', err);
+        devError('Firestore save error:', err);
       })
       .finally(() => {
         pendingWriteCount.current = Math.max(0, pendingWriteCount.current - 1);
@@ -641,7 +656,7 @@ export function AppProvider({ children }) {
     lastLocalWriteTime.current = Date.now();
     pendingWriteCount.current += 1;
     setDoc(FIRESTORE_DOC, sanitized)
-      .catch(err => console.error('Force sync error:', err))
+      .catch(err => devError('Force sync error:', err))
       .finally(() => {
         pendingWriteCount.current = Math.max(0, pendingWriteCount.current - 1);
         lastLocalWriteTime.current = Date.now();
