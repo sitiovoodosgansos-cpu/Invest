@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
-import { doc, onSnapshot, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import {
+  doc, collection, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch,
+} from 'firebase/firestore';
+import { partitionSaleDuplicates } from '../utils/helpers';
 
 // Generate a collision-free, non-enumerable ID for any locally-created entity.
 // Prefers the Web Crypto API (128 bits of entropy) and falls back to a
@@ -20,6 +23,14 @@ const AppContext = createContext();
 const STORAGE_KEY = 'sitio_voo_dos_gansos_data';
 const BACKUP_KEY = 'sitio_voo_dos_gansos_backup';
 const FIRESTORE_DOC = doc(db, 'config', 'appData');
+// Sales live in their own collection to escape the 1 MiB per-doc cap that
+// used to silently drop writes around the ~1100-sale mark. See firestore.rules
+// for the matching security model and the migration comment below.
+const SALES_COLLECTION = collection(db, 'sales');
+// LocalStorage flag: once set, we know the /sales collection has been
+// hydrated from the legacy appData.sales array and the array has been
+// cleared. Prevents us from re-migrating on every session.
+const SALES_MIGRATION_KEY = 'sitio_voo_dos_gansos_sales_migrated_v1';
 
 // Dev-only logger. Avoids leaking internal sync state to the browser console
 // in production, which would help attackers reverse-engineer the app.
@@ -36,10 +47,13 @@ const devError = (...args) => {
   }
 };
 
+// NOTE: `sales` lives in its own state slice / Firestore collection now.
+// It is NOT part of `defaultData` so the appData save effect can't
+// accidentally write the sales array back into /config/appData and re-hit
+// the 1 MiB cap. The two slices are merged when building the context value.
 const defaultData = {
   investors: [],
   birds: [],
-  sales: [],
   financialInvestments: [],
   customSpecies: [],
   payments: [],
@@ -58,11 +72,12 @@ const defaultData = {
   employeeToken: '',
 };
 
-// Count total items across all arrays in data
+// Count total items across all arrays in data. Sales are tracked separately
+// now and deliberately NOT counted here — this function is only used to
+// guard /config/appData writes.
 const countItems = (d) =>
   (d.investors?.length || 0) +
   (d.birds?.length || 0) +
-  (d.sales?.length || 0) +
   (d.financialInvestments?.length || 0) +
   (d.customSpecies?.length || 0) +
   (d.payments?.length || 0) +
@@ -84,8 +99,20 @@ export const BIRD_SPECIES = [];
 
 export function AppProvider({ children }) {
   const [data, setData] = useState(defaultData);
+  // Sales live in their own slice backed by the /sales collection. We keep
+  // them in a plain array in state so the rest of the app (Sales page,
+  // profit distribution, reports, portals) can treat sales like any other
+  // list without knowing where they're persisted.
+  const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [salesLoading, setSalesLoading] = useState(true);
   const [firestoreError, setFirestoreError] = useState(null);
+  // saveError surfaces rejected Firestore writes to the UI. Unlike
+  // firestoreError (which is about read/listen failures) this is flipped
+  // when setDoc/writeBatch throws, so admins can tell when a save didn't
+  // land and redo the action or contact support. It auto-clears on the
+  // next successful write.
+  const [saveError, setSaveError] = useState(null);
   const lastLocalWriteTime = useRef(0);
   const dataLoadedFromFirestore = useRef(false);
   const firestoreItemCount = useRef(0);
@@ -95,6 +122,8 @@ export function AppProvider({ children }) {
   // Keep a ref to latest data for use in event handlers (beforeunload, visibilitychange)
   const dataRef = useRef(data);
   dataRef.current = data;
+  const salesRef = useRef(sales);
+  salesRef.current = sales;
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
 
@@ -173,6 +202,85 @@ export function AppProvider({ children }) {
 
     return () => unsubscribe();
   }, []);
+
+  // Listen to the /sales collection separately. Each sale is its own doc
+  // now, so writes are O(1) and we're not bounded by the 1 MiB-per-doc cap.
+  //
+  // On first load after the Phase 2C deploy, we also migrate any legacy
+  // sales still living in appData.sales: we copy them into /sales/{id} and
+  // then clear appData.sales so the old doc shrinks. The migration is
+  // gated on a localStorage flag so it runs at most once per browser.
+  useEffect(() => {
+    const unsubscribe = onSnapshot(SALES_COLLECTION, (snapshot) => {
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setSales(docs);
+      setSalesLoading(false);
+    }, (error) => {
+      devError('Sales collection listen error:', error);
+      setSalesLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // One-shot migration: promote legacy appData.sales into /sales/{id}.
+  //
+  // We wait until the main appData doc has loaded at least once so we know
+  // which legacy sales exist. If the migration flag is already set, or the
+  // legacy array is empty, we skip. Otherwise we batch the writes (Firestore
+  // allows up to 500 ops per batch) and clear the legacy field on success.
+  useEffect(() => {
+    if (loading) return;
+    if (!dataLoadedFromFirestore.current) return;
+    if (typeof window === 'undefined') return;
+    try {
+      if (localStorage.getItem(SALES_MIGRATION_KEY) === 'done') return;
+    } catch {
+      // If localStorage is blocked we still try the migration; worst case
+      // it no-ops because legacy sales is already empty.
+    }
+    (async () => {
+      try {
+        const snap = await getDoc(FIRESTORE_DOC);
+        if (!snap.exists()) return;
+        const legacySales = snap.data().sales;
+        if (!Array.isArray(legacySales) || legacySales.length === 0) {
+          try { localStorage.setItem(SALES_MIGRATION_KEY, 'done'); } catch { /* noop */ }
+          return;
+        }
+        devWarn(`Migrating ${legacySales.length} legacy sales to /sales collection...`);
+        // Chunk into batches of 400 (under Firestore's 500-op limit) to
+        // keep individual commits small and recover gracefully mid-migration.
+        const CHUNK = 400;
+        for (let i = 0; i < legacySales.length; i += CHUNK) {
+          const chunk = legacySales.slice(i, i + CHUNK);
+          const batch = writeBatch(db);
+          for (const sale of chunk) {
+            const saleId = sale.id || newId();
+            const payload = { ...sale };
+            // Ensure required fields for the rules. Legacy rows can miss
+            // these if they were half-written; coerce to safe defaults so
+            // the create isn't rejected by the shape check.
+            payload.itemDescription = String(sale.itemDescription || sale.item || 'Sem descricao');
+            payload.totalValue = Number(sale.totalValue) || 0;
+            delete payload.id;
+            batch.set(doc(db, 'sales', saleId), payload);
+          }
+          await batch.commit();
+        }
+        // Clear the legacy array from appData so the old doc shrinks and
+        // no longer competes for the 1 MiB budget. We do this via setDoc
+        // merge so we don't clobber the rest of the blob.
+        await setDoc(FIRESTORE_DOC, { sales: [] }, { merge: true });
+        try { localStorage.setItem(SALES_MIGRATION_KEY, 'done'); } catch { /* noop */ }
+        devWarn('Sales migration complete.');
+      } catch (err) {
+        devError('Sales migration failed:', err);
+        setSaveError(
+          'Nao foi possivel migrar as vendas antigas. Recarregue a pagina e tente novamente.'
+        );
+      }
+    })();
+  }, [loading]);
 
   // PROTECTION: Save data before page closes or tab switches
   useEffect(() => {
@@ -261,8 +369,19 @@ export function AppProvider({ children }) {
     firestoreItemCount.current = newCount;
     pendingWriteCount.current += 1;
     setDoc(FIRESTORE_DOC, sanitized)
+      .then(() => {
+        // Clear any lingering save error banner once a write lands.
+        setSaveError(null);
+      })
       .catch(err => {
         devError('Firestore save error:', err);
+        // Surface to UI. The most common cause at this scale is the 1 MiB
+        // per-doc cap; give the user a hint without dumping the raw code.
+        setSaveError(
+          err?.code === 'invalid-argument' || /size|bytes|too large/i.test(err?.message || '')
+            ? 'Erro ao salvar: o documento principal atingiu o limite do Firestore. Entre em contato com o suporte.'
+            : `Erro ao salvar alteracoes: ${err?.code || err?.message || 'erro desconhecido'}`
+        );
       })
       .finally(() => {
         pendingWriteCount.current = Math.max(0, pendingWriteCount.current - 1);
@@ -336,34 +455,133 @@ export function AppProvider({ children }) {
     }));
   };
 
-  // Sales
-  const addSales = (salesList) => {
-    setData(prev => ({
-      ...prev,
-      sales: [...prev.sales, ...salesList.map(s => ({
-        ...s,
-        id: newId(),
-        importedAt: new Date().toISOString(),
-      }))],
-    }));
+  // -----------------------------------------------------------------
+  // Sales (Phase 2C: backed by /sales collection, one doc per sale).
+  //
+  // All writes go straight to Firestore and the /sales onSnapshot listener
+  // pushes the change back into local state. We DO NOT mutate local `sales`
+  // optimistically because that would double-apply when the snapshot fires
+  // (and diverge if the write fails). Every helper returns a promise so
+  // callers can disable UI while the batch is in flight.
+  //
+  // All helpers also refuse to include `undefined` values and stamp
+  // metadata (id, importedAt) server-side if missing so we never orphan a
+  // row that violates the rules' shape check.
+  // -----------------------------------------------------------------
+  const sanitizeSalePayload = (sale) => {
+    // Strip undefineds (Firestore rejects them) and null-out empty strings
+    // so filters don't have to special-case them.
+    const raw = JSON.parse(JSON.stringify(sale));
+    // Rules require these two fields. Coerce defensively.
+    raw.itemDescription = String(raw.itemDescription || raw.item || 'Sem descricao');
+    raw.totalValue = Number(raw.totalValue) || 0;
+    // Drop id from the payload; it's the doc key, not a field.
+    delete raw.id;
+    return raw;
   };
 
-  const clearSales = () => {
-    setDataWithDelete(prev => ({ ...prev, sales: [] }));
+  const addSales = async (salesList) => {
+    if (!Array.isArray(salesList) || salesList.length === 0) return;
+    const now = new Date().toISOString();
+    try {
+      // Batch in chunks of 400 to stay under Firestore's 500-op batch limit.
+      const CHUNK = 400;
+      for (let i = 0; i < salesList.length; i += CHUNK) {
+        const chunk = salesList.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+        for (const sale of chunk) {
+          const saleId = newId();
+          const payload = sanitizeSalePayload({
+            ...sale,
+            importedAt: sale.importedAt || now,
+          });
+          batch.set(doc(db, 'sales', saleId), payload);
+        }
+        await batch.commit();
+      }
+      setSaveError(null);
+    } catch (err) {
+      devError('addSales error:', err);
+      setSaveError(`Erro ao salvar vendas: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
   };
 
-  const deleteSale = (id) => {
-    setDataWithDelete(prev => ({
-      ...prev,
-      sales: prev.sales.filter(s => s.id !== id),
-    }));
+  const clearSales = async () => {
+    try {
+      const current = salesRef.current;
+      if (current.length === 0) return;
+      const CHUNK = 400;
+      for (let i = 0; i < current.length; i += CHUNK) {
+        const chunk = current.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+        for (const sale of chunk) {
+          batch.delete(doc(db, 'sales', sale.id));
+        }
+        await batch.commit();
+      }
+      setSaveError(null);
+    } catch (err) {
+      devError('clearSales error:', err);
+      setSaveError(`Erro ao limpar vendas: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
   };
 
-  const updateSale = (id, updates) => {
-    setData(prev => ({
-      ...prev,
-      sales: prev.sales.map(s => s.id === id ? { ...s, ...updates } : s),
-    }));
+  const deleteSale = async (id) => {
+    if (!id) return;
+    try {
+      await deleteDoc(doc(db, 'sales', id));
+      setSaveError(null);
+    } catch (err) {
+      devError('deleteSale error:', err);
+      setSaveError(`Erro ao excluir venda: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
+  };
+
+  const updateSale = async (id, updates) => {
+    if (!id) return;
+    try {
+      // Merge against the current local copy so we preserve all existing
+      // fields and still satisfy the rules' create/update shape check.
+      const current = salesRef.current.find(s => s.id === id);
+      const merged = { ...(current || {}), ...updates };
+      const payload = sanitizeSalePayload(merged);
+      await setDoc(doc(db, 'sales', id), payload);
+      setSaveError(null);
+    } catch (err) {
+      devError('updateSale error:', err);
+      setSaveError(`Erro ao atualizar venda: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
+  };
+
+  // Remove duplicate sales (same orderNumber + itemDescription + totalValue
+  // + quantity). Keeps the oldest occurrence by importedAt and deletes the
+  // rest. Returns { removed, kept } counts for the UI to show.
+  const removeDuplicateSales = async () => {
+    try {
+      const { duplicates } = partitionSaleDuplicates(salesRef.current);
+      if (duplicates.length === 0) {
+        return { removed: 0, kept: salesRef.current.length };
+      }
+      const CHUNK = 400;
+      for (let i = 0; i < duplicates.length; i += CHUNK) {
+        const chunk = duplicates.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+        for (const sale of chunk) {
+          batch.delete(doc(db, 'sales', sale.id));
+        }
+        await batch.commit();
+      }
+      setSaveError(null);
+      return { removed: duplicates.length, kept: salesRef.current.length - duplicates.length };
+    } catch (err) {
+      devError('removeDuplicateSales error:', err);
+      setSaveError(`Erro ao remover duplicatas: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
   };
 
   // Custom Species
@@ -755,11 +973,13 @@ export function AppProvider({ children }) {
 
   const value = {
     ...data,
-    loading,
+    sales,
+    loading: loading || salesLoading,
     firestoreError,
+    saveError,
     addInvestor, updateInvestor, deleteInvestor,
     addBird, updateBird, deleteBird,
-    addSales, clearSales, deleteSale, updateSale,
+    addSales, clearSales, deleteSale, updateSale, removeDuplicateSales,
     addFinancialInvestment, deleteFinancialInvestment,
     addPayment, deletePayment,
     addExpense, bulkAddExpenses, updateExpense, deleteExpense,

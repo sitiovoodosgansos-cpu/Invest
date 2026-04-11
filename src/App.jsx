@@ -58,12 +58,16 @@ import InvestorPortal from './pages/InvestorPortal';
 import DirectPortal from './pages/DirectPortal';
 import EmployeePortal from './pages/EmployeePortal';
 import {
-  LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut, Receipt, Egg, Thermometer, Heart, Baby
+  LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut, Receipt, Egg, Thermometer, Heart, Baby, AlertTriangle
 } from 'lucide-react';
 
 function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { logout, currentUser } = useAuth();
+  // Surface Firestore write failures so admins know when a save didn't
+  // land (e.g. the legacy 1 MiB-cap failure that used to silently drop
+  // new sales). saveError is sticky until the next successful write.
+  const { saveError } = useApp();
 
   const navItems = [
     { to: '/dashboard', icon: <LayoutDashboard />, label: 'Dashboard' },
@@ -133,6 +137,23 @@ function AdminLayout() {
       </aside>
 
       <main className="main-content">
+        {saveError && (
+          <div
+            role="alert"
+            style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10,
+              padding: '12px 16px', marginBottom: 16,
+              background: '#fff3cd', border: '1px solid #ffc107',
+              borderRadius: 8, color: '#856404', fontSize: 13,
+            }}
+          >
+            <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div style={{ flex: 1 }}>
+              <strong>Erro ao salvar alteracoes.</strong>
+              <div style={{ marginTop: 2 }}>{saveError}</div>
+            </div>
+          </div>
+        )}
         <Routes>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/investidores" element={<Investors />} />

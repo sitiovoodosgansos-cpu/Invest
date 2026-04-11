@@ -135,6 +135,29 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Phase 2C: sales moved to their own collection.
+    //
+    // Sales used to live inside /config/appData as a single array. At ~1100
+    // rows the monolithic doc started hitting the 1 MiB / ~20k index-entry
+    // cap and silently rejected writes, causing lost imports and lost edits.
+    // By promoting each sale to its own doc we lift that ceiling and also
+    // make per-sale edits O(1) instead of rewriting the full array.
+    //
+    // Reads stay open (investor portals read sales client-side and filter by
+    // matchedInvestorId; tightening this to authenticated-only is a Phase 2C+
+    // change that also requires portals to signInAnonymously). Writes are
+    // admin-only and shape-checked.
+    match /sales/{saleId} {
+      allow read: if true;
+
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasAll(['itemDescription', 'totalValue'])
+        && request.resource.data.itemDescription is string
+        && request.resource.data.totalValue is number;
+
+      allow delete: if isAdmin();
+    }
+
     // Lock down everything else. Any new collections must be added
     // explicitly above.
     match /{document=**} {

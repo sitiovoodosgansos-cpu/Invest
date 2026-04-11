@@ -127,6 +127,54 @@ export function filterValidTransactions(sales) {
   });
 }
 
+// Build a duplicate-detection key for a sale. Two sales are considered
+// duplicates iff they share the same order number, item description
+// (normalized), total value (rounded to 2 decimals), and quantity.
+// If either orderNumber or itemDescription is missing, the key is null
+// and the sale is never treated as a duplicate of anything.
+export function saleDedupeKey(sale) {
+  if (!sale) return null;
+  const orderNumber = (sale.orderNumber || '').toString().trim();
+  const description = (sale.itemDescription || sale.item || '')
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  if (!orderNumber || !description) return null;
+  const totalValue = Math.round((parseFloat(sale.totalValue) || 0) * 100) / 100;
+  const quantity = parseInt(sale.quantity, 10) || 1;
+  return `${orderNumber}||${description}||${totalValue}||${quantity}`;
+}
+
+// Returns { unique, duplicates } where `unique` is the first occurrence of
+// each dedupe key (by importedAt ascending, i.e. oldest wins) and
+// `duplicates` is every subsequent occurrence. Sales without a dedupe key
+// (missing order number or description) are always kept in `unique`.
+export function partitionSaleDuplicates(sales) {
+  const sorted = [...sales].sort((a, b) => {
+    const ta = a.importedAt || '';
+    const tb = b.importedAt || '';
+    return ta.localeCompare(tb);
+  });
+  const seen = new Map();
+  const unique = [];
+  const duplicates = [];
+  for (const sale of sorted) {
+    const key = saleDedupeKey(sale);
+    if (!key) {
+      unique.push(sale);
+      continue;
+    }
+    if (seen.has(key)) {
+      duplicates.push(sale);
+    } else {
+      seen.set(key, sale);
+      unique.push(sale);
+    }
+  }
+  return { unique, duplicates };
+}
+
 // Calculate profit distribution for sales
 // Respects saved matchedInvestorId/matchedBirdId on each sale to preserve manual/import links.
 // Only falls back to re-matching if no saved link exists.
