@@ -148,16 +148,34 @@ function parseSingleOrder(text) {
     || text.match(/Cupom[^-]*-\s*R\$\s*([\d.,]+)/i);
   const discount = discountMatch ? parseBRL(discountMatch[1]) : 0;
 
-  // Normalize: collapse newlines into spaces so multi-line item names are joined
-  // Preserve paragraph breaks (double newlines) but merge single line breaks
-  let normalized = text.replace(/\r\n/g, '\n').replace(/(?<!\n)\n(?!\n)/g, ' ');
+  // Normalize: collapse newlines into spaces so multi-line item names are
+  // joined. BUT first strip the order header block entirely — both the
+  // "Pedido XXXXX (N itens) [nome]" line AND the "Feito em DD de MMM. de
+  // YYYY, HH:MM [para <loja>]" line. The order number, buyer name and
+  // date were already captured above against the raw `text`, so they're
+  // safe to strip here.
+  //
+  // If we leave the header in the text, collapsing newlines merges it
+  // into the first item's description — e.g. "Pedido 10001 (5 itens) para
+  // Sitio Voo dos Gansos Peru Bronze". The older workaround only handled
+  // OVO-prefixed items because it relied on an "OVO" lookahead; bird
+  // orders that started with "Peru", "Brahma", etc. fell through and got
+  // polluted.
+  //
+  // For the Feito line we match both shapes Wix emits: the "para X"
+  // suffix on the same line as "Feito em...", AND on a standalone line
+  // immediately after (some PDF extractions split the header in two).
+  let normalized = text
+    .replace(/\r\n/g, '\n')
+    .replace(/^[ \t]*Pedido\s+\d+[^\n]*\n?/gim, '')
+    .replace(
+      /^[ \t]*Feito\s+em\s+[^\n]*(?:\n[ \t]*para\s+[^\n]*)?\n?/gim,
+      ''
+    )
+    .replace(/(?<!\n)\n(?!\n)/g, ' ');
 
   // Remove "Sexo:" prefix so gender info (Casal/Macho/Fêmea) merges into item description
   normalized = normalized.replace(/\bSexo:\s*/gi, '');
-
-  // Remove "para [destination]" that appears between date/time and the first item
-  // e.g. "18:17 para Sitio Voo dos Gansos OVO - ..." → "18:17 OVO - ..."
-  normalized = normalized.replace(/\bpara\s+[\wÀ-ÿ\s]+?(?=OVO\b)/gi, '');
 
   // Extract line items using a general regex that captures any text before "R$ price xQTY R$ total"
   // This handles both OVO items and bird items (Brahma, Sedosa, etc.)
