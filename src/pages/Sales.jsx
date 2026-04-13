@@ -8,7 +8,7 @@ import { parseCSV, readFileAsText } from '../utils/csvParser';
 import { parseWixOrderText } from '../utils/pdfParser';
 import {
   Upload, Trash2, CheckCircle, AlertCircle, ShoppingCart,
-  FileText, ClipboardPaste, PlusCircle, X, Edit2, Save, Copy
+  FileText, ClipboardPaste, PlusCircle, X, Edit2, Save, Copy, RefreshCw
 } from 'lucide-react';
 
 const EMPTY_MANUAL_ITEM = { itemDescription: '', quantity: 1, price: '' };
@@ -16,7 +16,7 @@ const EMPTY_MANUAL_ITEM = { itemDescription: '', quantity: 1, price: '' };
 export default function Sales() {
   const {
     investors, birds, sales,
-    addSales, clearSales, deleteSale, updateSale, removeDuplicateSales, recoverLegacySales,
+    addSales, clearSales, deleteSale, updateSale, removeDuplicateSales, recoverLegacySales, forceReloadSales,
   } = useApp();
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
@@ -361,9 +361,29 @@ export default function Sales() {
               </button>
               <button
                 className="btn btn-sm btn-secondary"
+                onClick={async () => {
+                  setRecoverRunning(true);
+                  setRecoverResult(null);
+                  try {
+                    const result = await forceReloadSales();
+                    setRecoverResult(result);
+                  } catch (err) {
+                    setRecoverResult({ status: 'error', message: err?.message || 'Erro' });
+                  } finally {
+                    setRecoverRunning(false);
+                  }
+                }}
+                disabled={recoverRunning}
+                title="Forcar releitura da colecao /sales do Firestore"
+                style={{ color: 'var(--primary)' }}
+              >
+                <RefreshCw size={14} /> Recarregar Vendas
+              </button>
+              <button
+                className="btn btn-sm btn-secondary"
                 onClick={handleRecoverSales}
                 disabled={recoverRunning}
-                title="Verificar e recuperar vendas que podem ter sido perdidas na migracao"
+                title="Recuperar vendas de fontes alternativas (appData, localStorage)"
                 style={{ color: 'var(--warning)' }}
               >
                 <AlertCircle size={14} /> {recoverRunning ? 'Verificando...' : 'Recuperar Vendas'}
