@@ -178,13 +178,17 @@ function parseSingleOrder(text) {
   // Some Wix PDFs repeat the unit price on a separate line, yielding:
   //   ITEM R$ price R$ price xQTY R$ total
   // The optional (?:\s+R\$\s*[\d.,]+)? handles the repeated price.
-  const itemRegex = /([A-ZÀ-ÿa-zà-ÿ][\wÀ-ÿ\s\-–(),.]*?)\s+R\$\s*([\d.,]+)(?:\s+R\$\s*[\d.,]+)?\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
+  // The colon in the char class handles "Quantia personalizada Note: XXX".
+  const itemRegex = /([A-ZÀ-ÿa-zà-ÿ][\wÀ-ÿ\s\-–():,.]*?)\s+R\$\s*([\d.,]+)(?:\s+R\$\s*[\d.,]+)?\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
 
   let match;
   while ((match = itemRegex.exec(normalized)) !== null) {
     let itemDescription = match[1].trim();
     // Skip summary lines
     if (/^(Itens|Frete|Imposto|Cupom|Total|Pago|Subtotal|Desconto)/i.test(itemDescription)) continue;
+
+    // Clean up Wix custom charges: "Quantia personalizada Note: FRETE" → "FRETE"
+    itemDescription = itemDescription.replace(/^Quantia personalizada\s*(?:Note:\s*)?/i, '').trim() || itemDescription;
 
     const unitPrice = parseBRL(match[2]);
     let quantity = parseInt(match[3], 10);
