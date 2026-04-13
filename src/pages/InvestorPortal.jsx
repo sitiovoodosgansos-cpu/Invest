@@ -9,7 +9,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, Legend, PieChart, Pie, Cell
 } from 'recharts';
-import { LogOut, Bird } from 'lucide-react';
+import { LogOut, Bird, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
@@ -17,6 +17,8 @@ export default function InvestorPortal() {
   const { currentUser, logout } = useAuth();
   const { investors, birds, sales, financialInvestments, payments } = useApp();
   const [period, setPeriod] = useState('monthly');
+  const [sortField, setSortField] = useState('date');
+  const [sortDirection, setSortDirection] = useState('desc');
 
   const investor = investors.find(i => i.id === currentUser.investorId);
   const distribution = useMemo(() => calculateProfitDistribution(sales, birds), [sales, birds]);
@@ -80,6 +82,60 @@ export default function InvestorPortal() {
     });
     return Object.entries(byBreed).map(([name, value]) => ({ name, value }));
   }, [mySales]);
+
+  // Sorted sales for the detail table
+  const sortedSales = useMemo(() => {
+    if (!mySales.length) return [];
+    const items = [...mySales];
+    const dir = sortDirection === 'asc' ? 1 : -1;
+    items.sort((a, b) => {
+      switch (sortField) {
+        case 'date': {
+          const da = new Date(a.date || a.importedAt || 0).getTime();
+          const db = new Date(b.date || b.importedAt || 0).getTime();
+          return (da - db) * dir;
+        }
+        case 'order': {
+          const oa = String(a.orderNumber || '');
+          const ob = String(b.orderNumber || '');
+          return oa.localeCompare(ob, undefined, { numeric: true }) * dir;
+        }
+        case 'item': {
+          const ia = String(a.itemDescription || a.item || '');
+          const ib = String(b.itemDescription || b.item || '');
+          return ia.localeCompare(ib) * dir;
+        }
+        case 'type': {
+          const ta = a.isEgg ? 0 : 1;
+          const tb = b.isEgg ? 0 : 1;
+          return (ta - tb) * dir;
+        }
+        case 'price':
+          return ((a.totalValue || 0) - (b.totalValue || 0)) * dir;
+        case 'profit':
+          return ((a.profit || 0) - (b.profit || 0)) * dir;
+        default:
+          return 0;
+      }
+    });
+    return items;
+  }, [mySales, sortField, sortDirection]);
+
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <ArrowUpDown size={12} style={{ opacity: 0.3, marginLeft: 4 }} />;
+    return sortDirection === 'asc'
+      ? <ArrowUp size={12} style={{ marginLeft: 4, color: 'var(--primary)' }} />
+      : <ArrowDown size={12} style={{ marginLeft: 4, color: 'var(--primary)' }} />;
+  };
 
   return (
     <div className="investor-portal">
@@ -360,17 +416,29 @@ export default function InvestorPortal() {
               <table>
                 <thead>
                   <tr>
-                    <th>Data</th>
-                    <th>Pedido</th>
-                    <th>Item</th>
-                    <th>Tipo</th>
-                    <th>Valor</th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('date')}>
+                      Data <SortIcon field="date" />
+                    </th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('order')}>
+                      Pedido <SortIcon field="order" />
+                    </th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('item')}>
+                      Item <SortIcon field="item" />
+                    </th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('type')}>
+                      Tipo <SortIcon field="type" />
+                    </th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('price')}>
+                      Valor <SortIcon field="price" />
+                    </th>
                     <th>Taxa</th>
-                    <th>Lucro</th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('profit')}>
+                      Lucro <SortIcon field="profit" />
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {mySales.map((item, idx) => (
+                  {sortedSales.map((item, idx) => (
                     <tr key={idx}>
                       <td>{formatDate(item.date || item.importedAt)}</td>
                       <td style={{ fontSize: 12 }}>{item.orderNumber || '-'}</td>
