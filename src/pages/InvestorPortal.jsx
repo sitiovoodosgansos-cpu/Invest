@@ -6,10 +6,10 @@ import {
   getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod
 } from '../utils/helpers';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, Legend, PieChart, Pie, Cell
 } from 'recharts';
-import { LogOut, Bird, Wallet, TrendingUp, ShoppingCart, DollarSign, Send } from 'lucide-react';
+import { LogOut, Bird } from 'lucide-react';
 
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
@@ -52,7 +52,8 @@ export default function InvestorPortal() {
 
   const myPayments = (payments || []).filter(p => p.investorId === investor.id).sort((a, b) => new Date(b.date) - new Date(a.date));
   const totalPaid = myPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
-  const netBalance = totalFinancialCurrent + totalProfit - totalPaid;
+  const totalAccumulated = totalFinancialProfit + totalProfit;
+  const netBalance = totalAccumulated - totalPaid;
 
   // Timeline chart data
   const timelineData = useMemo(() => {
@@ -105,82 +106,63 @@ export default function InvestorPortal() {
       </header>
 
       <main className="portal-content">
-        {/* Summary Stats */}
-        <div className="stats-grid" style={{ marginBottom: 24 }}>
-          <div className="stat-card">
-            <div className="stat-card-icon purple"><Bird size={20} /></div>
-            <div className="stat-label">Plantel</div>
-            <div className="stat-value">{myBirds.length} <span style={{ fontSize: 14, fontWeight: 400, color: 'var(--text-secondary)' }}>especies</span></div>
-            <div className="stat-change" style={{ color: 'var(--text-secondary)' }}>{totalMatrices} matrizes / {totalBreeders} reprodutores</div>
+        {/* Investor Summary — matches Reports.jsx layout */}
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+            <div className="investor-avatar" style={{ width: 56, height: 56, fontSize: 20 }}>
+              {getInitials(investor.name)}
+            </div>
+            <div>
+              <h3 style={{ fontSize: 20, fontWeight: 700 }}>{investor.name}</h3>
+              {investor.email && <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{investor.email}</p>}
+            </div>
           </div>
-          <div className="stat-card">
-            <div className="stat-card-icon blue"><Wallet size={20} /></div>
-            <div className="stat-label">Total Investido</div>
-            <div className="stat-value" style={{ fontSize: 20 }}>{formatCurrency(totalInvested + totalFinancialInvested)}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-card-icon green"><TrendingUp size={20} /></div>
-            <div className="stat-label">Lucro com Vendas</div>
-            <div className="stat-value" style={{ fontSize: 20, color: 'var(--success)' }}>{formatCurrency(totalProfit)}</div>
-            <div className="stat-change" style={{ color: 'var(--text-secondary)' }}>{mySales.length} vendas vinculadas</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-card-icon orange"><DollarSign size={20} /></div>
-            <div className="stat-label">Rendimento Financeiro</div>
-            <div className="stat-value" style={{ fontSize: 20, color: 'var(--success)' }}>{formatCurrency(totalFinancialProfit)}</div>
-            <div className="stat-change" style={{ color: 'var(--text-secondary)' }}>3% a.m. juros compostos</div>
+
+          <div className="stats-grid" style={{ marginBottom: 0 }}>
+            <div className="stat-card">
+              <div className="stat-label">Animais no Plantel</div>
+              <div className="stat-value">{totalMatrices + totalBreeders}</div>
+              <div className="stat-change positive">{totalMatrices} matrizes / {totalBreeders} reprodutores</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Investido no Plantel</div>
+              <div className="stat-value" style={{ color: 'var(--primary)' }}>{formatCurrency(totalInvested)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Lucro com Ovos</div>
+              <div className="stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(myDistribution?.eggProfit || 0)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Lucro com Animais</div>
+              <div className="stat-value" style={{ color: 'var(--info)' }}>{formatCurrency(myDistribution?.birdProfit || 0)}</div>
+            </div>
           </div>
         </div>
 
-        {/* My Birds */}
-        {myBirds.length > 0 && (
-          <div className="card" style={{ marginBottom: 24 }}>
-            <div className="card-header">
-              <span className="card-title">Meu Plantel</span>
-            </div>
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Especie / Raca</th>
-                    <th>Matrizes</th>
-                    <th>Reprodutores</th>
-                    <th>Valor Investido</th>
-                    <th>Data</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {myBirds.map(b => (
-                    <tr key={b.id}>
-                      <td><strong>{b.species} - {b.breed}</strong></td>
-                      <td>{b.matrixCount || 0}</td>
-                      <td>{b.breederCount || 0}</td>
-                      <td style={{ color: 'var(--primary)', fontWeight: 600 }}>{formatCurrency(b.investmentValue || 0)}</td>
-                      <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatDate(b.createdAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* Financial Investments */}
+        {/* Financial Investments — matches Reports.jsx "Aportes Financeiros" */}
         {myFinancial.length > 0 && (
           <div className="card" style={{ marginBottom: 24 }}>
             <div className="card-header">
-              <span className="card-title">Aportes Financeiros</span>
+              <span className="card-title">Aportes Financeiros (3% a.m.)</span>
+            </div>
+            <div className="stats-grid" style={{ marginBottom: 16 }}>
+              <div>
+                <div className="stat-label">Total Aportado</div>
+                <div className="stat-value" style={{ fontSize: 20 }}>{formatCurrency(totalFinancialInvested)}</div>
+              </div>
+              <div>
+                <div className="stat-label">Valor Atual</div>
+                <div className="stat-value" style={{ fontSize: 20, color: 'var(--success)' }}>{formatCurrency(totalFinancialCurrent)}</div>
+              </div>
+              <div>
+                <div className="stat-label">Rendimento</div>
+                <div className="stat-value" style={{ fontSize: 20, color: 'var(--info)' }}>+{formatCurrency(totalFinancialProfit)}</div>
+              </div>
             </div>
             <div className="table-container">
               <table>
                 <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>Valor Aportado</th>
-                    <th>Periodo</th>
-                    <th>Valor Atual</th>
-                    <th>Rendimento</th>
-                  </tr>
+                  <tr><th>Data</th><th>Valor</th><th>Meses</th><th>Atual</th><th>Rendimento</th></tr>
                 </thead>
                 <tbody>
                   {myFinancial.map(f => {
@@ -190,124 +172,212 @@ export default function InvestorPortal() {
                       <tr key={f.id}>
                         <td>{formatDate(f.date)}</td>
                         <td>{formatCurrency(f.amount)}</td>
-                        <td>{months} meses</td>
-                        <td style={{ fontWeight: 600 }}>{formatCurrency(current)}</td>
-                        <td style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(current - f.amount)}</td>
+                        <td>{months}</td>
+                        <td style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(current)}</td>
+                        <td style={{ color: 'var(--info)' }}>+{formatCurrency(current - f.amount)}</td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <div style={{ padding: '12px 16px', background: 'var(--success-bg)', borderRadius: 'var(--radius-sm)', marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Total investido: {formatCurrency(totalFinancialInvested)}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--success)' }}>Valor atual: {formatCurrency(totalFinancialCurrent)} (+{formatCurrency(totalFinancialProfit)})</span>
+          </div>
+        )}
+
+        {/* Balance Summary — matches Reports.jsx "Saldo do Investidor" */}
+        {(myFinancial.length > 0 || totalProfit > 0 || myPayments.length > 0) && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Saldo do Investidor</span>
+            </div>
+            <div className="stats-grid" style={{ marginBottom: myPayments.length > 0 ? 16 : 0 }}>
+              <div className="stat-card">
+                <div className="stat-label">Rendimento do Aporte</div>
+                <div className="stat-value" style={{ fontSize: 18, color: 'var(--info)' }}>+{formatCurrency(totalFinancialProfit)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Lucro com Vendas</div>
+                <div className="stat-value" style={{ fontSize: 18, color: 'var(--success)' }}>{formatCurrency(totalProfit)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Acumulado</div>
+                <div className="stat-value" style={{ fontSize: 18, color: 'var(--primary)' }}>{formatCurrency(totalAccumulated)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Pago</div>
+                <div className="stat-value" style={{ fontSize: 18, color: '#D97706' }}>{formatCurrency(totalPaid)}</div>
+              </div>
+            </div>
+
+            {/* Net balance highlight */}
+            <div style={{
+              background: netBalance >= 0 ? 'var(--success-bg, #ecfdf5)' : 'var(--danger-bg, #fef2f2)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '12px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: myPayments.length > 0 ? 16 : 0,
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>Saldo Liquido</span>
+              <span style={{
+                fontSize: 20,
+                fontWeight: 700,
+                color: netBalance >= 0 ? 'var(--success)' : 'var(--danger)',
+              }}>
+                {formatCurrency(netBalance)}
+              </span>
+            </div>
+
+            {/* Payments table */}
+            {myPayments.length > 0 && (
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr><th>Data</th><th>Descricao</th><th>Valor Pago</th></tr>
+                  </thead>
+                  <tbody>
+                    {myPayments.map(p => (
+                      <tr key={p.id}>
+                        <td>{formatDate(p.date)}</td>
+                        <td>{p.description || '-'}</td>
+                        <td style={{ color: '#D97706', fontWeight: 600 }}>{formatCurrency(p.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Plantel do Investidor — matches Reports.jsx */}
+        {myBirds.length > 0 && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Plantel do Investidor</span>
+            </div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr><th>Especie</th><th>Raca</th><th>Matrizes</th><th>Reprodutores</th><th>Investido</th></tr>
+                </thead>
+                <tbody>
+                  {myBirds.map(b => (
+                    <tr key={b.id}>
+                      <td>{b.species}</td>
+                      <td><strong>{b.breed}</strong></td>
+                      <td>{b.matrixCount || 0}</td>
+                      <td>{b.breederCount || 0}</td>
+                      <td style={{ color: 'var(--primary)', fontWeight: 600 }}>{formatCurrency(b.investmentValue || 0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
 
         {/* Charts */}
-        {mySales.length > 0 && (
-          <div className="grid-2" style={{ marginBottom: 24 }}>
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">Evolucao de Lucros</span>
-                <div className="period-selector">
-                  {['daily', 'weekly', 'monthly', 'yearly'].map(p => (
-                    <button
-                      key={p}
-                      className={`period-btn ${period === p ? 'active' : ''}`}
-                      onClick={() => setPeriod(p)}
-                    >
-                      {{ daily: 'D', weekly: 'S', monthly: 'M', yearly: 'A' }[p]}
-                    </button>
-                  ))}
-                </div>
+        <div className="grid-2" style={{ marginBottom: 24 }}>
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">Evolucao de Lucros</span>
+              <div className="period-selector">
+                {['daily', 'weekly', 'monthly', 'yearly'].map(p => (
+                  <button
+                    key={p}
+                    className={`period-btn ${period === p ? 'active' : ''}`}
+                    onClick={() => setPeriod(p)}
+                  >
+                    {{ daily: 'D', weekly: 'S', monthly: 'M', yearly: 'A' }[p]}
+                  </button>
+                ))}
               </div>
-              {timelineData.length > 0 ? (
-                <div className="chart-container">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={timelineData}>
-                      <defs>
-                        <linearGradient id="colorProfitPortal" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6C2BD9" stopOpacity={0.2} />
-                          <stop offset="95%" stopColor="#6C2BD9" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                      <XAxis dataKey="period" fontSize={11} />
-                      <YAxis fontSize={11} tickFormatter={v => `R$${v.toFixed(0)}`} />
-                      <Tooltip formatter={v => formatCurrency(v)} />
-                      <Legend />
-                      <Area type="monotone" dataKey="ovos" name="Ovos" stroke="#6C2BD9" fill="url(#colorProfitPortal)" />
-                      <Area type="monotone" dataKey="aves" name="Animais" stroke="#3B82F6" fill="none" strokeDasharray="5 5" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <div className="empty-state"><p>Sem dados de lucro</p></div>
-              )}
             </div>
-
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">Lucro por Raca</span>
+            {timelineData.length > 0 ? (
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={timelineData}>
+                    <defs>
+                      <linearGradient id="colorProfitPortal" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6C2BD9" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#6C2BD9" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="period" fontSize={11} />
+                    <YAxis fontSize={11} tickFormatter={v => `R$${v.toFixed(0)}`} />
+                    <Tooltip formatter={v => formatCurrency(v)} />
+                    <Legend />
+                    <Area type="monotone" dataKey="ovos" name="Ovos" stroke="#6C2BD9" fill="url(#colorProfitPortal)" />
+                    <Area type="monotone" dataKey="aves" name="Animais" stroke="#3B82F6" fill="none" strokeDasharray="5 5" />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-              {breedData.length > 0 ? (
-                <div className="chart-container">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={breedData}
-                        cx="50%"
-                        cy="50%"
-                        outerRadius={90}
-                        dataKey="value"
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      >
-                        {breedData.map((_, i) => (
-                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={v => formatCurrency(v)} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <div className="empty-state"><p>Sem dados de lucro por raca</p></div>
-              )}
-            </div>
+            ) : (
+              <div className="empty-state"><p>Sem dados de lucro</p></div>
+            )}
           </div>
-        )}
 
-        {/* Sales / Profit Distribution */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title">Lucro por Raca</span>
+            </div>
+            {breedData.length > 0 ? (
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={breedData}
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={90}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    >
+                      {breedData.map((_, i) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={v => formatCurrency(v)} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="empty-state"><p>Sem dados de lucro por raca</p></div>
+            )}
+          </div>
+        </div>
+
+        {/* Sales details — matches Reports.jsx "Detalhamento de Vendas" */}
         {mySales.length > 0 && (
           <div className="card" style={{ marginBottom: 24 }}>
             <div className="card-header">
-              <span className="card-title">Vendas Vinculadas ({mySales.length})</span>
+              <span className="card-title">Detalhamento de Vendas ({mySales.length} itens)</span>
             </div>
             <div className="table-container">
               <table>
                 <thead>
                   <tr>
                     <th>Data</th>
+                    <th>Pedido</th>
                     <th>Item</th>
                     <th>Tipo</th>
-                    <th>Valor Venda</th>
+                    <th>Valor</th>
                     <th>Taxa</th>
-                    <th>Seu Lucro</th>
+                    <th>Lucro</th>
                   </tr>
                 </thead>
                 <tbody>
                   {mySales.map((item, idx) => (
                     <tr key={idx}>
                       <td>{formatDate(item.date || item.importedAt)}</td>
-                      <td>{item.itemDescription || item.item || '-'}</td>
-                      <td>
-                        <span className={`badge ${item.isEgg ? 'badge-purple' : 'badge-blue'}`}>
-                          {item.isEgg ? 'Ovo' : 'Ave'}
-                        </span>
+                      <td style={{ fontSize: 12 }}>{item.orderNumber || '-'}</td>
+                      <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.itemDescription || item.item || '-'}
                       </td>
+                      <td><span className={`badge ${item.isEgg ? 'badge-purple' : 'badge-blue'}`}>{item.isEgg ? 'Ovo' : 'Animal'}</span></td>
                       <td>{formatCurrency(item.totalValue)}</td>
                       <td>{(item.rate * 100).toFixed(1)}%</td>
                       <td style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(item.profit)}</td>
@@ -316,55 +386,18 @@ export default function InvestorPortal() {
                 </tbody>
               </table>
             </div>
-            <div style={{ padding: '12px 16px', background: 'var(--primary-bg)', borderRadius: 'var(--radius-sm)', marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13 }}>
-                Ovos: <strong style={{ color: 'var(--primary)' }}>{formatCurrency(myDistribution.eggProfit)}</strong>
-                {' | '}
-                Aves: <strong style={{ color: 'var(--info)' }}>{formatCurrency(myDistribution.birdProfit)}</strong>
-              </span>
-              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--success)' }}>Total: {formatCurrency(totalProfit)}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Payments received */}
-        {myPayments.length > 0 && (
-          <div className="card" style={{ marginBottom: 24 }}>
-            <div className="card-header">
-              <span className="card-title">Pagamentos Recebidos ({myPayments.length})</span>
-            </div>
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>Descricao</th>
-                    <th>Valor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {myPayments.map(p => (
-                    <tr key={p.id}>
-                      <td>{formatDate(p.date)}</td>
-                      <td style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{p.description || '-'}</td>
-                      <td style={{ color: 'var(--success)', fontWeight: 700 }}>{formatCurrency(p.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginTop: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontSize: 13 }}>Total acumulado (rendimento + lucro vendas):</span>
-                <strong>{formatCurrency(totalFinancialCurrent + totalProfit)}</strong>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, padding: '16px 16px 0', borderTop: '2px solid var(--border)', marginTop: 12 }}>
+              <div>
+                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Lucro Ovos: </span>
+                <strong style={{ color: 'var(--primary)' }}>{formatCurrency(myDistribution?.eggProfit || 0)}</strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontSize: 13 }}>Total pago:</span>
-                <strong style={{ color: 'var(--warning)' }}>-{formatCurrency(totalPaid)}</strong>
+              <div>
+                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Lucro Animais: </span>
+                <strong style={{ color: 'var(--info)' }}>{formatCurrency(myDistribution?.birdProfit || 0)}</strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>Saldo liquido:</span>
-                <strong style={{ color: netBalance >= 0 ? 'var(--success)' : 'var(--danger)', fontSize: 16 }}>{formatCurrency(netBalance)}</strong>
+              <div>
+                <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Total: </span>
+                <strong style={{ color: 'var(--success)', fontSize: 16 }}>{formatCurrency(totalProfit)}</strong>
               </div>
             </div>
           </div>

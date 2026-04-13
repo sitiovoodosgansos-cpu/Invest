@@ -188,7 +188,7 @@ export default function Reports() {
   const balanceSummary = useMemo(() => {
     const totalPaid = investorPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
     const salesProfit = filteredDist ? filteredDist.totalProfit : 0;
-    const totalAccumulated = financialSummary.current + salesProfit;
+    const totalAccumulated = (financialSummary.current - financialSummary.invested) + salesProfit;
     const netBalance = totalAccumulated - totalPaid;
     return { totalPaid, salesProfit, totalAccumulated, netBalance };
   }, [investorPayments, financialSummary, filteredDist]);
