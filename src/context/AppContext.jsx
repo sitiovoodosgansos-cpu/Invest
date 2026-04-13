@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { db } from '../firebase';
 import {
-  doc, collection, onSnapshot, setDoc, getDoc, deleteDoc, writeBatch,
+  doc, collection, onSnapshot, setDoc, getDoc, getDocs, deleteDoc, writeBatch,
 } from 'firebase/firestore';
 import { partitionSaleDuplicates } from '../utils/helpers';
 
@@ -48,12 +48,17 @@ const devError = (...args) => {
 };
 
 // NOTE: `sales` lives in its own state slice / Firestore collection now.
-// It is NOT part of `defaultData` so the appData save effect can't
-// accidentally write the sales array back into /config/appData and re-hit
-// the 1 MiB cap. The two slices are merged when building the context value.
+// The actual sales data is in the /sales collection (one doc per sale).
+// However, `defaultData` still includes `sales: []` because the Firestore
+// security rules for /config/appData require a `sales` field to be present
+// (it was part of the original schema). Without it, any appData write
+// would be rejected by the rules, silently losing other data updates.
+// This empty array is never used for rendering — the real sales come from
+// the separate `sales` state slice fed by the /sales collection listener.
 const defaultData = {
   investors: [],
   birds: [],
+  sales: [],
   financialInvestments: [],
   customSpecies: [],
   payments: [],
@@ -206,20 +211,58 @@ export function AppProvider({ children }) {
   // Listen to the /sales collection separately. Each sale is its own doc
   // now, so writes are O(1) and we're not bounded by the 1 MiB-per-doc cap.
   //
-  // On first load after the Phase 2C deploy, we also migrate any legacy
-  // sales still living in appData.sales: we copy them into /sales/{id} and
-  // then clear appData.sales so the old doc shrinks. The migration is
-  // gated on a localStorage flag so it runs at most once per browser.
+  // PROTECTION: If the listener errors out, we retry up to 3 times with
+  // exponential backoff (2s, 4s, 8s). We also refuse to overwrite a
+  // previously-loaded sales array with an empty snapshot — that pattern
+  // indicates a transient Firestore glitch, not a real data change.
+  const salesLoadedOnce = useRef(false);
+  const salesRetryCount = useRef(0);
+  const salesRetryTimer = useRef(null);
+  const MAX_SALES_RETRIES = 3;
+
   useEffect(() => {
-    const unsubscribe = onSnapshot(SALES_COLLECTION, (snapshot) => {
-      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      setSales(docs);
-      setSalesLoading(false);
-    }, (error) => {
-      devError('Sales collection listen error:', error);
-      setSalesLoading(false);
-    });
-    return () => unsubscribe();
+    let unsubscribe = null;
+
+    const startSalesListener = () => {
+      unsubscribe = onSnapshot(SALES_COLLECTION, (snapshot) => {
+        salesRetryCount.current = 0; // reset on success
+        const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        // PROTECTION: If we previously loaded 100+ sales and the new
+        // snapshot has 0 docs, something is wrong (transient glitch,
+        // not a real clearSales). Don't overwrite — keep existing data.
+        if (salesLoadedOnce.current && salesRef.current.length > 100 && docs.length === 0) {
+          devWarn(
+            `Blocked: sales onSnapshot returned 0 docs but we had ${salesRef.current.length}. Keeping existing data.`
+          );
+          return;
+        }
+
+        if (docs.length > 0) salesLoadedOnce.current = true;
+        setSales(docs);
+        setSalesLoading(false);
+      }, (error) => {
+        devError('Sales collection listen error:', error);
+        setSalesLoading(false);
+
+        // Retry with exponential backoff
+        if (salesRetryCount.current < MAX_SALES_RETRIES) {
+          const delay = Math.pow(2, salesRetryCount.current + 1) * 1000;
+          salesRetryCount.current += 1;
+          devWarn(`Retrying sales listener in ${delay}ms (attempt ${salesRetryCount.current}/${MAX_SALES_RETRIES})...`);
+          salesRetryTimer.current = setTimeout(() => {
+            startSalesListener();
+          }, delay);
+        }
+      });
+    };
+
+    startSalesListener();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+      if (salesRetryTimer.current) clearTimeout(salesRetryTimer.current);
+    };
   }, []);
 
   // One-shot migration: promote legacy appData.sales into /sales/{id}.
@@ -584,23 +627,104 @@ export function AppProvider({ children }) {
     }
   };
 
-  // Check and recover legacy sales from appData.sales that may not have
-  // been migrated to the /sales collection. Returns status info for the UI.
+  // Force a fresh read of the /sales collection from Firestore (bypassing
+  // the onSnapshot cache). Useful when the listener might have errored or
+  // returned stale data.
+  const forceReloadSales = async () => {
+    try {
+      const snapshot = await getDocs(SALES_COLLECTION);
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (docs.length > 0) {
+        salesLoadedOnce.current = true;
+        setSales(docs);
+      }
+      setSalesLoading(false);
+      return {
+        status: 'ok',
+        message: `Recarregadas ${docs.length} vendas da colecao /sales.`,
+        count: docs.length,
+      };
+    } catch (err) {
+      devError('forceReloadSales error:', err);
+      return {
+        status: 'error',
+        message: `Erro ao recarregar vendas: ${err?.code || err?.message || 'erro desconhecido'}`,
+      };
+    }
+  };
+
+  // Check and recover legacy sales from appData.sales (or localStorage
+  // backup) that may not have been migrated to the /sales collection.
+  // First tries a force-reload from Firestore (the data may already be
+  // there but the listener missed it). Then checks the legacy appData
+  // array. Finally falls back to localStorage backup.
   const recoverLegacySales = async () => {
     try {
-      const snap = await getDoc(FIRESTORE_DOC);
-      if (!snap.exists()) return { status: 'empty', message: 'Documento appData nao encontrado.' };
-      const legacySales = snap.data().sales;
-      if (!Array.isArray(legacySales) || legacySales.length === 0) {
-        return { status: 'empty', message: 'Nenhuma venda legada encontrada em appData.sales. O array ja foi limpo apos a migracao.' };
+      // Step 1: Force a fresh read from Firestore /sales collection.
+      // The onSnapshot listener may have errored out on initial load,
+      // leaving the UI showing 0 sales even though the data exists.
+      const reloadResult = await forceReloadSales();
+      if (reloadResult.status === 'ok' && reloadResult.count > 100) {
+        return {
+          status: 'recovered',
+          message: `${reloadResult.count} vendas encontradas na colecao /sales. O listener foi reconectado.`,
+          recovered: reloadResult.count,
+        };
       }
-      // There are legacy sales — check which ones are NOT yet in /sales
+
+      // Step 2: Check legacy appData.sales array.
+      const snap = await getDoc(FIRESTORE_DOC);
+      let legacySales = [];
+      if (snap.exists()) {
+        const arr = snap.data().sales;
+        if (Array.isArray(arr) && arr.length > 0) {
+          legacySales = arr;
+        }
+      }
+
+      // Step 3: If appData.sales is empty, try localStorage backup.
+      if (legacySales.length === 0) {
+        try {
+          const backupRaw = localStorage.getItem(BACKUP_KEY);
+          if (backupRaw) {
+            const backup = JSON.parse(backupRaw);
+            if (backup.data && Array.isArray(backup.data.sales) && backup.data.sales.length > 0) {
+              legacySales = backup.data.sales;
+              devWarn(`Found ${legacySales.length} sales in localStorage backup (saved at ${backup.savedAt}).`);
+            }
+          }
+        } catch { /* ignore parse errors */ }
+      }
+      if (legacySales.length === 0) {
+        try {
+          const storedRaw = localStorage.getItem(STORAGE_KEY);
+          if (storedRaw) {
+            const stored = JSON.parse(storedRaw);
+            if (Array.isArray(stored.sales) && stored.sales.length > 0) {
+              legacySales = stored.sales;
+              devWarn(`Found ${legacySales.length} sales in localStorage main storage.`);
+            }
+          }
+        } catch { /* ignore parse errors */ }
+      }
+
+      if (legacySales.length === 0) {
+        const currentCount = salesRef.current.length;
+        return {
+          status: 'empty',
+          message: currentCount > 0
+            ? `Nenhuma venda adicional encontrada. ${currentCount} vendas ja carregadas.`
+            : 'Nenhuma venda encontrada em nenhuma fonte (Firestore, appData, localStorage).',
+        };
+      }
+
+      // Step 4: Compare with current /sales collection and re-migrate missing ones.
       const currentIds = new Set(salesRef.current.map(s => s.id));
       const missing = legacySales.filter(s => !currentIds.has(s.id));
       if (missing.length === 0) {
-        return { status: 'ok', message: `Todas as ${legacySales.length} vendas legadas ja existem na colecao /sales.` };
+        return { status: 'ok', message: `Todas as ${legacySales.length} vendas ja existem na colecao /sales.` };
       }
-      // Re-migrate the missing ones
+
       const CHUNK = 400;
       let migrated = 0;
       for (let i = 0; i < missing.length; i += CHUNK) {
@@ -620,7 +744,7 @@ export function AppProvider({ children }) {
       setSaveError(null);
       return {
         status: 'recovered',
-        message: `Recuperadas ${migrated} vendas de ${legacySales.length} encontradas no formato antigo. Total atual: ${salesRef.current.length + migrated}.`,
+        message: `Recuperadas ${migrated} vendas de ${legacySales.length} encontradas. Total atual: ${salesRef.current.length + migrated}.`,
         recovered: migrated,
         totalLegacy: legacySales.length,
       };
@@ -1027,7 +1151,7 @@ export function AppProvider({ children }) {
     saveError,
     addInvestor, updateInvestor, deleteInvestor,
     addBird, updateBird, deleteBird,
-    addSales, clearSales, deleteSale, updateSale, removeDuplicateSales, recoverLegacySales,
+    addSales, clearSales, deleteSale, updateSale, removeDuplicateSales, recoverLegacySales, forceReloadSales,
     addFinancialInvestment, deleteFinancialInvestment,
     addPayment, deletePayment,
     addExpense, bulkAddExpenses, updateExpense, deleteExpense,
