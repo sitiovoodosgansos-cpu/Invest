@@ -148,30 +148,26 @@ function parseSingleOrder(text) {
     || text.match(/Cupom[^-]*-\s*R\$\s*([\d.,]+)/i);
   const discount = discountMatch ? parseBRL(discountMatch[1]) : 0;
 
-  // Normalize: collapse newlines into spaces so multi-line item names are
-  // joined. BUT first strip the order header block entirely — both the
-  // "Pedido XXXXX (N itens) [nome]" line AND the "Feito em DD de MMM. de
-  // YYYY, HH:MM [para <loja>]" line. The order number, buyer name and
-  // date were already captured above against the raw `text`, so they're
-  // safe to strip here.
+  // Strip the entire order header block in one pass: from "Pedido XXXXX"
+  // through "Feito em ... [para ...]". This removes the Pedido line, the
+  // buyer contact line (name, email, phone) that sits between them in
+  // detailed PDF exports, AND the Feito em / para lines.  Order number,
+  // buyer name and date were already captured from the raw `text` above.
   //
-  // If we leave the header in the text, collapsing newlines merges it
-  // into the first item's description — e.g. "Pedido 10001 (5 itens) para
-  // Sitio Voo dos Gansos Peru Bronze". The older workaround only handled
-  // OVO-prefixed items because it relied on an "OVO" lookahead; bird
-  // orders that started with "Peru", "Brahma", etc. fell through and got
-  // polluted.
-  //
-  // For the Feito line we match both shapes Wix emits: the "para X"
-  // suffix on the same line as "Feito em...", AND on a standalone line
-  // immediately after (some PDF extractions split the header in two).
+  // Without this, collapsing newlines merges header text into the first
+  // item's description — e.g. "gmail.com, 83998572597 Sebright Dourada".
   let normalized = text
     .replace(/\r\n/g, '\n')
-    .replace(/^[ \t]*Pedido\s+\d+[^\n]*\n?/gim, '')
+    // Main header strip: Pedido ... [buyer info] ... Feito em ... [para ...]
     .replace(
-      /^[ \t]*Feito\s+em\s+[^\n]*(?:\n[ \t]*para\s+[^\n]*)?\n?/gim,
+      /Pedido\s+\d+[\s\S]*?Feito\s+em\s+[^\n]*(?:\n[ \t]*para[^\n]*)?\n?/gi,
       ''
     )
+    // Fallback: orphan Pedido or Feito em lines (e.g. missing counterpart)
+    .replace(/^[ \t]*Pedido\s+\d+[^\n]*\n?/gim, '')
+    .replace(/^[ \t]*Feito\s+em\s+[^\n]*\n?/gim, '')
+    // Strip footer metadata (delivery address, payment info, etc.)
+    .replace(/Informações do cliente[\s\S]*/i, '')
     .replace(/(?<!\n)\n(?!\n)/g, ' ');
 
   // Remove "Sexo:" prefix so gender info (Casal/Macho/Fêmea) merges into item description
