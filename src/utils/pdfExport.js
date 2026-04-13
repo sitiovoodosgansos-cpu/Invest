@@ -174,8 +174,10 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
     const months = getMonthsDifference(f.date, new Date().toISOString());
     return s + calculateCompoundInterest(f.amount, 0.03, months);
   }, 0);
+  const totalFinancialInvested = invFinancial.reduce((s, f) => s + parseFloat(f.amount), 0);
+  const totalFinancialProfit = totalFinancialCurrent - totalFinancialInvested;
   const salesProfit = distribution ? distribution.totalProfit : 0;
-  const totalAccumulated = totalFinancialCurrent + salesProfit;
+  const totalAccumulated = totalFinancialProfit + salesProfit;
   const netBalance = totalAccumulated - totalPaid;
 
   // Payments table (if any)
@@ -221,7 +223,7 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
 
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Aporte atualizado (c/ juros): ${formatCurrency(totalFinancialCurrent)}`, 20, y + 19);
+    doc.text(`Rendimento do aporte: ${formatCurrency(totalFinancialProfit)}`, 20, y + 19);
     doc.text(`Lucro com vendas: ${formatCurrency(salesProfit)}`, 20, y + 27);
     doc.text(`Total acumulado: ${formatCurrency(totalAccumulated)}`, 20, y + 35);
     doc.text(`Total pago: ${formatCurrency(totalPaid)}`, pageWidth / 2, y + 19);

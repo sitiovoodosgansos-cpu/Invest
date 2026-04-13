@@ -70,8 +70,8 @@ export default function Financial() {
     return Object.entries(balances).map(([id, b]) => ({
       investorId: id,
       ...b,
-      totalAccumulated: b.currentValue + b.salesProfit,
-      netBalance: b.currentValue + b.salesProfit - b.totalPaid,
+      totalAccumulated: b.financialProfit + b.salesProfit,
+      netBalance: b.financialProfit + b.salesProfit - b.totalPaid,
     }));
   }, [investmentDetails, distribution, payments, investors]);
 
@@ -174,7 +174,7 @@ export default function Financial() {
               <thead>
                 <tr>
                   <th>Investidor</th>
-                  <th>Aporte + Rend.</th>
+                  <th>Rendimento</th>
                   <th>Lucro Vendas</th>
                   <th>Total Acumulado</th>
                   <th>Total Pago</th>
@@ -185,7 +185,7 @@ export default function Financial() {
                 {investorBalances.map(b => (
                   <tr key={b.investorId}>
                     <td><strong>{b.name}</strong></td>
-                    <td>{formatCurrency(b.currentValue)}</td>
+                    <td>{formatCurrency(b.financialProfit)}</td>
                     <td>{formatCurrency(b.salesProfit)}</td>
                     <td style={{ fontWeight: 600 }}>{formatCurrency(b.totalAccumulated)}</td>
                     <td style={{ color: 'var(--warning)', fontWeight: 600 }}>{formatCurrency(b.totalPaid)}</td>
@@ -365,8 +365,8 @@ export default function Financial() {
               {selectedPaymentBalance && (
                 <div style={{ padding: 12, background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginBottom: 12, fontSize: 13 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span>Aporte + Rendimento:</span>
-                    <strong>{formatCurrency(selectedPaymentBalance.currentValue)}</strong>
+                    <span>Rendimento do Aporte:</span>
+                    <strong>{formatCurrency(selectedPaymentBalance.financialProfit)}</strong>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                     <span>Lucro com Vendas:</span>
