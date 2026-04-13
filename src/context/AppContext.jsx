@@ -584,6 +584,54 @@ export function AppProvider({ children }) {
     }
   };
 
+  // Check and recover legacy sales from appData.sales that may not have
+  // been migrated to the /sales collection. Returns status info for the UI.
+  const recoverLegacySales = async () => {
+    try {
+      const snap = await getDoc(FIRESTORE_DOC);
+      if (!snap.exists()) return { status: 'empty', message: 'Documento appData nao encontrado.' };
+      const legacySales = snap.data().sales;
+      if (!Array.isArray(legacySales) || legacySales.length === 0) {
+        return { status: 'empty', message: 'Nenhuma venda legada encontrada em appData.sales. O array ja foi limpo apos a migracao.' };
+      }
+      // There are legacy sales — check which ones are NOT yet in /sales
+      const currentIds = new Set(salesRef.current.map(s => s.id));
+      const missing = legacySales.filter(s => !currentIds.has(s.id));
+      if (missing.length === 0) {
+        return { status: 'ok', message: `Todas as ${legacySales.length} vendas legadas ja existem na colecao /sales.` };
+      }
+      // Re-migrate the missing ones
+      const CHUNK = 400;
+      let migrated = 0;
+      for (let i = 0; i < missing.length; i += CHUNK) {
+        const chunk = missing.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+        for (const sale of chunk) {
+          const saleId = sale.id || newId();
+          const payload = { ...sale };
+          payload.itemDescription = String(sale.itemDescription || sale.item || 'Sem descricao');
+          payload.totalValue = Number(sale.totalValue) || 0;
+          delete payload.id;
+          batch.set(doc(db, 'sales', saleId), payload);
+        }
+        await batch.commit();
+        migrated += chunk.length;
+      }
+      setSaveError(null);
+      return {
+        status: 'recovered',
+        message: `Recuperadas ${migrated} vendas de ${legacySales.length} encontradas no formato antigo. Total atual: ${salesRef.current.length + migrated}.`,
+        recovered: migrated,
+        totalLegacy: legacySales.length,
+      };
+    } catch (err) {
+      devError('recoverLegacySales error:', err);
+      const msg = `Erro ao recuperar vendas: ${err?.code || err?.message || 'erro desconhecido'}`;
+      setSaveError(msg);
+      return { status: 'error', message: msg };
+    }
+  };
+
   // Custom Species
   const addCustomSpecies = (speciesData) => {
     setData(prev => {
@@ -979,7 +1027,7 @@ export function AppProvider({ children }) {
     saveError,
     addInvestor, updateInvestor, deleteInvestor,
     addBird, updateBird, deleteBird,
-    addSales, clearSales, deleteSale, updateSale, removeDuplicateSales,
+    addSales, clearSales, deleteSale, updateSale, removeDuplicateSales, recoverLegacySales,
     addFinancialInvestment, deleteFinancialInvestment,
     addPayment, deletePayment,
     addExpense, bulkAddExpenses, updateExpense, deleteExpense,

@@ -16,12 +16,14 @@ const EMPTY_MANUAL_ITEM = { itemDescription: '', quantity: 1, price: '' };
 export default function Sales() {
   const {
     investors, birds, sales,
-    addSales, clearSales, deleteSale, updateSale, removeDuplicateSales,
+    addSales, clearSales, deleteSale, updateSale, removeDuplicateSales, recoverLegacySales,
   } = useApp();
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [dedupeRunning, setDedupeRunning] = useState(false);
   const [dedupeResult, setDedupeResult] = useState(null);
+  const [recoverRunning, setRecoverRunning] = useState(false);
+  const [recoverResult, setRecoverResult] = useState(null);
   const [filterType, setFilterType] = useState('all');
   const [importTab, setImportTab] = useState('file'); // file | paste | manual
   const [pasteText, setPasteText] = useState('');
@@ -226,6 +228,20 @@ export default function Sales() {
     }
   };
 
+  const handleRecoverSales = async () => {
+    if (recoverRunning) return;
+    setRecoverRunning(true);
+    setRecoverResult(null);
+    try {
+      const result = await recoverLegacySales();
+      setRecoverResult(result);
+    } catch (err) {
+      setRecoverResult({ status: 'error', message: err?.message || 'Erro ao recuperar vendas' });
+    } finally {
+      setRecoverRunning(false);
+    }
+  };
+
   const filteredSales = useMemo(() => {
     let list = validSales;
     if (filterType === 'eggs') list = list.filter(s => s.isEgg);
@@ -345,6 +361,15 @@ export default function Sales() {
               </button>
               <button
                 className="btn btn-sm btn-secondary"
+                onClick={handleRecoverSales}
+                disabled={recoverRunning}
+                title="Verificar e recuperar vendas que podem ter sido perdidas na migracao"
+                style={{ color: 'var(--warning)' }}
+              >
+                <AlertCircle size={14} /> {recoverRunning ? 'Verificando...' : 'Recuperar Vendas'}
+              </button>
+              <button
+                className="btn btn-sm btn-secondary"
                 style={{ color: 'var(--danger)' }}
                 onClick={async () => {
                   if (window.confirm('Limpar todas as vendas importadas?')) {
@@ -393,6 +418,28 @@ export default function Sales() {
                 </button>
               </>
             )}
+          </div>
+        )}
+
+        {recoverResult && (
+          <div style={{
+            marginBottom: 16,
+            padding: 12,
+            borderRadius: 'var(--radius-sm)',
+            background: recoverResult.status === 'error' ? 'var(--danger-bg)' : recoverResult.status === 'recovered' ? 'var(--success-bg)' : 'var(--primary-bg)',
+            color: recoverResult.status === 'error' ? 'var(--danger)' : recoverResult.status === 'recovered' ? 'var(--success)' : 'var(--primary)',
+            display: 'flex', alignItems: 'center', gap: 8, fontSize: 13,
+          }}>
+            {recoverResult.status === 'error' ? <AlertCircle size={18} /> : <CheckCircle size={18} />}
+            <span>{recoverResult.message}</span>
+            <button
+              className="btn btn-sm btn-secondary"
+              style={{ marginLeft: 'auto', padding: '2px 6px' }}
+              onClick={() => setRecoverResult(null)}
+              title="Fechar"
+            >
+              <X size={12} />
+            </button>
           </div>
         )}
 
