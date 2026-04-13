@@ -173,16 +173,18 @@ function parseSingleOrder(text) {
   // Remove "Sexo:" prefix so gender info (Casal/Macho/Fêmea) merges into item description
   normalized = normalized.replace(/\bSexo:\s*/gi, '');
 
-  // Extract line items using a general regex that captures any text before "R$ price xQTY R$ total"
-  // This handles both OVO items and bird items (Brahma, Sedosa, etc.)
-  // Note: \w doesn't match accented chars (ê,ã,ç,etc), so we add À-ÿ explicitly
-  const itemRegex = /([A-ZÀ-ÿa-zà-ÿ][\wÀ-ÿ\s\-–(),.]*?)\s+R\$\s*([\d.,]+)\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
+  // Extract line items.  Standard format (after newline collapse):
+  //   ITEM R$ price xQTY R$ total
+  // Some Wix PDFs repeat the unit price on a separate line, yielding:
+  //   ITEM R$ price R$ price xQTY R$ total
+  // The optional (?:\s+R\$\s*[\d.,]+)? handles the repeated price.
+  const itemRegex = /([A-ZÀ-ÿa-zà-ÿ][\wÀ-ÿ\s\-–(),.]*?)\s+R\$\s*([\d.,]+)(?:\s+R\$\s*[\d.,]+)?\s*x\s*(\d+)\s+R\$\s*([\d.,]+)/g;
 
   let match;
   while ((match = itemRegex.exec(normalized)) !== null) {
     let itemDescription = match[1].trim();
     // Skip summary lines
-    if (/^(Itens|Frete|Imposto|Cupom|Total|Pago|Subtotal)/i.test(itemDescription)) continue;
+    if (/^(Itens|Frete|Imposto|Cupom|Total|Pago|Subtotal|Desconto)/i.test(itemDescription)) continue;
 
     const unitPrice = parseBRL(match[2]);
     let quantity = parseInt(match[3], 10);
