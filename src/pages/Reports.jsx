@@ -77,6 +77,7 @@ function getMonthOptions() {
 
 export default function Reports() {
   const { investors, birds, sales, financialInvestments, payments } = useApp();
+  const [viewMode, setViewMode] = useState('general'); // 'general' | 'investor'
   const [selectedInvestor, setSelectedInvestor] = useState('');
   const [period, setPeriod] = useState('monthly');
   const [dateFilter, setDateFilter] = useState('all');
@@ -239,86 +240,483 @@ export default function Reports() {
 
   const monthOptions = useMemo(() => getMonthOptions(), []);
 
+  // ========== GENERAL (site-wide) REPORT DATA ==========
+  // All computed regardless of selected investor; filtered by dateRange.
+  const generalFinancialSummary = useMemo(() => {
+    return (financialInvestments || []).reduce((acc, f) => {
+      const months = getMonthsDifference(f.date);
+      const current = calculateCompoundInterest(parseFloat(f.amount) || 0, 0.03, months);
+      return {
+        invested: acc.invested + (parseFloat(f.amount) || 0),
+        current: acc.current + current,
+      };
+    }, { invested: 0, current: 0 });
+  }, [financialInvestments]);
+
+  const generalAllItems = useMemo(() => {
+    // Merge every investor's distribution items into one list.
+    const items = [];
+    Object.values(distribution.distribution || {}).forEach(dist => {
+      (dist.items || []).forEach(it => items.push(it));
+    });
+    return filterItemsByDate(items, dateRange);
+  }, [distribution, dateRange]);
+
+  const generalSalesProfit = useMemo(
+    () => generalAllItems.reduce((s, i) => s + (i.profit || 0), 0),
+    [generalAllItems]
+  );
+  const generalSalesRevenue = useMemo(
+    () => generalAllItems.reduce((s, i) => s + (i.totalValue || 0), 0),
+    [generalAllItems]
+  );
+
+  const generalTotalPaid = useMemo(
+    () => filterItemsByDate(payments || [], dateRange).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0),
+    [payments, dateRange]
+  );
+
+  const generalBirdInvestment = useMemo(
+    () => (birds || []).reduce((s, b) => s + (parseFloat(b.investmentValue) || 0), 0),
+    [birds]
+  );
+
+  const generalTimelineData = useMemo(() => {
+    if (!generalAllItems.length) return [];
+    const grouped = groupSalesByPeriod(generalAllItems, period);
+    return Object.entries(grouped)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, items]) => ({
+        period: key,
+        ovos: items.filter(i => i.isEgg).reduce((s, i) => s + (i.profit || 0), 0),
+        aves: items.filter(i => !i.isEgg).reduce((s, i) => s + (i.profit || 0), 0),
+        total: items.reduce((s, i) => s + (i.profit || 0), 0),
+      }));
+  }, [generalAllItems, period]);
+
+  const generalBreedData = useMemo(() => {
+    if (!generalAllItems.length) return [];
+    const byBreed = {};
+    generalAllItems.forEach(item => {
+      const breed = item.matchedBird || 'Outros';
+      if (!byBreed[breed]) byBreed[breed] = 0;
+      byBreed[breed] += (item.profit || 0);
+    });
+    const sorted = Object.entries(byBreed)
+      .map(([name, value]) => ({ name, value }))
+      .filter(e => e.value > 0)
+      .sort((a, b) => b.value - a.value);
+    if (sorted.length <= 5) return sorted;
+    const top5 = sorted.slice(0, 5);
+    const outrosValue = sorted.slice(5).reduce((s, d) => s + d.value, 0);
+    if (outrosValue > 0) top5.push({ name: 'Outros', value: outrosValue });
+    return top5;
+  }, [generalAllItems]);
+
+  // Per-investor ranking table (site-wide)
+  const investorRanking = useMemo(() => {
+    const rows = investors.map(inv => {
+      const invFin = (financialInvestments || []).filter(f => f.investorId === inv.id);
+      const fInvested = invFin.reduce((s, f) => s + (parseFloat(f.amount) || 0), 0);
+      const fCurrent = invFin.reduce((s, f) => {
+        const months = getMonthsDifference(f.date);
+        return s + calculateCompoundInterest(parseFloat(f.amount) || 0, 0.03, months);
+      }, 0);
+      const financialProfit = fCurrent - fInvested;
+
+      const invDist = distribution.distribution[inv.id];
+      const items = invDist ? filterItemsByDate(invDist.items, dateRange) : [];
+      const salesProfit = items.reduce((s, i) => s + (i.profit || 0), 0);
+
+      const invPayments = filterItemsByDate(
+        (payments || []).filter(p => p.investorId === inv.id),
+        dateRange
+      );
+      const totalPaid = invPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+
+      const totalAccumulated = financialProfit + salesProfit;
+      const netBalance = totalAccumulated - totalPaid;
+      return {
+        id: inv.id,
+        name: inv.name,
+        financialProfit,
+        salesProfit,
+        totalAccumulated,
+        totalPaid,
+        netBalance,
+      };
+    });
+    return rows.sort((a, b) => b.totalAccumulated - a.totalAccumulated);
+  }, [investors, financialInvestments, distribution, payments, dateRange]);
+
+  // Sorted general sales for the detail table
+  const sortedGeneralItems = useMemo(() => {
+    if (!generalAllItems.length) return [];
+    const items = [...generalAllItems];
+    const dir = sortDirection === 'asc' ? 1 : -1;
+    items.sort((a, b) => {
+      switch (sortField) {
+        case 'date': {
+          const da = new Date(a.date || a.importedAt || 0).getTime();
+          const db = new Date(b.date || b.importedAt || 0).getTime();
+          return (da - db) * dir;
+        }
+        case 'order': {
+          const oa = String(a.orderNumber || '');
+          const ob = String(b.orderNumber || '');
+          return oa.localeCompare(ob, undefined, { numeric: true }) * dir;
+        }
+        case 'item': {
+          const ia = String(a.itemDescription || a.item || '');
+          const ib = String(b.itemDescription || b.item || '');
+          return ia.localeCompare(ib) * dir;
+        }
+        case 'type': {
+          const ta = a.isEgg ? 0 : 1;
+          const tb = b.isEgg ? 0 : 1;
+          return (ta - tb) * dir;
+        }
+        case 'price':
+          return ((a.totalValue || 0) - (b.totalValue || 0)) * dir;
+        case 'profit':
+          return ((a.profit || 0) - (b.profit || 0)) * dir;
+        default:
+          return 0;
+      }
+    });
+    return items;
+  }, [generalAllItems, sortField, sortDirection]);
+
   return (
     <div className="animate-in">
       <div className="page-header">
         <h2>Relatorios</h2>
-        <p>Visualize e exporte relatorios individuais por investidor</p>
+        <p>Visualize e exporte relatorios gerais ou por investidor</p>
       </div>
 
-      <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 10 }}>
-        <select
-          className="form-input"
-          style={{ width: 'auto', minWidth: 250 }}
-          value={selectedInvestor}
-          onChange={e => setSelectedInvestor(e.target.value)}
+      {/* View mode toggle */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button
+          className={`btn ${viewMode === 'general' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setViewMode('general')}
         >
-          <option value="">Selecione um investidor</option>
-          {investors.map(i => (
-            <option key={i.id} value={i.id}>{i.name}</option>
-          ))}
-        </select>
+          Relatorio Geral
+        </button>
+        <button
+          className={`btn ${viewMode === 'investor' ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setViewMode('investor')}
+        >
+          Por Investidor
+        </button>
+      </div>
 
-        {selectedInvestor && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg-card)', borderRadius: 10, padding: '4px 6px', border: '1px solid var(--border-light)' }}>
-              <Calendar size={14} style={{ color: 'var(--text-muted)' }} />
+      {/* Date filter (shown for both views) */}
+      <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 10 }}>
+        {viewMode === 'investor' && (
+          <select
+            className="form-input"
+            style={{ width: 'auto', minWidth: 250 }}
+            value={selectedInvestor}
+            onChange={e => setSelectedInvestor(e.target.value)}
+          >
+            <option value="">Selecione um investidor</option>
+            {investors.map(i => (
+              <option key={i.id} value={i.id}>{i.name}</option>
+            ))}
+          </select>
+        )}
+
+        {(viewMode === 'general' || selectedInvestor) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--bg-card)', borderRadius: 10, padding: '4px 6px', border: '1px solid var(--border-light)' }}>
+            <Calendar size={14} style={{ color: 'var(--text-muted)' }} />
+            <select
+              className="form-input"
+              style={{ width: 'auto', minWidth: 160, border: 'none', background: 'transparent', padding: '6px 8px' }}
+              value={dateFilter}
+              onChange={e => { setDateFilter(e.target.value); if (e.target.value !== 'specific_month') setSpecificMonth(''); }}
+            >
+              <option value="all">Todos os periodos</option>
+              <option value="today">Hoje</option>
+              <option value="7days">Ultimos 7 dias</option>
+              <option value="last_month">Ultimo mes</option>
+              <option value="specific_month">Mes especifico</option>
+              <option value="last_year">Ultimo ano</option>
+            </select>
+
+            {dateFilter === 'specific_month' && (
               <select
                 className="form-input"
                 style={{ width: 'auto', minWidth: 160, border: 'none', background: 'transparent', padding: '6px 8px' }}
-                value={dateFilter}
-                onChange={e => { setDateFilter(e.target.value); if (e.target.value !== 'specific_month') setSpecificMonth(''); }}
+                value={specificMonth}
+                onChange={e => setSpecificMonth(e.target.value)}
               >
-                <option value="all">Todos os periodos</option>
-                <option value="today">Hoje</option>
-                <option value="7days">Ultimos 7 dias</option>
-                <option value="last_month">Ultimo mes</option>
-                <option value="specific_month">Mes especifico</option>
-                <option value="last_year">Ultimo ano</option>
+                <option value="">Selecione o mes</option>
+                {monthOptions.map(m => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
               </select>
-
-              {dateFilter === 'specific_month' && (
-                <select
-                  className="form-input"
-                  style={{ width: 'auto', minWidth: 160, border: 'none', background: 'transparent', padding: '6px 8px' }}
-                  value={specificMonth}
-                  onChange={e => setSpecificMonth(e.target.value)}
-                >
-                  <option value="">Selecione o mes</option>
-                  {monthOptions.map(m => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-
-            {dateRange && (
-              <span className="badge badge-purple" style={{ fontSize: 12, padding: '6px 12px' }}>
-                <Filter size={12} style={{ marginRight: 4 }} />
-                {dateRange.label}
-              </span>
             )}
-
-            <button className="btn btn-primary" onClick={handleExportPDF}>
-              <FileDown size={16} /> Exportar PDF
-            </button>
-            <button
-              className="btn"
-              onClick={copyInvestorLink}
-              style={{
-                background: linkCopied ? 'var(--success)' : 'var(--primary)',
-                color: '#fff',
-                border: 'none',
-              }}
-            >
-              {linkCopied ? <Check size={16} /> : <Link size={16} />}
-              {linkCopied ? 'Link copiado!' : 'Copiar link do investidor'}
-            </button>
-          </>
+          </div>
+        )}
+        {(viewMode === 'general' || selectedInvestor) && dateRange && (
+          <span className="badge badge-purple" style={{ fontSize: 12, padding: '6px 12px' }}>
+            <Filter size={12} style={{ marginRight: 4 }} />
+            {dateRange.label}
+          </span>
         )}
       </div>
 
-      {!selectedInvestor ? (
+      {viewMode === 'investor' && selectedInvestor && (
+        <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 10 }}>
+          <button className="btn btn-primary" onClick={handleExportPDF}>
+            <FileDown size={16} /> Exportar PDF
+          </button>
+          <button
+            className="btn"
+            onClick={copyInvestorLink}
+            style={{
+              background: linkCopied ? 'var(--success)' : 'var(--primary)',
+              color: '#fff',
+              border: 'none',
+            }}
+          >
+            {linkCopied ? <Check size={16} /> : <Link size={16} />}
+            {linkCopied ? 'Link copiado!' : 'Copiar link do investidor'}
+          </button>
+        </div>
+      )}
+
+      {viewMode === 'general' ? (
+        <>
+          {/* ========== GENERAL SITE REPORT ========== */}
+          {/* Summary stat cards */}
+          <div className="stats-grid" style={{ marginBottom: 24 }}>
+            <div className="stat-card">
+              <div className="stat-label">Investidores</div>
+              <div className="stat-value">{investors.length}</div>
+              <div className="stat-change positive">{birds.length} aves cadastradas</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Total Aportado</div>
+              <div className="stat-value" style={{ color: 'var(--primary)' }}>{formatCurrency(generalFinancialSummary.invested)}</div>
+              <div className="stat-change positive">Valor Atual: {formatCurrency(generalFinancialSummary.current)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Rendimento dos Aportes</div>
+              <div className="stat-value" style={{ color: 'var(--info)' }}>+{formatCurrency(generalFinancialSummary.current - generalFinancialSummary.invested)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Investido no Plantel</div>
+              <div className="stat-value" style={{ color: 'var(--primary)' }}>{formatCurrency(generalBirdInvestment)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Receita Total (Vendas)</div>
+              <div className="stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(generalSalesRevenue)}</div>
+              <div className="stat-change positive">{generalAllItems.length} itens vendidos</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Lucro Distribuido</div>
+              <div className="stat-value" style={{ color: 'var(--success)' }}>{formatCurrency(generalSalesProfit)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Total Pago aos Investidores</div>
+              <div className="stat-value" style={{ color: '#D97706' }}>{formatCurrency(generalTotalPaid)}</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-label">Saldo a Pagar</div>
+              <div className="stat-value" style={{
+                color: ((generalFinancialSummary.current - generalFinancialSummary.invested) + generalSalesProfit - generalTotalPaid) >= 0 ? 'var(--success)' : 'var(--danger)'
+              }}>
+                {formatCurrency((generalFinancialSummary.current - generalFinancialSummary.invested) + generalSalesProfit - generalTotalPaid)}
+              </div>
+            </div>
+          </div>
+
+          {/* Charts: timeline + breed pie */}
+          <div className="grid-2">
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">Evolucao de Lucros (Geral)</span>
+                <div className="period-selector">
+                  {['daily', 'weekly', 'monthly', 'yearly'].map(p => (
+                    <button
+                      key={p}
+                      className={`period-btn ${period === p ? 'active' : ''}`}
+                      onClick={() => setPeriod(p)}
+                    >
+                      {{ daily: 'D', weekly: 'S', monthly: 'M', yearly: 'A' }[p]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {generalTimelineData.length > 0 ? (
+                <div className="chart-container">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={generalTimelineData}>
+                      <defs>
+                        <linearGradient id="colorGeneralProfit" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#6C2BD9" stopOpacity={0.25} />
+                          <stop offset="95%" stopColor="#6C2BD9" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="period" fontSize={11} />
+                      <YAxis fontSize={11} tickFormatter={v => `R$${v.toFixed(0)}`} />
+                      <Tooltip formatter={v => formatCurrency(v)} />
+                      <Legend />
+                      <Area type="monotone" dataKey="ovos" name="Ovos" stroke="#6C2BD9" fill="url(#colorGeneralProfit)" />
+                      <Area type="monotone" dataKey="aves" name="Animais" stroke="#3B82F6" fill="none" strokeDasharray="5 5" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="empty-state"><p>Sem dados de lucro{dateRange ? ` para ${dateRange.label}` : ''}</p></div>
+              )}
+            </div>
+
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">Top 5 Lucro por Raca</span>
+              </div>
+              {generalBreedData.length > 0 ? (
+                <div className="chart-container">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={generalBreedData}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={90}
+                        dataKey="value"
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {generalBreedData.map((_, i) => (
+                          <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={v => formatCurrency(v)} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="empty-state"><p>Sem dados de lucro por raca</p></div>
+              )}
+            </div>
+          </div>
+
+          {/* Investor ranking */}
+          {investorRanking.length > 0 && (
+            <div className="card" style={{ marginTop: 24 }}>
+              <div className="card-header">
+                <span className="card-title">Ranking de Investidores</span>
+              </div>
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Investidor</th>
+                      <th>Rend. Aportes</th>
+                      <th>Lucro Vendas</th>
+                      <th>Total Acumulado</th>
+                      <th>Total Pago</th>
+                      <th>Saldo Liquido</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {investorRanking.map((r, i) => (
+                      <tr key={r.id}>
+                        <td><strong>{i + 1}</strong></td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div className="investor-avatar" style={{ width: 28, height: 28, fontSize: 11 }}>
+                              {getInitials(r.name)}
+                            </div>
+                            <span>{r.name}</span>
+                          </div>
+                        </td>
+                        <td style={{ color: 'var(--info)' }}>+{formatCurrency(r.financialProfit)}</td>
+                        <td style={{ color: 'var(--success)' }}>{formatCurrency(r.salesProfit)}</td>
+                        <td style={{ color: 'var(--primary)', fontWeight: 600 }}>{formatCurrency(r.totalAccumulated)}</td>
+                        <td style={{ color: '#D97706' }}>{formatCurrency(r.totalPaid)}</td>
+                        <td style={{ fontWeight: 700, color: r.netBalance >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                          {formatCurrency(r.netBalance)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* General sales detail (sortable) */}
+          {sortedGeneralItems.length > 0 && (
+            <div className="card" style={{ marginTop: 24 }}>
+              <div className="card-header">
+                <span className="card-title">Detalhamento de Vendas ({sortedGeneralItems.length} itens)</span>
+              </div>
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('date')}>
+                        Data <SortIcon field="date" />
+                      </th>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('order')}>
+                        Pedido <SortIcon field="order" />
+                      </th>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('item')}>
+                        Item <SortIcon field="item" />
+                      </th>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('type')}>
+                        Tipo <SortIcon field="type" />
+                      </th>
+                      <th>Raca</th>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('price')}>
+                        Valor <SortIcon field="price" />
+                      </th>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('profit')}>
+                        Lucro <SortIcon field="profit" />
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedGeneralItems.slice(0, 500).map((item, idx) => (
+                      <tr key={idx}>
+                        <td>{formatDate(item.date || item.importedAt)}</td>
+                        <td style={{ fontSize: 12 }}>{item.orderNumber || '-'}</td>
+                        <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.itemDescription || '-'}
+                        </td>
+                        <td><span className={`badge ${item.isEgg ? 'badge-purple' : 'badge-blue'}`}>{item.isEgg ? 'Ovo' : 'Animal'}</span></td>
+                        <td>{item.matchedBird || '-'}</td>
+                        <td>{formatCurrency(item.totalValue)}</td>
+                        <td style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(item.profit)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {sortedGeneralItems.length > 500 && (
+                <div style={{ padding: 12, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
+                  Mostrando os primeiros 500 de {sortedGeneralItems.length} itens
+                </div>
+              )}
+            </div>
+          )}
+
+          {generalAllItems.length === 0 && dateRange && (
+            <div className="card" style={{ marginTop: 24 }}>
+              <div className="empty-state">
+                <Calendar size={36} />
+                <h3>Nenhuma venda no periodo</h3>
+                <p>Nao ha vendas registradas para "{dateRange.label}".</p>
+              </div>
+            </div>
+          )}
+        </>
+      ) : !selectedInvestor ? (
         <div className="empty-state">
           <Users size={48} />
           <h3>Selecione um investidor</h3>
