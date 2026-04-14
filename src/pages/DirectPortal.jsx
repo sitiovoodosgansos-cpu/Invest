@@ -136,7 +136,8 @@ function DirectPortalContent() {
     return payments.filter(p => p.investorId === investor.id).sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [payments, investor]);
   const totalPaid = myPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
-  const netBalance = totalFinancialCurrent + totalProfit - totalPaid;
+  // Total Acumulado = Rendimento do Aporte + Lucro com Vendas (exclui principal investido)
+  const netBalance = totalFinancialProfit + totalProfit - totalPaid;
 
   // Timeline chart data
   const timelineData = useMemo(() => {
@@ -368,7 +369,25 @@ function DirectPortalContent() {
         {myFinancial.length > 0 && (
           <div className="card" style={{ marginBottom: 24 }}>
             <div className="card-header">
-              <span className="card-title">Aportes Financeiros</span>
+              <span className="card-title">Aportes Financeiros (3% a.m.)</span>
+            </div>
+            <div className="stats-grid" style={{ marginBottom: 16 }}>
+              <div className="stat-card">
+                <div className="stat-label">Total Aportado</div>
+                <div className="stat-value" style={{ fontSize: 20 }}>{formatCurrency(totalFinancialInvested)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Valor Atual</div>
+                <div className="stat-value" style={{ fontSize: 20, color: 'var(--success)' }}>{formatCurrency(totalFinancialCurrent)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Rendimento Total</div>
+                <div className="stat-value" style={{ fontSize: 20, color: 'var(--info)' }}>+{formatCurrency(totalFinancialProfit)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Pago</div>
+                <div className="stat-value" style={{ fontSize: 20, color: '#D97706' }}>{formatCurrency(totalPaid)}</div>
+              </div>
             </div>
             <div className="table-container">
               <table>
@@ -398,10 +417,71 @@ function DirectPortalContent() {
                 </tbody>
               </table>
             </div>
-            <div style={{ padding: '12px 16px', background: 'var(--success-bg)', borderRadius: 'var(--radius-sm)', marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Total investido: {formatCurrency(totalFinancialInvested)}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--success)' }}>Valor atual: {formatCurrency(totalFinancialCurrent)} (+{formatCurrency(totalFinancialProfit)})</span>
+          </div>
+        )}
+
+        {/* Saldo do Investidor — full balance breakdown mirroring Reports page */}
+        {(myFinancial.length > 0 || totalProfit > 0 || myPayments.length > 0) && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Saldo do Investidor</span>
             </div>
+            <div className="stats-grid" style={{ marginBottom: 16 }}>
+              <div className="stat-card">
+                <div className="stat-label">Rendimento do Aporte</div>
+                <div className="stat-value" style={{ fontSize: 18, color: 'var(--info)' }}>+{formatCurrency(totalFinancialProfit)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Lucro com Vendas</div>
+                <div className="stat-value" style={{ fontSize: 18, color: 'var(--success)' }}>{formatCurrency(totalProfit)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Acumulado</div>
+                <div className="stat-value" style={{ fontSize: 18, color: 'var(--primary)' }}>{formatCurrency(totalFinancialProfit + totalProfit)}</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-label">Total Pago</div>
+                <div className="stat-value" style={{ fontSize: 18, color: '#D97706' }}>{formatCurrency(totalPaid)}</div>
+              </div>
+            </div>
+
+            <div style={{
+              background: netBalance >= 0 ? 'var(--success-bg, #ecfdf5)' : 'var(--danger-bg, #fef2f2)',
+              borderRadius: 'var(--radius-sm)',
+              padding: '12px 20px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: myPayments.length > 0 ? 16 : 0,
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>Saldo Liquido</span>
+              <span style={{
+                fontSize: 20,
+                fontWeight: 700,
+                color: netBalance >= 0 ? 'var(--success)' : 'var(--danger)',
+              }}>
+                {formatCurrency(netBalance)}
+              </span>
+            </div>
+
+            {myPayments.length > 0 && (
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr><th>Data</th><th>Descricao</th><th>Valor Pago</th></tr>
+                  </thead>
+                  <tbody>
+                    {myPayments.map(p => (
+                      <tr key={p.id}>
+                        <td>{formatDate(p.date)}</td>
+                        <td style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{p.description || '-'}</td>
+                        <td style={{ color: '#D97706', fontWeight: 600 }}>{formatCurrency(p.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
@@ -544,48 +624,6 @@ function DirectPortalContent() {
           </div>
         )}
 
-        {/* Payments received */}
-        {myPayments.length > 0 && (
-          <div className="card" style={{ marginBottom: 24 }}>
-            <div className="card-header">
-              <span className="card-title">Pagamentos Recebidos ({myPayments.length})</span>
-            </div>
-            <div className="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Data</th>
-                    <th>Descricao</th>
-                    <th>Valor</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {myPayments.map(p => (
-                    <tr key={p.id}>
-                      <td>{formatDate(p.date)}</td>
-                      <td style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{p.description || '-'}</td>
-                      <td style={{ color: 'var(--success)', fontWeight: 700 }}>{formatCurrency(p.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ padding: '12px 16px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginTop: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontSize: 13 }}>Total acumulado (rendimento + lucro vendas):</span>
-                <strong>{formatCurrency(totalFinancialCurrent + totalProfit)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                <span style={{ fontSize: 13 }}>Total pago:</span>
-                <strong style={{ color: 'var(--warning)' }}>-{formatCurrency(totalPaid)}</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>Saldo liquido:</span>
-                <strong style={{ color: netBalance >= 0 ? 'var(--success)' : 'var(--danger)', fontSize: 16 }}>{formatCurrency(netBalance)}</strong>
-              </div>
-            </div>
-          </div>
-        )}
 
         {myBirds.length === 0 && myFinancial.length === 0 && mySales.length === 0 && (
           <div className="empty-state">
