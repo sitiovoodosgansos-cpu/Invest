@@ -310,12 +310,20 @@ export function AppProvider({ children }) {
           }
           await batch.commit();
         }
-        // Clear the legacy array from appData so the old doc shrinks and
-        // no longer competes for the 1 MiB budget. We do this via setDoc
-        // merge so we don't clobber the rest of the blob.
-        await setDoc(FIRESTORE_DOC, { sales: [] }, { merge: true });
+        // Verify migration actually worked before clearing legacy data.
+        // Read back the /sales collection and only clear appData.sales
+        // if the collection has at least as many docs as the legacy array.
+        const verifySnap = await getDocs(SALES_COLLECTION);
+        if (verifySnap.size >= legacySales.length) {
+          await setDoc(FIRESTORE_DOC, { sales: [] }, { merge: true });
+          devWarn(`Sales migration verified and legacy cleared (${verifySnap.size} docs in /sales).`);
+        } else {
+          devWarn(
+            `Sales migration partial: ${verifySnap.size} docs in /sales vs ${legacySales.length} legacy. ` +
+            'NOT clearing legacy array so recovery remains possible.'
+          );
+        }
         try { localStorage.setItem(SALES_MIGRATION_KEY, 'done'); } catch { /* noop */ }
-        devWarn('Sales migration complete.');
       } catch (err) {
         devError('Sales migration failed:', err);
         setSaveError(
@@ -653,26 +661,16 @@ export function AppProvider({ children }) {
     }
   };
 
-  // Check and recover legacy sales from appData.sales (or localStorage
-  // backup) that may not have been migrated to the /sales collection.
-  // First tries a force-reload from Firestore (the data may already be
-  // there but the listener missed it). Then checks the legacy appData
-  // array. Finally falls back to localStorage backup.
+  // Check and recover legacy sales from appData.sales that may not have
+  // been migrated to the /sales collection. Returns status info for the UI.
+  // Also checks localStorage backup as fallback if appData.sales is empty.
   const recoverLegacySales = async () => {
     try {
-      // Step 1: Force a fresh read from Firestore /sales collection.
-      // The onSnapshot listener may have errored out on initial load,
-      // leaving the UI showing 0 sales even though the data exists.
-      const reloadResult = await forceReloadSales();
-      if (reloadResult.status === 'ok' && reloadResult.count > 100) {
-        return {
-          status: 'recovered',
-          message: `${reloadResult.count} vendas encontradas na colecao /sales. O listener foi reconectado.`,
-          recovered: reloadResult.count,
-        };
-      }
+      // Step 1: Force a fresh read from Firestore /sales collection
+      // so salesRef.current is up-to-date before comparing.
+      await forceReloadSales();
 
-      // Step 2: Check legacy appData.sales array.
+      // Step 2: Check legacy appData.sales array in Firestore.
       const snap = await getDoc(FIRESTORE_DOC);
       let legacySales = [];
       if (snap.exists()) {
@@ -722,9 +720,10 @@ export function AppProvider({ children }) {
       const currentIds = new Set(salesRef.current.map(s => s.id));
       const missing = legacySales.filter(s => !currentIds.has(s.id));
       if (missing.length === 0) {
-        return { status: 'ok', message: `Todas as ${legacySales.length} vendas ja existem na colecao /sales.` };
+        return { status: 'ok', message: `Todas as ${legacySales.length} vendas ja existem na colecao /sales. Total atual: ${salesRef.current.length}.` };
       }
 
+      // Re-migrate the missing ones
       const CHUNK = 400;
       let migrated = 0;
       for (let i = 0; i < missing.length; i += CHUNK) {
