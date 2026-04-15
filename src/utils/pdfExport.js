@@ -265,3 +265,101 @@ export function exportInvestorReport(investor, birds, sales, financialInvestment
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+// Generic site-wide report exporter. Accepts a title, subtitle (period label),
+// optional `summary` pairs [{label, value}], and an array of `sections`,
+// each with { heading, head (array), rows (array of arrays), color? }.
+// Rows are automatically paginated by jspdf-autotable.
+export function exportGeneralReport({ title, subtitle, summary, sections }) {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  // Header
+  doc.setFillColor(108, 43, 217);
+  doc.rect(0, 0, pageWidth, 45, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(20);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Sitio Voo dos Gansos', 14, 16);
+  doc.setFontSize(12);
+  doc.setFont('helvetica', 'normal');
+  doc.text(title || 'Relatorio Geral', 14, 26);
+  doc.setFontSize(10);
+  if (subtitle) doc.text(`Periodo: ${subtitle}`, 14, 35);
+  doc.text(formatDate(new Date().toISOString()), pageWidth - 14, 35, { align: 'right' });
+
+  let y = 57;
+
+  // Summary block (3 columns)
+  if (summary && summary.length) {
+    doc.setFillColor(248, 249, 252);
+    const rows = Math.ceil(summary.length / 3);
+    const boxH = rows * 14 + 10;
+    doc.roundedRect(14, y, pageWidth - 28, boxH, 4, 4, 'F');
+    doc.setFontSize(10);
+    doc.setTextColor(30, 27, 75);
+    summary.forEach((item, i) => {
+      const col = i % 3;
+      const row = Math.floor(i / 3);
+      const x = 20 + col * ((pageWidth - 40) / 3);
+      const yy = y + 10 + row * 14;
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(8);
+      doc.text(item.label, x, yy);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 27, 75);
+      doc.setFontSize(11);
+      doc.text(String(item.value), x, yy + 6);
+    });
+    y += boxH + 6;
+  }
+
+  // Sections
+  (sections || []).forEach(section => {
+    if (!section.rows || !section.rows.length) return;
+    if (y > 250) { doc.addPage(); y = 20; }
+    doc.setTextColor(30, 27, 75);
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.text(section.heading, 14, y);
+    y += 4;
+    autoTable(doc, {
+      startY: y,
+      head: [section.head],
+      body: section.rows,
+      theme: 'striped',
+      headStyles: { fillColor: section.color || [108, 43, 217], fontSize: 8 },
+      bodyStyles: { fontSize: 7 },
+      margin: { left: 14, right: 14 },
+    });
+    y = doc.lastAutoTable.finalY + 10;
+  });
+
+  // Footer with page numbers
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.text(
+      `Sitio Voo dos Gansos - Relatorio gerado em ${formatDate(new Date().toISOString())} - Pagina ${i}/${pageCount}`,
+      pageWidth / 2,
+      doc.internal.pageSize.getHeight() - 10,
+      { align: 'center' }
+    );
+  }
+
+  const safeTitle = (title || 'Relatorio').replace(/[^a-zA-Z0-9]/g, '_');
+  const suffix = subtitle ? `_${subtitle.replace(/[^a-zA-Z0-9]/g, '_')}` : '';
+  const fileName = `${safeTitle}${suffix}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
