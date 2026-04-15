@@ -595,6 +595,15 @@ export default function Reports() {
       } else if (viewMode === 'ovos') {
         const totalEggs = filteredEggCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
         const totalCracked = filteredEggCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
+        const byBird = {};
+        filteredEggCollections.forEach(c => {
+          const key = c.birdId || 'unknown';
+          if (!byBird[key]) byBird[key] = { birdId: c.birdId, quantity: 0, cracked: 0, count: 0 };
+          byBird[key].quantity += parseInt(c.quantity) || 0;
+          byBird[key].cracked += parseInt(c.cracked) || 0;
+          byBird[key].count += 1;
+        });
+        const aggregated = Object.values(byBird).sort((a, b) => b.quantity - a.quantity);
         exportGeneralReport({
           title: 'Relatorio Geral - Coleta de Ovos',
           subtitle,
@@ -602,13 +611,13 @@ export default function Reports() {
             { label: 'Coletas', value: filteredEggCollections.length },
             { label: 'Ovos Coletados', value: totalEggs },
             { label: 'Ovos Trincados', value: totalCracked },
+            { label: 'Racas Diferentes', value: aggregated.length },
           ],
           sections: [{
-            heading: 'Coletas',
-            head: ['Data', 'Raca', 'Quantidade', 'Trincados', 'Notas'],
-            rows: [...filteredEggCollections].sort((a, b) => new Date(b.date) - new Date(a.date)).map(c => [
-              formatDate(c.date), birdLabel(c.birdId),
-              c.quantity || 0, c.cracked || 0, (c.notes || '').slice(0, 40),
+            heading: 'Coletas por Raca',
+            head: ['Raca', 'Total Coletado', 'Total Trincados', 'Coletas'],
+            rows: aggregated.map(r => [
+              birdLabel(r.birdId), r.quantity, r.cracked, r.count,
             ]),
             color: [245, 158, 11],
           }],
@@ -884,39 +893,64 @@ export default function Reports() {
   const renderOvosReport = () => {
     const totalEggs = filteredEggCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
     const totalCracked = filteredEggCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
-    const sorted = [...filteredEggCollections].sort((a, b) => new Date(b.date) - new Date(a.date));
-    const pageItems = paginate(sorted);
+    // Aggregate by bird: one row per bird (species+breed) with totals for the period
+    const byBird = {};
+    filteredEggCollections.forEach(c => {
+      const key = c.birdId || 'unknown';
+      if (!byBird[key]) byBird[key] = { birdId: c.birdId, quantity: 0, cracked: 0, count: 0 };
+      byBird[key].quantity += parseInt(c.quantity) || 0;
+      byBird[key].cracked += parseInt(c.cracked) || 0;
+      byBird[key].count += 1;
+    });
+    const aggregated = Object.values(byBird).sort((a, b) => b.quantity - a.quantity);
+    const pageItems = paginate(aggregated);
     return (
       <>
         <StatCards cards={[
           { label: 'Coletas', value: filteredEggCollections.length },
           { label: 'Ovos Coletados', value: totalEggs, color: 'var(--success)' },
           { label: 'Ovos Trincados', value: totalCracked, color: 'var(--danger)' },
-          { label: 'Racas Diferentes', value: new Set(filteredEggCollections.map(c => c.birdId)).size },
+          { label: 'Racas Diferentes', value: aggregated.length },
         ]} />
         <div className="card">
-          <div className="card-header"><span className="card-title">Coletas de Ovos ({sorted.length})</span></div>
-          {sorted.length === 0 ? (
+          <div className="card-header">
+            <span className="card-title">Coletas por Raca ({aggregated.length})</span>
+          </div>
+          {aggregated.length === 0 ? (
             <div className="empty-state"><p>Sem coletas no periodo</p></div>
           ) : (
             <>
               <div className="table-container">
                 <table>
-                  <thead><tr><th>Data</th><th>Raca</th><th>Quantidade</th><th>Trincados</th><th>Notas</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>Raca</th>
+                      <th>Total Coletado</th>
+                      <th>Total Trincados</th>
+                      <th>Coletas no periodo</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {pageItems.map(c => (
-                      <tr key={c.id}>
-                        <td>{formatDate(c.date)}</td>
-                        <td>{birdLabel(c.birdId)}</td>
-                        <td style={{ color: 'var(--success)', fontWeight: 600 }}>{c.quantity || 0}</td>
-                        <td style={{ color: 'var(--danger)' }}>{c.cracked || 0}</td>
-                        <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{c.notes || '-'}</td>
+                    {pageItems.map(r => (
+                      <tr key={r.birdId || 'unknown'}>
+                        <td><strong>{birdLabel(r.birdId)}</strong></td>
+                        <td style={{ color: 'var(--success)', fontWeight: 600 }}>{r.quantity}</td>
+                        <td style={{ color: 'var(--danger)' }}>{r.cracked}</td>
+                        <td style={{ color: 'var(--text-secondary)' }}>{r.count}</td>
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr style={{ fontWeight: 700, background: 'var(--bg-card)' }}>
+                      <td>Total</td>
+                      <td style={{ color: 'var(--success)' }}>{totalEggs}</td>
+                      <td style={{ color: 'var(--danger)' }}>{totalCracked}</td>
+                      <td>{filteredEggCollections.length}</td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
-              <Pagination total={sorted.length} page={modulePage} pageSize={ROWS_PER_PAGE} onPage={setModulePage} />
+              <Pagination total={aggregated.length} page={modulePage} pageSize={ROWS_PER_PAGE} onPage={setModulePage} />
             </>
           )}
         </div>
