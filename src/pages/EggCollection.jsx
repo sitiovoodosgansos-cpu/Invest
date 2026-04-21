@@ -61,6 +61,7 @@ export default function EggCollection() {
     addEggCollection, updateEggCollection, deleteEggCollection,
     updateBird,
     employeeToken, generateEmployeeToken, revokeEmployeeToken,
+    saveError, forceSync,
   } = useApp();
 
   const [showModal, setShowModal] = useState(false);
@@ -73,6 +74,7 @@ export default function EggCollection() {
   const [batchEntries, setBatchEntries] = useState({});
   const [batchNotes, setBatchNotes] = useState('');
   const [editForm, setEditForm] = useState({ date: '', birdId: '', quantity: '', cracked: '0', notes: '' });
+  const [successMsg, setSuccessMsg] = useState('');
   // Calendar state
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState(null);
@@ -315,17 +317,27 @@ export default function EggCollection() {
     e.preventDefault();
     const entries = Object.entries(batchEntries).filter(([, v]) => (parseInt(v.quantity) || 0) > 0);
     if (entries.length === 0) return;
+    const totalEggs = entries.reduce((s, [, v]) => s + (parseInt(v.quantity) || 0), 0);
     entries.forEach(([birdId, entry]) => {
       addEggCollection({ date: batchDate, birdId, quantity: parseInt(entry.quantity) || 0, cracked: parseInt(entry.cracked) || 0, notes: batchNotes.trim() });
     });
+    // Extra safety: force a Firestore sync so the data is definitely persisted,
+    // not just queued in the auto-save debounce window. Without this, navigating
+    // away or reloading quickly after saving could drop the write.
+    setTimeout(() => { try { forceSync(); } catch {} }, 100);
     setBatchEntries({}); setBatchNotes(''); setBatchDate(new Date().toISOString().slice(0, 10)); setShowModal(false);
+    setSuccessMsg(`${entries.length} coleta(s) registrada(s) — ${totalEggs} ovos`);
+    setTimeout(() => setSuccessMsg(''), 4000);
   };
 
   const handleEditSubmit = (e) => {
     e.preventDefault();
     if (!editForm.birdId || !editForm.quantity) return;
     updateEggCollection(editingId, { date: editForm.date, birdId: editForm.birdId, quantity: parseInt(editForm.quantity) || 0, cracked: parseInt(editForm.cracked) || 0, notes: editForm.notes.trim() });
+    setTimeout(() => { try { forceSync(); } catch {} }, 100);
     setEditingId(null); setShowModal(false);
+    setSuccessMsg('Coleta atualizada');
+    setTimeout(() => setSuccessMsg(''), 3000);
   };
 
   const handleEdit = (collection) => {
@@ -410,6 +422,29 @@ export default function EggCollection() {
 
   return (
     <div className="animate-in">
+      {/* Save feedback banners */}
+      {successMsg && (
+        <div role="status" style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+          marginBottom: 12, background: '#d1fae5', border: '1px solid #10b981',
+          borderRadius: 8, color: '#065f46', fontSize: 13, fontWeight: 600,
+        }}>
+          <Egg size={16} /> {successMsg}
+        </div>
+      )}
+      {saveError && (
+        <div role="alert" style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 16px',
+          marginBottom: 12, background: '#fee2e2', border: '1px solid #ef4444',
+          borderRadius: 8, color: '#991b1b', fontSize: 13,
+        }}>
+          <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <strong>Erro ao salvar.</strong>
+            <div style={{ marginTop: 2, fontWeight: 400 }}>{saveError}</div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
