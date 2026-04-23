@@ -158,6 +158,22 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Phase 2C: egg collections moved to their own collection.
+    //
+    // Same rationale as /sales: the monolithic /config/appData doc was hitting
+    // the 1 MiB cap as daily egg records accumulated, silently rejecting
+    // writes and causing data loss. One doc per collection entry lifts that
+    // ceiling.
+    match /eggCollections/{collectionId} {
+      allow read: if true;
+
+      allow create, update: if isAdmin()
+        && request.resource.data.birdId is string
+        && request.resource.data.quantity is number;
+
+      allow delete: if isAdmin();
+    }
+
     // Lock down everything else. Any new collections must be added
     // explicitly above.
     match /{document=**} {

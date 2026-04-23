@@ -27,10 +27,15 @@ const FIRESTORE_DOC = doc(db, 'config', 'appData');
 // used to silently drop writes around the ~1100-sale mark. See firestore.rules
 // for the matching security model and the migration comment below.
 const SALES_COLLECTION = collection(db, 'sales');
+// Egg collections also live in their own collection now, for the same
+// reason as sales: the monolithic appData doc was hitting the 1 MiB cap
+// as daily egg records accumulated, silently rejecting writes.
+const EGG_COLLECTIONS_COLLECTION = collection(db, 'eggCollections');
 // LocalStorage flag: once set, we know the /sales collection has been
 // hydrated from the legacy appData.sales array and the array has been
 // cleared. Prevents us from re-migrating on every session.
 const SALES_MIGRATION_KEY = 'sitio_voo_dos_gansos_sales_migrated_v1';
+const EGG_MIGRATION_KEY = 'sitio_voo_dos_gansos_eggs_migrated_v1';
 
 // Dev-only logger. Avoids leaking internal sync state to the browser console
 // in production, which would help attackers reverse-engineer the app.
@@ -88,7 +93,6 @@ const countItems = (d) =>
   (d.payments?.length || 0) +
   (d.expenses?.length || 0) +
   (d.customExpenseCategories?.length || 0) +
-  (d.eggCollections?.length || 0) +
   (d.incubators?.length || 0) +
   (d.incubatorBatches?.length || 0) +
   (d.infirmaryBays?.length || 0) +
@@ -109,8 +113,10 @@ export function AppProvider({ children }) {
   // profit distribution, reports, portals) can treat sales like any other
   // list without knowing where they're persisted.
   const [sales, setSales] = useState([]);
+  const [eggCollections, setEggCollections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salesLoading, setSalesLoading] = useState(true);
+  const [eggCollectionsLoading, setEggCollectionsLoading] = useState(true);
   const [firestoreError, setFirestoreError] = useState(null);
   // saveError surfaces rejected Firestore writes to the UI. Unlike
   // firestoreError (which is about read/listen failures) this is flipped
@@ -129,6 +135,8 @@ export function AppProvider({ children }) {
   dataRef.current = data;
   const salesRef = useRef(sales);
   salesRef.current = sales;
+  const eggCollectionsRef = useRef(eggCollections);
+  eggCollectionsRef.current = eggCollections;
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
 
@@ -265,6 +273,19 @@ export function AppProvider({ children }) {
     };
   }, []);
 
+  // Listen to the /eggCollections collection.
+  useEffect(() => {
+    const unsubscribe = onSnapshot(EGG_COLLECTIONS_COLLECTION, (snapshot) => {
+      const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setEggCollections(docs);
+      setEggCollectionsLoading(false);
+    }, (error) => {
+      devError('Egg collections listen error:', error);
+      setEggCollectionsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // One-shot migration: promote legacy appData.sales into /sales/{id}.
   //
   // We wait until the main appData doc has loaded at least once so we know
@@ -329,6 +350,52 @@ export function AppProvider({ children }) {
         setSaveError(
           'Nao foi possivel migrar as vendas antigas. Recarregue a pagina e tente novamente.'
         );
+      }
+    })();
+  }, [loading]);
+
+  // One-shot migration: promote legacy appData.eggCollections into
+  // /eggCollections/{id}. Same pattern as the sales migration above.
+  useEffect(() => {
+    if (loading) return;
+    if (!dataLoadedFromFirestore.current) return;
+    if (typeof window === 'undefined') return;
+    try {
+      if (localStorage.getItem(EGG_MIGRATION_KEY) === 'done') return;
+    } catch { /* noop */ }
+    (async () => {
+      try {
+        const snap = await getDoc(FIRESTORE_DOC);
+        if (!snap.exists()) return;
+        const legacyEggs = snap.data().eggCollections;
+        if (!Array.isArray(legacyEggs) || legacyEggs.length === 0) {
+          try { localStorage.setItem(EGG_MIGRATION_KEY, 'done'); } catch { /* noop */ }
+          return;
+        }
+        devWarn(`Migrating ${legacyEggs.length} legacy egg collections to /eggCollections...`);
+        const CHUNK = 400;
+        for (let i = 0; i < legacyEggs.length; i += CHUNK) {
+          const chunk = legacyEggs.slice(i, i + CHUNK);
+          const batch = writeBatch(db);
+          for (const egg of chunk) {
+            const eggId = egg.id || newId();
+            const payload = { ...egg };
+            payload.birdId = String(payload.birdId || '');
+            payload.quantity = Number(payload.quantity) || 0;
+            payload.cracked = Number(payload.cracked) || 0;
+            delete payload.id;
+            batch.set(doc(db, 'eggCollections', eggId), payload);
+          }
+          await batch.commit();
+        }
+        const verifySnap = await getDocs(EGG_COLLECTIONS_COLLECTION);
+        if (verifySnap.size >= legacyEggs.length) {
+          await setDoc(FIRESTORE_DOC, { eggCollections: [] }, { merge: true });
+          devWarn(`Egg collections migration verified and legacy cleared (${verifySnap.size} docs).`);
+        }
+        try { localStorage.setItem(EGG_MIGRATION_KEY, 'done'); } catch { /* noop */ }
+      } catch (err) {
+        devError('Egg collections migration failed:', err);
       }
     })();
   }, [loading]);
@@ -893,32 +960,86 @@ export function AppProvider({ children }) {
     }));
   };
 
-  // Egg Collections
-  const addEggCollection = (collection) => {
-    const newCollection = {
-      ...collection,
-      id: newId(),
+  // -----------------------------------------------------------------
+  // Egg Collections (backed by /eggCollections collection).
+  //
+  // Same pattern as sales: writes go straight to Firestore and the
+  // onSnapshot listener pushes changes back into local state.
+  // -----------------------------------------------------------------
+  const addEggCollection = async (collectionData) => {
+    const id = newId();
+    const payload = JSON.parse(JSON.stringify({
+      ...collectionData,
+      quantity: Number(collectionData.quantity) || 0,
+      cracked: Number(collectionData.cracked) || 0,
       createdAt: new Date().toISOString(),
-    };
-    setData(prev => ({
-      ...prev,
-      eggCollections: [...(prev.eggCollections || []), newCollection],
     }));
-    return newCollection;
+    try {
+      await setDoc(doc(db, 'eggCollections', id), payload);
+      setSaveError(null);
+    } catch (err) {
+      devError('addEggCollection error:', err);
+      setSaveError(`Erro ao salvar coleta: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
+    return { ...payload, id };
   };
 
-  const updateEggCollection = (id, updates) => {
-    setData(prev => ({
-      ...prev,
-      eggCollections: (prev.eggCollections || []).map(c => c.id === id ? { ...c, ...updates } : c),
-    }));
+  const addEggCollections = async (collections) => {
+    const now = new Date().toISOString();
+    try {
+      const CHUNK = 400;
+      for (let i = 0; i < collections.length; i += CHUNK) {
+        const chunk = collections.slice(i, i + CHUNK);
+        const b = writeBatch(db);
+        for (const coll of chunk) {
+          const id = newId();
+          const payload = JSON.parse(JSON.stringify({
+            ...coll,
+            quantity: Number(coll.quantity) || 0,
+            cracked: Number(coll.cracked) || 0,
+            createdAt: now,
+          }));
+          b.set(doc(db, 'eggCollections', id), payload);
+        }
+        await b.commit();
+      }
+      setSaveError(null);
+    } catch (err) {
+      devError('addEggCollections error:', err);
+      setSaveError(`Erro ao salvar coletas: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
   };
 
-  const deleteEggCollection = (id) => {
-    setDataWithDelete(prev => ({
-      ...prev,
-      eggCollections: (prev.eggCollections || []).filter(c => c.id !== id),
-    }));
+  const updateEggCollection = async (id, updates) => {
+    if (!id) return;
+    try {
+      const current = eggCollectionsRef.current.find(c => c.id === id);
+      const merged = { ...(current || {}), ...updates };
+      merged.quantity = Number(merged.quantity) || 0;
+      merged.cracked = Number(merged.cracked) || 0;
+      const payload = JSON.parse(JSON.stringify(merged));
+      delete payload.id;
+      await setDoc(doc(db, 'eggCollections', id), payload);
+      setSaveError(null);
+    } catch (err) {
+      devError('updateEggCollection error:', err);
+      setSaveError(`Erro ao atualizar coleta: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
+  };
+
+  const deleteEggCollection = async (id) => {
+    if (!id) return;
+    try {
+      await deleteDoc(doc(db, 'eggCollections', id));
+      setSaveError(null);
+    } catch (err) {
+      devError('deleteEggCollection error:', err);
+      setSaveError(`Erro ao excluir coleta: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
   };
 
   // Incubators
@@ -1145,7 +1266,8 @@ export function AppProvider({ children }) {
   const value = {
     ...data,
     sales,
-    loading: loading || salesLoading,
+    eggCollections,
+    loading: loading || salesLoading || eggCollectionsLoading,
     firestoreError,
     saveError,
     addInvestor, updateInvestor, deleteInvestor,
@@ -1155,7 +1277,7 @@ export function AppProvider({ children }) {
     addPayment, deletePayment,
     addExpense, bulkAddExpenses, updateExpense, deleteExpense,
     addCustomExpenseCategory, deleteCustomExpenseCategory,
-    addEggCollection, updateEggCollection, deleteEggCollection,
+    addEggCollection, addEggCollections, updateEggCollection, deleteEggCollection,
     addIncubator, updateIncubator, deleteIncubator,
     addIncubatorBatch, updateIncubatorBatch, deleteIncubatorBatch,
     addInfirmaryBay, updateInfirmaryBay, deleteInfirmaryBay,
