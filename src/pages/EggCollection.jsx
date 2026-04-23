@@ -58,10 +58,10 @@ function getActiveBirdCount(bird) {
 export default function EggCollection() {
   const {
     birds, eggCollections, customSpecies,
-    addEggCollection, updateEggCollection, deleteEggCollection,
+    addEggCollections, updateEggCollection, deleteEggCollection,
     updateBird,
     employeeToken, generateEmployeeToken, revokeEmployeeToken,
-    saveError, forceSync,
+    saveError,
   } = useApp();
 
   const [showModal, setShowModal] = useState(false);
@@ -313,31 +313,38 @@ export default function EggCollection() {
   const maxDayEggs = useMemo(() => Math.max(1, ...Object.values(calendarDaysData).map(d => d.total)), [calendarDaysData]);
 
   // ===== HANDLERS =====
-  const handleBatchSubmit = (e) => {
+  const handleBatchSubmit = async (e) => {
     e.preventDefault();
     const entries = Object.entries(batchEntries).filter(([, v]) => (parseInt(v.quantity) || 0) > 0);
     if (entries.length === 0) return;
     const totalEggs = entries.reduce((s, [, v]) => s + (parseInt(v.quantity) || 0), 0);
-    entries.forEach(([birdId, entry]) => {
-      addEggCollection({ date: batchDate, birdId, quantity: parseInt(entry.quantity) || 0, cracked: parseInt(entry.cracked) || 0, notes: batchNotes.trim() });
-    });
-    // Extra safety: force a Firestore sync so the data is definitely persisted,
-    // not just queued in the auto-save debounce window. Without this, navigating
-    // away or reloading quickly after saving could drop the write.
-    setTimeout(() => { try { forceSync(); } catch {} }, 100);
-    setBatchEntries({}); setBatchNotes(''); setBatchDate(new Date().toISOString().slice(0, 10)); setShowModal(false);
-    setSuccessMsg(`${entries.length} coleta(s) registrada(s) — ${totalEggs} ovos`);
-    setTimeout(() => setSuccessMsg(''), 4000);
+    try {
+      const collections = entries.map(([birdId, entry]) => ({
+        date: batchDate, birdId,
+        quantity: parseInt(entry.quantity) || 0,
+        cracked: parseInt(entry.cracked) || 0,
+        notes: batchNotes.trim(),
+      }));
+      await addEggCollections(collections);
+      setBatchEntries({}); setBatchNotes(''); setBatchDate(new Date().toISOString().slice(0, 10)); setShowModal(false);
+      setSuccessMsg(`${entries.length} coleta(s) registrada(s) — ${totalEggs} ovos`);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch {
+      // Error already surfaced via saveError
+    }
   };
 
-  const handleEditSubmit = (e) => {
+  const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!editForm.birdId || !editForm.quantity) return;
-    updateEggCollection(editingId, { date: editForm.date, birdId: editForm.birdId, quantity: parseInt(editForm.quantity) || 0, cracked: parseInt(editForm.cracked) || 0, notes: editForm.notes.trim() });
-    setTimeout(() => { try { forceSync(); } catch {} }, 100);
-    setEditingId(null); setShowModal(false);
-    setSuccessMsg('Coleta atualizada');
-    setTimeout(() => setSuccessMsg(''), 3000);
+    try {
+      await updateEggCollection(editingId, { date: editForm.date, birdId: editForm.birdId, quantity: parseInt(editForm.quantity) || 0, cracked: parseInt(editForm.cracked) || 0, notes: editForm.notes.trim() });
+      setEditingId(null); setShowModal(false);
+      setSuccessMsg('Coleta atualizada');
+      setTimeout(() => setSuccessMsg(''), 3000);
+    } catch {
+      // Error already surfaced via saveError
+    }
   };
 
   const handleEdit = (collection) => {
@@ -352,7 +359,7 @@ export default function EggCollection() {
   const batchTotal = useMemo(() => Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.quantity) || 0), 0), [batchEntries]);
   const batchCrackedTotal = useMemo(() => Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.cracked) || 0), 0), [batchEntries]);
 
-  const handleDelete = (id) => { if (window.confirm('Remover esta coleta?')) deleteEggCollection(id); };
+  const handleDelete = async (id) => { if (window.confirm('Remover esta coleta?')) { try { await deleteEggCollection(id); } catch { /* surfaced via saveError */ } } };
 
   const handleBirdConfig = (bird) => {
     const individuals = getIndividuals(bird);
