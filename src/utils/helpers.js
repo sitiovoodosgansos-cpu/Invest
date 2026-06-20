@@ -189,8 +189,20 @@ export function calculateProfitDistribution(sales, birds) {
 
     if (!description || totalValue <= 0) continue;
 
-    const isEgg = isEggProduct(description);
-    const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+    // Manual / standalone ("avulsa") sales are addressed to an investor
+    // directly and carry an explicit type + rate. Honor those instead of
+    // re-deriving the rate from the description, because a custom item
+    // (e.g. "Venda avulsa") won't contain the "OVO" keyword and would
+    // otherwise be misclassified as a bird sale.
+    let isEgg;
+    let rate;
+    if (sale.isManual && typeof sale.profitRate === 'number') {
+      isEgg = !!sale.isEgg;
+      rate = sale.profitRate;
+    } else {
+      isEgg = isEggProduct(description);
+      rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+    }
 
     // Use saved match if available, otherwise try to match
     let investorId = sale.matchedInvestorId || null;

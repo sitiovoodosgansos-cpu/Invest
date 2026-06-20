@@ -8,10 +8,14 @@ import { parseCSV, readFileAsText } from '../utils/csvParser';
 import { parseWixOrderText } from '../utils/pdfParser';
 import {
   Upload, Trash2, CheckCircle, AlertCircle, ShoppingCart,
-  FileText, ClipboardPaste, PlusCircle, X, Edit2, Save, Copy, RefreshCw
+  FileText, ClipboardPaste, PlusCircle, X, Edit2, Save, Copy, RefreshCw, UserCheck
 } from 'lucide-react';
 
 const EMPTY_MANUAL_ITEM = { itemDescription: '', quantity: 1, price: '' };
+const EMPTY_AVULSA = {
+  investorId: '', itemDescription: '', type: 'egg',
+  quantity: 1, totalValue: '', date: '', buyerName: '',
+};
 
 export default function Sales() {
   const {
@@ -25,9 +29,10 @@ export default function Sales() {
   const [recoverRunning, setRecoverRunning] = useState(false);
   const [recoverResult, setRecoverResult] = useState(null);
   const [filterType, setFilterType] = useState('all');
-  const [importTab, setImportTab] = useState('file'); // file | paste | manual
+  const [importTab, setImportTab] = useState('file'); // file | paste | manual | avulsa
   const [pasteText, setPasteText] = useState('');
   const [manualOrder, setManualOrder] = useState({ orderNumber: '', buyerName: '', date: '', items: [{ ...EMPTY_MANUAL_ITEM }] });
+  const [avulsaForm, setAvulsaForm] = useState({ ...EMPTY_AVULSA });
   const [editingSale, setEditingSale] = useState(null);
   const [sortField, setSortField] = useState('date'); // date | totalValue | orderNumber
   const [sortDir, setSortDir] = useState('desc'); // asc | desc
@@ -208,6 +213,70 @@ export default function Sales() {
     }
   };
 
+  // STANDALONE / "AVULSA" SALE
+  //
+  // Creates a single sale addressed directly to a chosen investor, with no
+  // bird linked. Unlike the other import paths, this does NOT run the
+  // breed-matching logic — the investor is set explicitly and the sale is
+  // flagged isManual so the edit flow and profit distribution preserve the
+  // chosen investor and rate.
+  const handleAvulsaSubmit = async () => {
+    const investorId = avulsaForm.investorId;
+    const description = avulsaForm.itemDescription.trim();
+    const totalValue = parseFloat(avulsaForm.totalValue) || 0;
+
+    if (!investorId) {
+      setImportResult({ success: false, error: 'Selecione um investidor para a venda avulsa.' });
+      return;
+    }
+    if (!description) {
+      setImportResult({ success: false, error: 'Informe a descricao do item avulso.' });
+      return;
+    }
+    if (totalValue <= 0) {
+      setImportResult({ success: false, error: 'Informe um valor maior que zero.' });
+      return;
+    }
+
+    const isEgg = avulsaForm.type === 'egg';
+    const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+    const qty = parseInt(avulsaForm.quantity, 10) || 1;
+    const investor = investors.find(i => i.id === investorId);
+
+    const sale = {
+      orderNumber: '',
+      buyerName: avulsaForm.buyerName.trim() || (investor ? investor.name : ''),
+      date: avulsaForm.date || new Date().toISOString().slice(0, 10),
+      itemDescription: description,
+      quantity: qty,
+      price: totalValue,
+      totalValue,
+      transactionStatus: 'Pago',
+      isEgg,
+      profitRate: rate,
+      profit: totalValue * rate,
+      matchedBirdId: null,
+      matchedInvestorId: investorId,
+      matchedBreed: null,
+      isManual: true,
+    };
+
+    setImportResult(null);
+    setImporting(true);
+    try {
+      await addSales([sale]);
+      setImportResult({
+        success: true, source: 'Avulsa', total: 1, valid: 1, rejected: 0,
+        matched: 1, unmatched: 0, totalValue, totalProfit: totalValue * rate,
+      });
+      setAvulsaForm({ ...EMPTY_AVULSA });
+    } catch (err) {
+      setImportResult({ success: false, error: err.message });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // Run the dedupe helper from AppContext, which finds sales with the same
   // (orderNumber + itemDescription + totalValue + quantity) and deletes all
   // but the oldest occurrence.
@@ -302,6 +371,9 @@ export default function Sales() {
       totalValue: sale.totalValue || 0,
       date: sale.date ? sale.date.slice(0, 10) : '',
       orderNumber: sale.orderNumber || '',
+      isManual: !!sale.isManual,
+      matchedInvestorId: sale.matchedInvestorId || '',
+      type: sale.isEgg ? 'egg' : 'bird',
     });
   };
 
@@ -309,16 +381,15 @@ export default function Sales() {
     if (!editingSale) return;
     const description = editingSale.itemDescription;
     const totalValue = parseFloat(editingSale.totalValue) || 0;
-    const isEgg = isEggProduct(description);
-    const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
 
-    const matchedBird = matchSaleToBird(description, birds);
-    const matchedBirdId = matchedBird ? matchedBird.id : null;
-    const matchedInvestorId = matchedBird ? matchedBird.investorId : null;
-    const matchedBreed = matchedBird ? matchedBird.breed : null;
-
-    try {
-      await updateSale(editingSale.id, {
+    let updates;
+    if (editingSale.isManual) {
+      // Standalone sale: keep the investor chosen by the admin and the
+      // explicit Ovo/Ave type. Do NOT re-run breed matching, which would
+      // wipe the manual link for custom item descriptions.
+      const isEgg = editingSale.type === 'egg';
+      const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+      updates = {
         itemDescription: description,
         quantity: parseInt(editingSale.quantity, 10) || 1,
         totalValue,
@@ -327,10 +398,33 @@ export default function Sales() {
         isEgg,
         profitRate: rate,
         profit: totalValue * rate,
-        matchedBirdId,
-        matchedInvestorId,
-        matchedBreed,
-      });
+        matchedBirdId: null,
+        matchedInvestorId: editingSale.matchedInvestorId || null,
+        matchedBreed: null,
+        isManual: true,
+      };
+    } else {
+      // Imported sale: recompute type and re-link to a bird/investor by breed.
+      const isEgg = isEggProduct(description);
+      const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+      const matchedBird = matchSaleToBird(description, birds);
+      updates = {
+        itemDescription: description,
+        quantity: parseInt(editingSale.quantity, 10) || 1,
+        totalValue,
+        date: editingSale.date,
+        orderNumber: editingSale.orderNumber,
+        isEgg,
+        profitRate: rate,
+        profit: totalValue * rate,
+        matchedBirdId: matchedBird ? matchedBird.id : null,
+        matchedInvestorId: matchedBird ? matchedBird.investorId : null,
+        matchedBreed: matchedBird ? matchedBird.breed : null,
+      };
+    }
+
+    try {
+      await updateSale(editingSale.id, updates);
       setEditingSale(null);
     } catch {
       // saveError banner shows the reason; keep the modal open so the
@@ -473,6 +567,9 @@ export default function Sales() {
           </button>
           <button className={`tab ${importTab === 'manual' ? 'active' : ''}`} onClick={() => setImportTab('manual')}>
             <PlusCircle size={14} /> Manual
+          </button>
+          <button className={`tab ${importTab === 'avulsa' ? 'active' : ''}`} onClick={() => setImportTab('avulsa')}>
+            <UserCheck size={14} /> Avulsa
           </button>
         </div>
 
@@ -639,6 +736,143 @@ export default function Sales() {
           </div>
         )}
 
+        {/* AVULSA TAB — standalone sale addressed directly to an investor */}
+        {importTab === 'avulsa' && (
+          <div>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+              Registre uma venda avulsa e direcione o lucro a um investidor especifico, sem precisar vincular uma ave. Informe um item, o valor e escolha o investidor.
+            </p>
+
+            {investors.length === 0 ? (
+              <div style={{
+                padding: 16, borderRadius: 'var(--radius-sm)', background: 'var(--bg-secondary)',
+                color: 'var(--text-muted)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <AlertCircle size={18} /> Cadastre um investidor antes de criar uma venda avulsa.
+              </div>
+            ) : (
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Investidor *</label>
+                    <select
+                      className="input"
+                      value={avulsaForm.investorId}
+                      onChange={(e) => setAvulsaForm(prev => ({ ...prev, investorId: e.target.value }))}
+                    >
+                      <option value="">Selecione o investidor</option>
+                      {[...investors].sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(inv => (
+                        <option key={inv.id} value={inv.id}>{inv.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Tipo (taxa de lucro) *</label>
+                    <select
+                      className="input"
+                      value={avulsaForm.type}
+                      onChange={(e) => setAvulsaForm(prev => ({ ...prev, type: e.target.value }))}
+                    >
+                      <option value="egg">Ovo (10%)</option>
+                      <option value="bird">Ave (6,4%)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Descricao do Item *</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Ex: Venda avulsa de ovos ferteis"
+                    value={avulsaForm.itemDescription}
+                    onChange={(e) => setAvulsaForm(prev => ({ ...prev, itemDescription: e.target.value }))}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Valor Total (R$) *</label>
+                    <div style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: 'var(--text-muted)' }}>R$</span>
+                      <input
+                        type="number"
+                        className="input"
+                        placeholder="0,00"
+                        step="0.01"
+                        min="0"
+                        value={avulsaForm.totalValue}
+                        onChange={(e) => setAvulsaForm(prev => ({ ...prev, totalValue: e.target.value }))}
+                        style={{ paddingLeft: 32, width: '100%' }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Quantidade</label>
+                    <input
+                      type="number"
+                      className="input"
+                      min="1"
+                      value={avulsaForm.quantity}
+                      onChange={(e) => setAvulsaForm(prev => ({ ...prev, quantity: e.target.value }))}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Data</label>
+                    <input
+                      type="date"
+                      className="input"
+                      value={avulsaForm.date}
+                      onChange={(e) => setAvulsaForm(prev => ({ ...prev, date: e.target.value }))}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Comprador / Observacao (opcional)</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="Nome do comprador ou observacao"
+                    value={avulsaForm.buyerName}
+                    onChange={(e) => setAvulsaForm(prev => ({ ...prev, buyerName: e.target.value }))}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+
+                {/* Live profit preview */}
+                {(parseFloat(avulsaForm.totalValue) || 0) > 0 && (
+                  <div style={{
+                    fontSize: 13, padding: '10px 12px', marginBottom: 12,
+                    background: 'var(--success-bg)', color: 'var(--success)',
+                    borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <UserCheck size={16} />
+                    <span>
+                      Lucro para o investidor:{' '}
+                      <strong>
+                        {formatCurrency((parseFloat(avulsaForm.totalValue) || 0) * (avulsaForm.type === 'egg' ? getEggProfitRate() : getBirdProfitRate()))}
+                      </strong>{' '}
+                      ({avulsaForm.type === 'egg' ? '10%' : '6,4%'} de {formatCurrency(parseFloat(avulsaForm.totalValue) || 0)})
+                    </span>
+                  </div>
+                )}
+
+                <button
+                  className="btn btn-primary"
+                  onClick={handleAvulsaSubmit}
+                  disabled={importing}
+                >
+                  <CheckCircle size={14} /> Registrar Venda Avulsa
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         {importing && (
           <div style={{ textAlign: 'center', padding: 20, color: 'var(--primary)' }}>
             Processando...
@@ -760,8 +994,21 @@ export default function Sales() {
                   <tr key={sale.id || idx}>
                     <td>{formatDate(sale.date)}</td>
                     <td style={{ fontSize: 12 }}>{sale.orderNumber || '-'}</td>
-                    <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {sale.itemDescription || sale.item || '-'}
+                    <td style={{ maxWidth: 220 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {sale.isManual && (
+                          <span
+                            className="badge"
+                            style={{ background: 'var(--warning-bg, #fef3c7)', color: 'var(--warning, #d97706)', flexShrink: 0, fontSize: 10 }}
+                            title="Venda avulsa direcionada a um investidor"
+                          >
+                            Avulsa
+                          </span>
+                        )}
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {sale.itemDescription || sale.item || '-'}
+                        </span>
+                      </div>
                     </td>
                     <td>
                       <span className={`badge ${sale.isEgg ? 'badge-purple' : 'badge-blue'}`}>
@@ -926,9 +1173,43 @@ export default function Sales() {
                   />
                 </div>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                Tipo detectado: <strong>{isEggProduct(editingSale.itemDescription) ? 'Ovo (10%)' : 'Ave (6,4%)'}</strong> — O vinculo com investidor sera recalculado ao salvar.
-              </div>
+              {editingSale.isManual ? (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Investidor (avulsa)</label>
+                      <select
+                        className="input"
+                        value={editingSale.matchedInvestorId}
+                        onChange={e => setEditingSale(prev => ({ ...prev, matchedInvestorId: e.target.value }))}
+                      >
+                        <option value="">Sem investidor</option>
+                        {[...investors].sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(inv => (
+                          <option key={inv.id} value={inv.id}>{inv.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Tipo (taxa)</label>
+                      <select
+                        className="input"
+                        value={editingSale.type}
+                        onChange={e => setEditingSale(prev => ({ ...prev, type: e.target.value }))}
+                      >
+                        <option value="egg">Ovo (10%)</option>
+                        <option value="bird">Ave (6,4%)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                    Venda avulsa — o lucro vai direto para o investidor escolhido, sem vinculo com ave.
+                  </div>
+                </>
+              ) : (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                  Tipo detectado: <strong>{isEggProduct(editingSale.itemDescription) ? 'Ovo (10%)' : 'Ave (6,4%)'}</strong> — O vinculo com investidor sera recalculado ao salvar.
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: 12, marginTop: 20, justifyContent: 'flex-end' }}>
