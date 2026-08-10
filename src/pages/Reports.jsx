@@ -140,6 +140,7 @@ export default function Reports() {
     eggCollections, incubators, incubatorBatches,
     infirmaryBays, infirmaryAdmissions, treatments,
     nurseryRooms, nurseryBatches, nurseryEvents,
+    eggProfitRate, birdProfitRate,
   } = useApp();
   // Report type: 'vendas' | 'investidores' | 'plantel' | 'ovos' |
   //              'chocadeira' | 'pintinhos' | 'sanidade' | 'financeiro' | 'investor'
@@ -168,8 +169,8 @@ export default function Reports() {
   };
 
   const distribution = useMemo(
-    () => calculateProfitDistribution(sales, birds),
-    [sales, birds]
+    () => calculateProfitDistribution(sales, birds, { eggProfitRate, birdProfitRate }),
+    [sales, birds, eggProfitRate, birdProfitRate]
   );
 
   const dateRange = useMemo(

@@ -1,8 +1,15 @@
 import React, { useState } from 'react';
 import { useApp, BIRD_SPECIES } from '../context/AppContext';
-import { formatCurrency, getInitials } from '../utils/helpers';
-import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X } from 'lucide-react';
+import {
+  formatCurrency, getInitials, formatDate, getOwnershipPeriods,
+} from '../utils/helpers';
+import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X, ArrowLeftRight, History } from 'lucide-react';
 import Portal from '../components/Portal';
+
+const EMPTY_BIRD_FORM = {
+  investorId: '', species: '', breed: '', matrixCount: '', breederCount: '',
+  investmentValue: '', ownershipStartDate: '', ownershipEndDate: '',
+};
 
 const SPECIES_EMOJI = {
   'Galinha': '🐔', 'Faisão': '🪶', 'Pavão': '🦚', 'Pato': '🦆',
@@ -13,15 +20,21 @@ const SPECIES_EMOJI = {
 };
 
 export default function Plantel() {
-  const { investors, birds, addBird, updateBird, deleteBird, customSpecies, addCustomSpecies, deleteCustomSpecies } = useApp();
+  const {
+    investors, birds, addBird, updateBird, deleteBird, transferBird,
+    customSpecies, addCustomSpecies, deleteCustomSpecies,
+  } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [showNewAnimalModal, setShowNewAnimalModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState('');
   const [filterInvestor, setFilterInvestor] = useState('');
-  const [form, setForm] = useState({
-    investorId: '', species: '', breed: '', matrixCount: '', breederCount: '', investmentValue: '',
-  });
+  const [form, setForm] = useState({ ...EMPTY_BIRD_FORM });
+  // Bird currently being handed over to another investor.
+  const [transferTarget, setTransferTarget] = useState(null);
+  const [transferForm, setTransferForm] = useState({ toInvestorId: '', transferDate: '' });
+  // Bird whose ownership history panel is expanded.
+  const [historyBirdId, setHistoryBirdId] = useState(null);
 
   // New animal form
   const [newAnimalForm, setNewAnimalForm] = useState({ species: '', breeds: '' });
@@ -55,7 +68,7 @@ export default function Plantel() {
   };
 
   const resetForm = () => {
-    setForm({ investorId: '', species: '', breed: '', matrixCount: '', breederCount: '', investmentValue: '' });
+    setForm({ ...EMPTY_BIRD_FORM });
     setEditingId(null);
     setShowModal(false);
   };
@@ -68,6 +81,8 @@ export default function Plantel() {
       matrixCount: bird.matrixCount || '',
       breederCount: bird.breederCount || '',
       investmentValue: bird.investmentValue || '',
+      ownershipStartDate: bird.ownershipStartDate || '',
+      ownershipEndDate: bird.ownershipEndDate || '',
     });
     setEditingId(bird.id);
     setShowModal(true);
@@ -75,6 +90,22 @@ export default function Plantel() {
 
   const handleDelete = (id) => {
     if (window.confirm('Remover este animal do plantel?')) deleteBird(id);
+  };
+
+  const openTransfer = (bird) => {
+    setTransferTarget(bird);
+    setTransferForm({ toInvestorId: '', transferDate: new Date().toISOString().slice(0, 10) });
+  };
+
+  const handleTransferSubmit = (e) => {
+    e.preventDefault();
+    if (!transferTarget || !transferForm.toInvestorId || !transferForm.transferDate) return;
+    transferBird(transferTarget.id, {
+      toInvestorId: transferForm.toInvestorId,
+      transferDate: transferForm.transferDate,
+    });
+    setTransferTarget(null);
+    setTransferForm({ toInvestorId: '', transferDate: '' });
   };
 
   const handleNewAnimalSubmit = (e) => {
@@ -147,46 +178,98 @@ export default function Plantel() {
       </div>
 
       <div className="grid-3">
-        {filtered.map(bird => (
-          <div className="bird-card" key={bird.id}>
-            <div className="bird-card-header">
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <span className="bird-emoji">{SPECIES_EMOJI[bird.species] || '🐾'}</span>
-                <div className="bird-info">
-                  <h4>{bird.breed}</h4>
-                  <p>{bird.species}</p>
+        {filtered.map(bird => {
+          const pastPeriods = getOwnershipPeriods(bird).filter(p => !p.current);
+          const showHistory = historyBirdId === bird.id;
+          const hasPeriod = !!(bird.ownershipStartDate || bird.ownershipEndDate);
+          return (
+            <div className="bird-card" key={bird.id}>
+              <div className="bird-card-header">
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <span className="bird-emoji">{SPECIES_EMOJI[bird.species] || '🐾'}</span>
+                  <div className="bird-info">
+                    <h4>{bird.breed}</h4>
+                    <p>{bird.species}</p>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    className="btn-icon"
+                    onClick={() => openTransfer(bird)}
+                    title="Transferir para outro investidor"
+                    style={{ color: 'var(--info, #3B82F6)' }}
+                  >
+                    <ArrowLeftRight size={14} />
+                  </button>
+                  <button className="btn-icon edit" onClick={() => handleEdit(bird)} title="Editar">
+                    <Edit size={14} />
+                  </button>
+                  <button className="btn-icon" onClick={() => handleDelete(bird.id)} title="Remover">
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button className="btn-icon edit" onClick={() => handleEdit(bird)} title="Editar">
-                  <Edit size={14} />
-                </button>
-                <button className="btn-icon" onClick={() => handleDelete(bird.id)} title="Remover">
-                  <Trash2 size={14} />
-                </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                <div className="investor-avatar" style={{ width: 24, height: 24, fontSize: 10, borderRadius: 6 }}>
+                  {getInitials(getInvestorName(bird.investorId))}
+                </div>
+                <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{getInvestorName(bird.investorId)}</span>
+                {pastPeriods.length > 0 && (
+                  <button
+                    onClick={() => setHistoryBirdId(showHistory ? null : bird.id)}
+                    title="Ver historico de titularidade"
+                    style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                      display: 'flex', alignItems: 'center', gap: 3,
+                      fontSize: 11, color: 'var(--primary)',
+                    }}
+                  >
+                    <History size={12} /> {pastPeriods.length} anterior{pastPeriods.length > 1 ? 'es' : ''}
+                  </button>
+                )}
+              </div>
+
+              {hasPeriod && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+                  Titular de {bird.ownershipStartDate ? formatDate(bird.ownershipStartDate) : 'sempre'}
+                  {' '}ate {bird.ownershipEndDate ? formatDate(bird.ownershipEndDate) : 'hoje'}
+                </div>
+              )}
+
+              {showHistory && pastPeriods.length > 0 && (
+                <div style={{
+                  marginBottom: 8, padding: 8, borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-secondary)', fontSize: 11,
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text-secondary)' }}>
+                    Titulares anteriores
+                  </div>
+                  {pastPeriods.map((p, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '2px 0' }}>
+                      <span>{getInvestorName(p.investorId)}</span>
+                      <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                        {p.startDate ? formatDate(p.startDate) : 'inicio'} - {p.endDate ? formatDate(p.endDate) : 'hoje'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="bird-details">
+                <span className="badge badge-purple">{bird.matrixCount || 0} Matrizes</span>
+                <span className="badge badge-blue">{bird.breederCount || 0} Reprodutores</span>
+              </div>
+
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-light)' }}>
+                <div className="investor-stat-label">Valor Investido</div>
+                <div className="investor-stat-value" style={{ color: 'var(--primary)' }}>
+                  {formatCurrency(bird.investmentValue)}
+                </div>
               </div>
             </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <div className="investor-avatar" style={{ width: 24, height: 24, fontSize: 10, borderRadius: 6 }}>
-                {getInitials(getInvestorName(bird.investorId))}
-              </div>
-              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{getInvestorName(bird.investorId)}</span>
-            </div>
-
-            <div className="bird-details">
-              <span className="badge badge-purple">{bird.matrixCount || 0} Matrizes</span>
-              <span className="badge badge-blue">{bird.breederCount || 0} Reprodutores</span>
-            </div>
-
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-light)' }}>
-              <div className="investor-stat-label">Valor Investido</div>
-              <div className="investor-stat-value" style={{ color: 'var(--primary)' }}>
-                {formatCurrency(bird.investmentValue)}
-              </div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {filtered.length === 0 && (
@@ -279,9 +362,88 @@ export default function Plantel() {
                 />
               </div>
 
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Titular desde</label>
+                  <input
+                    className="form-input"
+                    type="date"
+                    value={form.ownershipStartDate}
+                    onChange={e => setForm({ ...form, ownershipStartDate: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Titular ate</label>
+                  <input
+                    className="form-input"
+                    type="date"
+                    value={form.ownershipEndDate}
+                    onChange={e => setForm({ ...form, ownershipEndDate: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -4, marginBottom: 8 }}>
+                Opcional. Define o periodo em que este investidor recebe o lucro das vendas deste animal.
+                Deixe em branco para valer sempre. Para passar o animal a outro investidor, use o botao
+                de transferencia no card — o historico e preservado.
+              </div>
+
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
                 <button type="submit" className="btn btn-primary">{editingId ? 'Salvar' : 'Cadastrar'}</button>
+              </div>
+            </form>
+          </div>
+        </div></Portal>
+      )}
+
+      {/* Modal Transferir Titularidade */}
+      {transferTarget && (
+        <Portal><div className="modal-overlay" onClick={() => setTransferTarget(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3 className="modal-title">Transferir Titularidade</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              <strong>{transferTarget.species} - {transferTarget.breed}</strong>, hoje de{' '}
+              <strong>{getInvestorName(transferTarget.investorId)}</strong>.
+            </p>
+            <form onSubmit={handleTransferSubmit}>
+              <div className="form-group">
+                <label className="form-label">Novo Investidor *</label>
+                <select
+                  className="form-input"
+                  required
+                  value={transferForm.toInvestorId}
+                  onChange={e => setTransferForm({ ...transferForm, toInvestorId: e.target.value })}
+                >
+                  <option value="">Selecione o investidor</option>
+                  {investors
+                    .filter(i => i.id !== transferTarget.investorId)
+                    .map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Data da Transferencia *</label>
+                <input
+                  className="form-input"
+                  type="date"
+                  required
+                  value={transferForm.transferDate}
+                  onChange={e => setTransferForm({ ...transferForm, transferDate: e.target.value })}
+                />
+              </div>
+              <div style={{
+                padding: 12, background: 'var(--info-bg, #dbeafe)', color: 'var(--info, #2563eb)',
+                borderRadius: 'var(--radius-sm)', fontSize: 12, marginTop: 8,
+              }}>
+                As vendas ate o dia anterior continuam sendo do titular atual. A partir da data
+                escolhida, o lucro passa a ser do novo investidor. Nenhuma venda ja registrada
+                e apagada — o historico fica guardado no animal.
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setTransferTarget(null)}>Cancelar</button>
+                <button type="submit" className="btn btn-primary">
+                  <ArrowLeftRight size={14} /> Transferir
+                </button>
               </div>
             </form>
           </div>

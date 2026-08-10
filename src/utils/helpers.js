@@ -5,6 +5,13 @@ export function formatCurrency(value) {
   }).format(value || 0);
 }
 
+// Render a rate like 0.064 as "6,4%" — pt-BR decimal comma, no trailing zeros.
+export function formatPercent(rate) {
+  const v = (Number(rate) || 0) * 100;
+  const s = v.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return `${s.replace('.', ',')}%`;
+}
+
 export function formatDate(dateStr) {
   if (!dateStr) return '-';
   try {
@@ -35,12 +42,40 @@ export function isEggProduct(description) {
   return description.toUpperCase().includes('OVO');
 }
 
-export function getEggProfitRate() {
-  return 0.10; // 10%
+// Default profit rates — the values the farm started with. They stay the
+// fallback whenever no configured rate is available (legacy rows, or a portal
+// rendering before appData finishes loading).
+export const DEFAULT_EGG_PROFIT_RATE = 0.10;   // 10%
+export const DEFAULT_BIRD_PROFIT_RATE = 0.064; // 6,4%
+
+// Both resolvers take an optional `rates` object — in practice the appData
+// slice `{ eggProfitRate, birdProfitRate }` exposed by useApp(). Calling them
+// with no argument still yields the historical defaults, so any call site that
+// has not been threaded through yet keeps working unchanged.
+export function getEggProfitRate(rates) {
+  const r = rates?.eggProfitRate;
+  return typeof r === 'number' && isFinite(r) && r >= 0 ? r : DEFAULT_EGG_PROFIT_RATE;
 }
 
-export function getBirdProfitRate() {
-  return 0.064; // 6.4%
+export function getBirdProfitRate(rates) {
+  const r = rates?.birdProfitRate;
+  return typeof r === 'number' && isFinite(r) && r >= 0 ? r : DEFAULT_BIRD_PROFIT_RATE;
+}
+
+// Resolve the rate that actually applies to a given sale.
+//
+// Every sale stores the profitRate it was registered with, so historical rows
+// keep the percentage that was in force at the time. That is precisely what
+// makes "keep the history" work when the admin edits the global rates: only
+// sales with no stored rate fall back to the current configuration.
+export function getSaleRateInfo(sale, rates) {
+  const description = sale?.itemDescription || sale?.descricaoItem || sale?.item || '';
+  const isEgg = typeof sale?.isEgg === 'boolean' ? sale.isEgg : isEggProduct(description);
+  const stored = sale?.profitRate;
+  if (typeof stored === 'number' && isFinite(stored) && stored >= 0) {
+    return { isEgg, rate: stored };
+  }
+  return { isEgg, rate: isEgg ? getEggProfitRate(rates) : getBirdProfitRate(rates) };
 }
 
 export function calculateCompoundInterest(principal, monthlyRate, months) {
@@ -120,6 +155,99 @@ export function matchSaleToBird(itemDescription, birds) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Bird ownership timeline
+//
+// A bird belongs to one investor at a time, but that link can change hands —
+// e.g. an investor absorbs an animal from another. Rather than rewriting past
+// sales, each bird carries a timeline and every sale is attributed to whoever
+// owned the animal ON THE SALE DATE.
+//
+//   bird.investorId           -> current owner
+//   bird.ownershipStartDate   -> when the current owner took over ('' = always)
+//   bird.ownershipEndDate     -> when the current owner's period ends ('' = open)
+//   bird.ownershipHistory[]   -> previous { investorId, startDate, endDate }
+//
+// Dates are inclusive on both ends.
+// ---------------------------------------------------------------------------
+
+// Normalize any date-ish value to a comparable YYYY-MM-DD string. Sale dates
+// arrive from CSV, pasted receipts and manual forms, so the raw value may be
+// an ISO timestamp, a plain date, or a locale string.
+export function normalizeDay(value) {
+  if (!value) return '';
+  const s = String(value).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+// The day before `dayStr`. Used to close the outgoing owner's period on a
+// transfer: they keep everything up to the day before the new owner starts.
+export function previousDay(dayStr) {
+  const day = normalizeDay(dayStr);
+  if (!day) return '';
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return normalizeDay(d.toISOString());
+}
+
+// True when a bird carries an explicit ownership timeline. Birds registered
+// before this feature have none and MUST keep behaving exactly as before:
+// every sale credits their current investor, regardless of date.
+export function hasOwnershipTimeline(bird) {
+  if (!bird) return false;
+  return !!(
+    bird.ownershipStartDate ||
+    bird.ownershipEndDate ||
+    (Array.isArray(bird.ownershipHistory) && bird.ownershipHistory.length > 0)
+  );
+}
+
+// Full timeline of a bird: past periods plus the current link, oldest first.
+export function getOwnershipPeriods(bird) {
+  if (!bird) return [];
+  const past = Array.isArray(bird.ownershipHistory) ? bird.ownershipHistory : [];
+  const current = {
+    investorId: bird.investorId,
+    startDate: bird.ownershipStartDate || '',
+    endDate: bird.ownershipEndDate || '',
+    current: true,
+  };
+  return [...past, current]
+    .filter(p => p && p.investorId)
+    .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+}
+
+// Which investor owned `bird` on `dateStr`. Returns null when the date falls
+// outside every period (e.g. a sale predating the owner's start date) — those
+// sales are left unattributed on purpose.
+export function resolveBirdOwnerAt(bird, dateStr) {
+  const periods = getOwnershipPeriods(bird);
+  if (periods.length === 0) return null;
+  const day = normalizeDay(dateStr);
+  // No usable date on the sale: fall back to whoever owns the bird now.
+  if (!day) return bird.investorId || null;
+  // Latest applicable period wins, should two ranges ever overlap.
+  for (let i = periods.length - 1; i >= 0; i--) {
+    const p = periods[i];
+    if (p.startDate && day < p.startDate) continue;
+    if (p.endDate && day > p.endDate) continue;
+    return p.investorId;
+  }
+  return null;
+}
+
+// Investor a bird-linked sale should credit on a given date. Birds with no
+// timeline keep the legacy behaviour (always the current investor).
+export function resolveBirdInvestorForDate(bird, dateStr) {
+  if (!bird) return null;
+  if (!hasOwnershipTimeline(bird)) return bird.investorId || null;
+  return resolveBirdOwnerAt(bird, dateStr);
+}
+
 export function filterValidTransactions(sales) {
   return sales.filter(sale => {
     const status = (sale.transactionStatus || sale.statusTransacao || '').toUpperCase();
@@ -175,13 +303,16 @@ export function partitionSaleDuplicates(sales) {
   return { unique, duplicates };
 }
 
-// Calculate profit distribution for sales
-// Respects saved matchedInvestorId/matchedBirdId on each sale to preserve manual/import links.
-// Only falls back to re-matching if no saved link exists.
-export function calculateProfitDistribution(sales, birds) {
+// Calculate profit distribution for sales.
+//
+// `rates` is the optional appData slice { eggProfitRate, birdProfitRate }.
+// It is only consulted for sales that carry no stored profitRate — historical
+// rows keep the percentage they were registered with.
+export function calculateProfitDistribution(sales, birds, rates) {
   const validSales = filterValidTransactions(sales);
   const distribution = {};
   const unmatchedSales = [];
+  const birdList = Array.isArray(birds) ? birds : [];
 
   for (const sale of validSales) {
     const description = sale.itemDescription || sale.descricaoItem || sale.item || '';
@@ -189,28 +320,36 @@ export function calculateProfitDistribution(sales, birds) {
 
     if (!description || totalValue <= 0) continue;
 
-    // Manual / standalone ("avulsa") sales are addressed to an investor
-    // directly and carry an explicit type + rate. Honor those instead of
-    // re-deriving the rate from the description, because a custom item
-    // (e.g. "Venda avulsa") won't contain the "OVO" keyword and would
-    // otherwise be misclassified as a bird sale.
-    let isEgg;
-    let rate;
-    if (sale.isManual && typeof sale.profitRate === 'number') {
-      isEgg = !!sale.isEgg;
-      rate = sale.profitRate;
-    } else {
-      isEgg = isEggProduct(description);
-      rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
-    }
+    // Each sale carries its own type + rate (set when it was registered).
+    // Manual "avulsa" sales rely on this too: a custom item description has no
+    // "OVO" keyword and would otherwise be misclassified as a bird sale.
+    const { isEgg, rate } = getSaleRateInfo(sale, rates);
+    const saleDay = normalizeDay(sale.date || sale.data || sale.importedAt);
 
-    // Use saved match if available, otherwise try to match
-    let investorId = sale.matchedInvestorId || null;
+    // Investor resolution, in priority order:
+    //   1. The bird this sale is linked to, evaluated AT THE SALE DATE. This is
+    //      what makes an ownership transfer re-attribute past sales correctly
+    //      without rewriting a single stored row.
+    //   2. The investor stored on the sale — manual "avulsa" sales, and
+    //      imported sales whose bird has no ownership timeline.
+    //   3. A fresh breed match, also evaluated at the sale date.
+    let investorId = null;
     let breedName = sale.matchedBreed || null;
-    if (!investorId) {
-      const matchedBird = matchSaleToBird(description, birds);
+
+    const linkedBird = sale.matchedBirdId
+      ? birdList.find(b => b.id === sale.matchedBirdId)
+      : null;
+
+    if (linkedBird && hasOwnershipTimeline(linkedBird)) {
+      investorId = resolveBirdOwnerAt(linkedBird, saleDay);
+      breedName = linkedBird.breed || breedName;
+    } else if (sale.matchedInvestorId) {
+      investorId = sale.matchedInvestorId;
+      if (linkedBird) breedName = linkedBird.breed || breedName;
+    } else {
+      const matchedBird = matchSaleToBird(description, birdList);
       if (matchedBird) {
-        investorId = matchedBird.investorId;
+        investorId = resolveBirdInvestorForDate(matchedBird, saleDay);
         breedName = matchedBird.breed;
       }
     }

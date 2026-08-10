@@ -10,6 +10,7 @@ export default function Investors() {
     investors, birds, sales,
     addInvestor, updateInvestor, deleteInvestor,
     generateInvestorPortalToken, revokeInvestorPortalToken,
+    eggProfitRate, birdProfitRate,
   } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -66,8 +67,8 @@ export default function Investors() {
   };
 
   const distribution = useMemo(
-    () => calculateProfitDistribution(sales, birds),
-    [sales, birds]
+    () => calculateProfitDistribution(sales, birds, { eggProfitRate, birdProfitRate }),
+    [sales, birds, eggProfitRate, birdProfitRate]
   );
 
   const handleSubmit = async (e) => {

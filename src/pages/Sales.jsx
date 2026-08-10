@@ -1,14 +1,15 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import {
-  formatCurrency, formatDate, calculateProfitDistribution,
-  isEggProduct, getEggProfitRate, getBirdProfitRate, filterValidTransactions, matchSaleToBird
+  formatCurrency, formatDate, formatPercent, calculateProfitDistribution,
+  isEggProduct, getEggProfitRate, getBirdProfitRate, filterValidTransactions, matchSaleToBird,
+  resolveBirdInvestorForDate, getSaleRateInfo
 } from '../utils/helpers';
 import { parseCSV, readFileAsText } from '../utils/csvParser';
 import { parseWixOrderText } from '../utils/pdfParser';
 import {
   Upload, Trash2, CheckCircle, AlertCircle, ShoppingCart,
-  FileText, ClipboardPaste, PlusCircle, X, Edit2, Save, Copy, RefreshCw, UserCheck
+  FileText, ClipboardPaste, PlusCircle, X, Edit2, Save, Copy, RefreshCw, UserCheck, Percent
 } from 'lucide-react';
 
 const EMPTY_MANUAL_ITEM = { itemDescription: '', quantity: 1, price: '' };
@@ -21,6 +22,7 @@ export default function Sales() {
   const {
     investors, birds, sales,
     addSales, clearSales, deleteSale, updateSale, removeDuplicateSales, recoverLegacySales, forceReloadSales,
+    eggProfitRate, birdProfitRate, updateProfitRates, recalculateAllSaleProfits,
   } = useApp();
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
@@ -37,12 +39,28 @@ export default function Sales() {
   const [sortField, setSortField] = useState('date'); // date | totalValue | orderNumber
   const [sortDir, setSortDir] = useState('desc'); // asc | desc
   const [currentPage, setCurrentPage] = useState(1);
+  // Profit-rate configuration modal. Two steps: edit the values, then choose
+  // whether the change applies only going forward or reprices the history.
+  const [showRatesModal, setShowRatesModal] = useState(false);
+  const [ratesForm, setRatesForm] = useState({ egg: '', bird: '' });
+  const [ratesPending, setRatesPending] = useState(null);
+  const [ratesSaving, setRatesSaving] = useState(false);
+  const [ratesResult, setRatesResult] = useState(null);
   const ITEMS_PER_PAGE = 50;
   const fileInputRef = useRef(null);
 
+  // Configured global rates. Existing sales keep whatever rate they were
+  // registered with; these two only apply to sales created from now on.
+  const rates = useMemo(
+    () => ({ eggProfitRate, birdProfitRate }),
+    [eggProfitRate, birdProfitRate]
+  );
+  const eggRate = getEggProfitRate(rates);
+  const birdRate = getBirdProfitRate(rates);
+
   const distribution = useMemo(
-    () => calculateProfitDistribution(sales, birds),
-    [sales, birds]
+    () => calculateProfitDistribution(sales, birds, rates),
+    [sales, birds, rates]
   );
 
   const validSales = useMemo(() => filterValidTransactions(sales), [sales]);
@@ -63,11 +81,13 @@ export default function Sales() {
       const description = row.itemDescription || row.item || '';
       const totalValue = parseFloat(row.totalValue || row.price || 0);
       const isEgg = isEggProduct(description);
-      const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+      const rate = isEgg ? eggRate : birdRate;
 
+      // Credit the investor who owned the bird ON THE SALE DATE, so imports
+      // that span an ownership transfer land on the right person.
       const matchedBird = matchSaleToBird(description, birds);
       const matchedBirdId = matchedBird ? matchedBird.id : null;
-      const matchedInvestorId = matchedBird ? matchedBird.investorId : null;
+      const matchedInvestorId = matchedBird ? resolveBirdInvestorForDate(matchedBird, row.date) : null;
       const matchedBreed = matchedBird ? matchedBird.breed : null;
 
       return {
@@ -239,7 +259,7 @@ export default function Sales() {
     }
 
     const isEgg = avulsaForm.type === 'egg';
-    const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+    const rate = isEgg ? eggRate : birdRate;
     const qty = parseInt(avulsaForm.quantity, 10) || 1;
     const investor = investors.find(i => i.id === investorId);
 
@@ -353,6 +373,63 @@ export default function Sales() {
 
   const getInvestorName = (id) => investors.find(i => i.id === id)?.name || '-';
 
+  // ---- Profit rate configuration --------------------------------------
+  const rateToInput = (rate) =>
+    String(((Number(rate) || 0) * 100).toFixed(4).replace(/0+$/, '').replace(/\.$/, ''));
+
+  const openRatesModal = () => {
+    setRatesForm({ egg: rateToInput(eggRate), bird: rateToInput(birdRate) });
+    setRatesPending(null);
+    setRatesResult(null);
+    setShowRatesModal(true);
+  };
+
+  const closeRatesModal = () => {
+    if (ratesSaving) return;
+    setShowRatesModal(false);
+    setRatesPending(null);
+    setRatesResult(null);
+  };
+
+  // Step 1 -> 2: validate the typed percentages and ask about the scope.
+  const handleRatesContinue = (e) => {
+    e.preventDefault();
+    const egg = parseFloat(String(ratesForm.egg).replace(',', '.'));
+    const bird = parseFloat(String(ratesForm.bird).replace(',', '.'));
+    if (!isFinite(egg) || egg < 0 || egg > 100 || !isFinite(bird) || bird < 0 || bird > 100) {
+      setRatesResult({ error: 'Informe porcentagens validas entre 0 e 100.' });
+      return;
+    }
+    setRatesResult(null);
+    setRatesPending({ eggProfitRate: egg / 100, birdProfitRate: bird / 100 });
+  };
+
+  // Step 2: apply. `recalculate` reprices every stored sale (irreversible).
+  const applyRates = async (recalculate) => {
+    if (!ratesPending || ratesSaving) return;
+    if (recalculate && !window.confirm(
+      'Recalcular TODAS as vendas ja registradas com as novas taxas? '
+      + 'Os lucros e saldos de todos os investidores serao alterados. Esta acao nao pode ser desfeita.'
+    )) return;
+
+    setRatesSaving(true);
+    try {
+      updateProfitRates(ratesPending);
+      if (recalculate) {
+        const res = await recalculateAllSaleProfits(ratesPending);
+        setRatesResult({ ok: `Taxas salvas e ${res.updated} venda(s) recalculada(s).` });
+      } else {
+        setRatesResult({ ok: 'Taxas salvas. As vendas ja registradas mantiveram as taxas antigas.' });
+      }
+      setRatesPending(null);
+      setTimeout(() => setShowRatesModal(false), 1800);
+    } catch (err) {
+      setRatesResult({ error: err?.message || 'Erro ao aplicar as taxas.' });
+    } finally {
+      setRatesSaving(false);
+    }
+  };
+
   const handleDeleteSale = async (sale) => {
     if (window.confirm(`Excluir venda "${sale.itemDescription || sale.item || 'sem descricao'}"?`)) {
       try {
@@ -388,7 +465,7 @@ export default function Sales() {
       // explicit Ovo/Ave type. Do NOT re-run breed matching, which would
       // wipe the manual link for custom item descriptions.
       const isEgg = editingSale.type === 'egg';
-      const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+      const rate = isEgg ? eggRate : birdRate;
       updates = {
         itemDescription: description,
         quantity: parseInt(editingSale.quantity, 10) || 1,
@@ -406,7 +483,7 @@ export default function Sales() {
     } else {
       // Imported sale: recompute type and re-link to a bird/investor by breed.
       const isEgg = isEggProduct(description);
-      const rate = isEgg ? getEggProfitRate() : getBirdProfitRate();
+      const rate = isEgg ? eggRate : birdRate;
       const matchedBird = matchSaleToBird(description, birds);
       updates = {
         itemDescription: description,
@@ -418,7 +495,7 @@ export default function Sales() {
         profitRate: rate,
         profit: totalValue * rate,
         matchedBirdId: matchedBird ? matchedBird.id : null,
-        matchedInvestorId: matchedBird ? matchedBird.investorId : null,
+        matchedInvestorId: matchedBird ? resolveBirdInvestorForDate(matchedBird, editingSale.date) : null,
         matchedBreed: matchedBird ? matchedBird.breed : null,
       };
     }
@@ -434,9 +511,14 @@ export default function Sales() {
 
   return (
     <div className="animate-in">
-      <div className="page-header">
-        <h2>Vendas</h2>
-        <p>Importe vendas do Wix (CSV, texto colado ou manual) e distribua lucros</p>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h2>Vendas</h2>
+          <p>Importe vendas do Wix (CSV, texto colado ou manual) e distribua lucros</p>
+        </div>
+        <button className="btn btn-secondary" onClick={openRatesModal} style={{ whiteSpace: 'nowrap' }}>
+          <Percent size={14} /> Taxas de Lucro ({formatPercent(eggRate)} / {formatPercent(birdRate)})
+        </button>
       </div>
 
       {/* Import Area */}
@@ -773,8 +855,8 @@ export default function Sales() {
                       value={avulsaForm.type}
                       onChange={(e) => setAvulsaForm(prev => ({ ...prev, type: e.target.value }))}
                     >
-                      <option value="egg">Ovo (10%)</option>
-                      <option value="bird">Ave (6,4%)</option>
+                      <option value="egg">Ovo ({formatPercent(eggRate)})</option>
+                      <option value="bird">Ave ({formatPercent(birdRate)})</option>
                     </select>
                   </div>
                 </div>
@@ -854,9 +936,9 @@ export default function Sales() {
                     <span>
                       Lucro para o investidor:{' '}
                       <strong>
-                        {formatCurrency((parseFloat(avulsaForm.totalValue) || 0) * (avulsaForm.type === 'egg' ? getEggProfitRate() : getBirdProfitRate()))}
+                        {formatCurrency((parseFloat(avulsaForm.totalValue) || 0) * (avulsaForm.type === 'egg' ? eggRate : birdRate))}
                       </strong>{' '}
-                      ({avulsaForm.type === 'egg' ? '10%' : '6,4%'} de {formatCurrency(parseFloat(avulsaForm.totalValue) || 0)})
+                      ({formatPercent(avulsaForm.type === 'egg' ? eggRate : birdRate)} de {formatCurrency(parseFloat(avulsaForm.totalValue) || 0)})
                     </span>
                   </div>
                 )}
@@ -928,8 +1010,8 @@ export default function Sales() {
               <thead>
                 <tr>
                   <th>Investidor</th>
-                  <th>Lucro Ovos (10%)</th>
-                  <th>Lucro Aves (6,4%)</th>
+                  <th>Lucro Ovos ({formatPercent(eggRate)})</th>
+                  <th>Lucro Aves ({formatPercent(birdRate)})</th>
                   <th>Total</th>
                   <th>Itens</th>
                 </tr>
@@ -1017,9 +1099,15 @@ export default function Sales() {
                     </td>
                     <td>{sale.quantity || 1}</td>
                     <td>{formatCurrency(sale.totalValue)}</td>
-                    <td>{((sale.profitRate || (sale.isEgg ? 0.10 : 0.064)) * 100).toFixed(1)}%</td>
+                    <td>{formatPercent(getSaleRateInfo(sale, rates).rate)}</td>
                     <td style={{ color: 'var(--success)', fontWeight: 600 }}>
-                      {sale.matchedInvestorId ? formatCurrency(sale.profit || (sale.totalValue * (sale.isEgg ? 0.10 : 0.064))) : '-'}
+                      {sale.matchedInvestorId
+                        ? formatCurrency(
+                            typeof sale.profit === 'number'
+                              ? sale.profit
+                              : (parseFloat(sale.totalValue) || 0) * getSaleRateInfo(sale, rates).rate
+                          )
+                        : '-'}
                     </td>
                     <td>
                       {sale.matchedInvestorId ? (
@@ -1100,6 +1188,130 @@ export default function Sales() {
           <ShoppingCart size={48} />
           <h3>Nenhuma venda importada</h3>
           <p>Use as abas acima para importar CSV, colar texto de PDF ou inserir manualmente</p>
+        </div>
+      )}
+
+      {/* Profit Rates Modal */}
+      {showRatesModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        }} onClick={closeRatesModal}>
+          <div style={{
+            background: 'var(--bg)', borderRadius: 'var(--radius)', padding: 24,
+            width: '100%', maxWidth: 480, margin: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0 }}>Taxas de Lucro</h3>
+              <button className="btn btn-sm btn-secondary" onClick={closeRatesModal} style={{ padding: '4px 6px' }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            {ratesResult?.ok && (
+              <div style={{
+                marginBottom: 16, padding: 12, borderRadius: 'var(--radius-sm)',
+                background: 'var(--success-bg)', color: 'var(--success)',
+                display: 'flex', alignItems: 'center', gap: 8, fontSize: 13,
+              }}>
+                <CheckCircle size={18} /> <span>{ratesResult.ok}</span>
+              </div>
+            )}
+            {ratesResult?.error && (
+              <div style={{
+                marginBottom: 16, padding: 12, borderRadius: 'var(--radius-sm)',
+                background: 'var(--danger-bg)', color: 'var(--danger)',
+                display: 'flex', alignItems: 'center', gap: 8, fontSize: 13,
+              }}>
+                <AlertCircle size={18} /> <span>{ratesResult.error}</span>
+              </div>
+            )}
+
+            {!ratesPending ? (
+              /* Step 1: edit the percentages */
+              <form onSubmit={handleRatesContinue}>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
+                  Porcentagem do valor da venda que vai para o investidor.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Lucro Ovos (%)</label>
+                    <input
+                      type="number" className="input" step="0.01" min="0" max="100" required
+                      value={ratesForm.egg}
+                      onChange={e => setRatesForm(prev => ({ ...prev, egg: e.target.value }))}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Lucro Aves (%)</label>
+                    <input
+                      type="number" className="input" step="0.01" min="0" max="100" required
+                      value={ratesForm.bird}
+                      onChange={e => setRatesForm(prev => ({ ...prev, bird: e.target.value }))}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
+                  Atual: ovos {formatPercent(eggRate)}, aves {formatPercent(birdRate)}.
+                </div>
+                <div style={{ display: 'flex', gap: 12, marginTop: 20, justifyContent: 'flex-end' }}>
+                  <button type="button" className="btn btn-secondary" onClick={closeRatesModal}>Cancelar</button>
+                  <button type="submit" className="btn btn-primary">Continuar</button>
+                </div>
+              </form>
+            ) : (
+              /* Step 2: choose the scope of the change */
+              <div>
+                <p style={{ fontSize: 13, marginTop: 0, marginBottom: 16 }}>
+                  Novas taxas: <strong>ovos {formatPercent(ratesPending.eggProfitRate)}</strong>,{' '}
+                  <strong>aves {formatPercent(ratesPending.birdProfitRate)}</strong>.
+                  <br />Como aplicar?
+                </p>
+
+                <button
+                  className="btn btn-primary"
+                  disabled={ratesSaving}
+                  onClick={() => applyRates(false)}
+                  style={{ width: '100%', justifyContent: 'flex-start', marginBottom: 10, textAlign: 'left', height: 'auto', padding: '12px 14px' }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700 }}>Somente novas vendas</div>
+                    <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.9 }}>
+                      As vendas ja registradas mantem as taxas antigas. Saldos e pagamentos nao mudam.
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  className="btn btn-secondary"
+                  disabled={ratesSaving}
+                  onClick={() => applyRates(true)}
+                  style={{ width: '100%', justifyContent: 'flex-start', textAlign: 'left', height: 'auto', padding: '12px 14px', color: 'var(--warning)' }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700 }}>Recalcular todo o historico</div>
+                    <div style={{ fontSize: 12, fontWeight: 400, opacity: 0.9 }}>
+                      Reaplica as novas taxas em todas as {sales.length} vendas. Altera os lucros e
+                      saldos de todos os investidores. Nao pode ser desfeito.
+                    </div>
+                  </div>
+                </button>
+
+                <div style={{ display: 'flex', gap: 12, marginTop: 20, justifyContent: 'flex-end' }}>
+                  <button className="btn btn-secondary" disabled={ratesSaving} onClick={() => setRatesPending(null)}>
+                    Voltar
+                  </button>
+                </div>
+                {ratesSaving && (
+                  <div style={{ textAlign: 'center', paddingTop: 12, color: 'var(--primary)', fontSize: 13 }}>
+                    Aplicando...
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1196,8 +1408,8 @@ export default function Sales() {
                         value={editingSale.type}
                         onChange={e => setEditingSale(prev => ({ ...prev, type: e.target.value }))}
                       >
-                        <option value="egg">Ovo (10%)</option>
-                        <option value="bird">Ave (6,4%)</option>
+                        <option value="egg">Ovo ({formatPercent(eggRate)})</option>
+                        <option value="bird">Ave ({formatPercent(birdRate)})</option>
                       </select>
                     </div>
                   </div>
@@ -1207,7 +1419,7 @@ export default function Sales() {
                 </>
               ) : (
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                  Tipo detectado: <strong>{isEggProduct(editingSale.itemDescription) ? 'Ovo (10%)' : 'Ave (6,4%)'}</strong> — O vinculo com investidor sera recalculado ao salvar.
+                  Tipo detectado: <strong>{isEggProduct(editingSale.itemDescription) ? `Ovo (${formatPercent(eggRate)})` : `Ave (${formatPercent(birdRate)})`}</strong> — O vinculo com investidor sera recalculado ao salvar.
                 </div>
               )}
             </div>

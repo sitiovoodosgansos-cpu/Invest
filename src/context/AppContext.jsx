@@ -3,7 +3,10 @@ import { db } from '../firebase';
 import {
   doc, collection, onSnapshot, setDoc, getDoc, getDocs, deleteDoc, writeBatch,
 } from 'firebase/firestore';
-import { partitionSaleDuplicates } from '../utils/helpers';
+import {
+  partitionSaleDuplicates, isEggProduct, normalizeDay, previousDay,
+  DEFAULT_EGG_PROFIT_RATE, DEFAULT_BIRD_PROFIT_RATE,
+} from '../utils/helpers';
 
 // Generate a collision-free, non-enumerable ID for any locally-created entity.
 // Prefers the Web Crypto API (128 bits of entropy) and falls back to a
@@ -80,6 +83,11 @@ const defaultData = {
   nurseryBatches: [],
   nurseryEvents: [],
   employeeToken: '',
+  // Global profit rates applied to new sales. Stored here so every page —
+  // including the read-only investor/employee portals — reads them straight
+  // from useApp(). Existing sales keep the rate they were registered with.
+  eggProfitRate: DEFAULT_EGG_PROFIT_RATE,
+  birdProfitRate: DEFAULT_BIRD_PROFIT_RATE,
 };
 
 // Count total items across all arrays in data. Sales are tracked separately
@@ -573,6 +581,39 @@ export function AppProvider({ children }) {
     }));
   };
 
+  // Hand a bird over to another investor from `transferDate` onward.
+  //
+  // The outgoing owner's period is closed the day BEFORE the transfer and
+  // pushed onto ownershipHistory. Because profit attribution resolves the
+  // owner at each sale's date, past sales stay with the previous investor and
+  // everything from the transfer date credits the new one — without rewriting
+  // a single stored sale.
+  const transferBird = (birdId, { toInvestorId, transferDate }) => {
+    const day = normalizeDay(transferDate);
+    if (!birdId || !toInvestorId || !day) return;
+    setData(prev => ({
+      ...prev,
+      birds: (prev.birds || []).map(b => {
+        if (b.id !== birdId) return b;
+        const history = Array.isArray(b.ownershipHistory) ? [...b.ownershipHistory] : [];
+        if (b.investorId) {
+          history.push({
+            investorId: b.investorId,
+            startDate: b.ownershipStartDate || '',
+            endDate: previousDay(day),
+          });
+        }
+        return {
+          ...b,
+          ownershipHistory: history,
+          investorId: toInvestorId,
+          ownershipStartDate: day,
+          ownershipEndDate: '',
+        };
+      }),
+    }));
+  };
+
   // -----------------------------------------------------------------
   // Sales (Phase 2C: backed by /sales collection, one doc per sale).
   //
@@ -819,6 +860,60 @@ export function AppProvider({ children }) {
       const msg = `Erro ao recuperar vendas: ${err?.code || err?.message || 'erro desconhecido'}`;
       setSaveError(msg);
       return { status: 'error', message: msg };
+    }
+  };
+
+  // -----------------------------------------------------------------
+  // Profit rates (global configuration).
+  //
+  // Editing the rates never rewrites history on its own: each sale stores the
+  // profitRate it was registered with, so past distributions stay untouched.
+  // recalculateAllSaleProfits() is the explicit, opt-in path that reprices the
+  // entire history — the admin is asked which behaviour they want on save.
+  // -----------------------------------------------------------------
+  const updateProfitRates = ({ eggProfitRate, birdProfitRate }) => {
+    const egg = Number(eggProfitRate);
+    const bird = Number(birdProfitRate);
+    if (!isFinite(egg) || egg < 0 || !isFinite(bird) || bird < 0) return;
+    setData(prev => ({ ...prev, eggProfitRate: egg, birdProfitRate: bird }));
+  };
+
+  // Reprice every stored sale with the given rates. Irreversible: it
+  // overwrites profitRate/profit on all sales, which shifts investor balances.
+  const recalculateAllSaleProfits = async ({ eggProfitRate, birdProfitRate }) => {
+    const current = salesRef.current;
+    if (current.length === 0) return { updated: 0 };
+    const eggRate = Number(eggProfitRate);
+    const birdRate = Number(birdProfitRate);
+    if (!isFinite(eggRate) || !isFinite(birdRate)) return { updated: 0 };
+    try {
+      const CHUNK = 400;
+      let updated = 0;
+      for (let i = 0; i < current.length; i += CHUNK) {
+        const chunk = current.slice(i, i + CHUNK);
+        const b = writeBatch(db);
+        for (const sale of chunk) {
+          const description = sale.itemDescription || sale.item || '';
+          const isEgg = typeof sale.isEgg === 'boolean' ? sale.isEgg : isEggProduct(description);
+          const rate = isEgg ? eggRate : birdRate;
+          const totalValue = Number(sale.totalValue) || 0;
+          const payload = sanitizeSalePayload({
+            ...sale,
+            isEgg,
+            profitRate: rate,
+            profit: totalValue * rate,
+          });
+          b.set(doc(db, 'sales', sale.id), payload);
+          updated += 1;
+        }
+        await b.commit();
+      }
+      setSaveError(null);
+      return { updated };
+    } catch (err) {
+      devError('recalculateAllSaleProfits error:', err);
+      setSaveError(`Erro ao recalcular lucros: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
     }
   };
 
@@ -1271,7 +1366,8 @@ export function AppProvider({ children }) {
     firestoreError,
     saveError,
     addInvestor, updateInvestor, deleteInvestor,
-    addBird, updateBird, deleteBird,
+    addBird, updateBird, deleteBird, transferBird,
+    updateProfitRates, recalculateAllSaleProfits,
     addSales, clearSales, deleteSale, updateSale, removeDuplicateSales, recoverLegacySales, forceReloadSales,
     addFinancialInvestment, deleteFinancialInvestment,
     addPayment, deletePayment,

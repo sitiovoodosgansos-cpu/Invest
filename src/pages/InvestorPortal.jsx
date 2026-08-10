@@ -15,13 +15,16 @@ const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444'
 
 export default function InvestorPortal() {
   const { currentUser, logout } = useAuth();
-  const { investors, birds, sales, financialInvestments, payments } = useApp();
+  const { investors, birds, sales, financialInvestments, payments, eggProfitRate, birdProfitRate } = useApp();
   const [period, setPeriod] = useState('monthly');
   const [sortField, setSortField] = useState('date');
   const [sortDirection, setSortDirection] = useState('desc');
 
   const investor = investors.find(i => i.id === currentUser.investorId);
-  const distribution = useMemo(() => calculateProfitDistribution(sales, birds), [sales, birds]);
+  const distribution = useMemo(
+    () => calculateProfitDistribution(sales, birds, { eggProfitRate, birdProfitRate }),
+    [sales, birds, eggProfitRate, birdProfitRate]
+  );
 
   if (!investor) {
     return (
