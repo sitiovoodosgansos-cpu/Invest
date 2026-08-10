@@ -22,6 +22,7 @@ export default function Dashboard() {
     eggCollections, incubatorBatches, incubators,
     nurseryRooms, nurseryBatches, nurseryEvents,
     infirmaryBays, infirmaryAdmissions, treatments,
+    eggProfitRate, birdProfitRate,
   } = useApp();
 
   const [period, setPeriod] = useState('monthly');
@@ -36,8 +37,8 @@ export default function Dashboard() {
 
   // ── Financial stats ──
   const distribution = useMemo(
-    () => calculateProfitDistribution(sales, birds),
-    [sales, birds]
+    () => calculateProfitDistribution(sales, birds, { eggProfitRate, birdProfitRate }),
+    [sales, birds, eggProfitRate, birdProfitRate]
   );
 
   const totalProfit = useMemo(() => {

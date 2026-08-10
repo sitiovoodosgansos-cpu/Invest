@@ -107,11 +107,14 @@ function DirectPortalContent() {
 
   const distribution = useMemo(() => {
     try {
-      return calculateProfitDistribution(sales, birds);
+      return calculateProfitDistribution(sales, birds, {
+        eggProfitRate: appData.eggProfitRate,
+        birdProfitRate: appData.birdProfitRate,
+      });
     } catch {
       return { distribution: {}, unmatchedSales: [] };
     }
-  }, [sales, birds]);
+  }, [sales, birds, appData.eggProfitRate, appData.birdProfitRate]);
 
   // ALL derived data computed here (before any early return) to respect Rules of Hooks
   const myBirds = useMemo(() => investor ? birds.filter(b => b.investorId === investor.id) : [], [birds, investor]);

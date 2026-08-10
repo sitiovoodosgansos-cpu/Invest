@@ -13,13 +13,16 @@ import Portal from '../components/Portal';
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
 export default function Financial() {
-  const { investors, birds, sales, financialInvestments, payments, addFinancialInvestment, deleteFinancialInvestment, addPayment, deletePayment } = useApp();
+  const { investors, birds, sales, financialInvestments, payments, addFinancialInvestment, deleteFinancialInvestment, addPayment, deletePayment, eggProfitRate, birdProfitRate } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [form, setForm] = useState({ investorId: '', amount: '', date: new Date().toISOString().slice(0, 10) });
   const [paymentForm, setPaymentForm] = useState({ investorId: '', amount: '', date: new Date().toISOString().slice(0, 10), description: '' });
 
-  const distribution = useMemo(() => calculateProfitDistribution(sales, birds), [sales, birds]);
+  const distribution = useMemo(
+    () => calculateProfitDistribution(sales, birds, { eggProfitRate, birdProfitRate }),
+    [sales, birds, eggProfitRate, birdProfitRate]
+  );
 
   const investmentDetails = useMemo(() => {
     return financialInvestments.map(inv => {
