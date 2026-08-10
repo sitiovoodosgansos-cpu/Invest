@@ -68,14 +68,31 @@ export function getBirdProfitRate(rates) {
 // keep the percentage that was in force at the time. That is precisely what
 // makes "keep the history" work when the admin edits the global rates: only
 // sales with no stored rate fall back to the current configuration.
-export function getSaleRateInfo(sale, rates) {
+export function getSaleRateInfo(sale, rates, bird) {
   const description = sale?.itemDescription || sale?.descricaoItem || sale?.item || '';
   const isEgg = typeof sale?.isEgg === 'boolean' ? sale.isEgg : isEggProduct(description);
   const stored = sale?.profitRate;
   if (typeof stored === 'number' && isFinite(stored) && stored >= 0) {
     return { isEgg, rate: stored };
   }
-  return { isEgg, rate: isEgg ? getEggProfitRate(rates) : getBirdProfitRate(rates) };
+  return { isEgg, rate: resolveRateFor(bird, isEgg, rates) };
+}
+
+// Rate that applies to a sale of a given animal. Each bird may override the
+// egg rate, the animal rate, or both — margins differ per breed. An absent or
+// blank override falls back to the global configuration.
+export function resolveRateFor(bird, isEgg, rates) {
+  const override = isEgg ? bird?.eggProfitRate : bird?.birdProfitRate;
+  if (typeof override === 'number' && isFinite(override) && override >= 0) return override;
+  return isEgg ? getEggProfitRate(rates) : getBirdProfitRate(rates);
+}
+
+// True when a bird overrides at least one of the two rates.
+export function hasRateOverride(bird) {
+  if (!bird) return false;
+  const e = bird.eggProfitRate;
+  const b = bird.birdProfitRate;
+  return (typeof e === 'number' && isFinite(e)) || (typeof b === 'number' && isFinite(b));
 }
 
 export function calculateCompoundInterest(principal, monthlyRate, months) {
@@ -320,11 +337,19 @@ export function calculateProfitDistribution(sales, birds, rates) {
 
     if (!description || totalValue <= 0) continue;
 
-    // Each sale carries its own type + rate (set when it was registered).
-    // Manual "avulsa" sales rely on this too: a custom item description has no
-    // "OVO" keyword and would otherwise be misclassified as a bird sale.
-    const { isEgg, rate } = getSaleRateInfo(sale, rates);
     const saleDay = normalizeDay(sale.date || sale.data || sale.importedAt);
+
+    const linkedBird = sale.matchedBirdId
+      ? birdList.find(b => b.id === sale.matchedBirdId)
+      : null;
+
+    // Each sale carries its own type + rate (set when it was registered), so
+    // history is never repriced behind the admin's back. Only rows with no
+    // stored rate fall back — to the linked animal's own rate when it has one,
+    // otherwise to the global configuration. Manual "avulsa" sales rely on the
+    // stored rate too: a custom description has no "OVO" keyword and would
+    // otherwise be misclassified as an animal sale.
+    const { isEgg, rate } = getSaleRateInfo(sale, rates, linkedBird);
 
     // Investor resolution, in priority order:
     //   1. The bird this sale is linked to, evaluated AT THE SALE DATE. This is
@@ -335,10 +360,6 @@ export function calculateProfitDistribution(sales, birds, rates) {
     //   3. A fresh breed match, also evaluated at the sale date.
     let investorId = null;
     let breedName = sale.matchedBreed || null;
-
-    const linkedBird = sale.matchedBirdId
-      ? birdList.find(b => b.id === sale.matchedBirdId)
-      : null;
 
     if (linkedBird && hasOwnershipTimeline(linkedBird)) {
       investorId = resolveBirdOwnerAt(linkedBird, saleDay);
