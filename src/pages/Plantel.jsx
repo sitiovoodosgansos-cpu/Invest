@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp, BIRD_SPECIES } from '../context/AppContext';
 import {
   formatCurrency, getInitials, formatDate, formatPercent, getOwnershipPeriods,
   getEggProfitRate, getBirdProfitRate, resolveRateFor, hasRateOverride,
+  calculateBirdReturns,
 } from '../utils/helpers';
 import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X, ArrowLeftRight, History } from 'lucide-react';
 import Portal from '../components/Portal';
@@ -37,13 +38,21 @@ const SPECIES_EMOJI = {
 
 export default function Plantel() {
   const {
-    investors, birds, addBird, updateBird, deleteBird, transferBird,
+    investors, birds, sales, addBird, updateBird, deleteBird, transferBird,
     customSpecies, addCustomSpecies, deleteCustomSpecies,
     eggProfitRate: globalEggRate, birdProfitRate: globalBirdRate,
   } = useApp();
   // Global fallback rates, used as placeholders and to show each animal's
   // effective rate when it has no override of its own.
   const globals = { eggProfitRate: globalEggRate, birdProfitRate: globalBirdRate };
+
+  // How much each animal has already returned. Same rate and ownership rules
+  // as the investor statements, so the figures always agree.
+  const birdReturns = useMemo(
+    () => calculateBirdReturns(sales, birds, globals),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sales, birds, globalEggRate, globalBirdRate]
+  );
   const [showModal, setShowModal] = useState(false);
   const [showNewAnimalModal, setShowNewAnimalModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -320,11 +329,41 @@ export default function Plantel() {
                 </div>
               </div>
 
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-light)' }}>
-                <div className="investor-stat-label">Valor Investido</div>
-                <div className="investor-stat-value" style={{ color: 'var(--primary)' }}>
-                  {formatCurrency(bird.investmentValue)}
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-light)', display: 'flex', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div className="investor-stat-label">Valor Investido</div>
+                  <div className="investor-stat-value" style={{ color: 'var(--primary)' }}>
+                    {formatCurrency(bird.investmentValue)}
+                  </div>
                 </div>
+                {(() => {
+                  const ret = birdReturns[bird.id] || { profit: 0, currentOwnerProfit: 0, saleCount: 0 };
+                  const invested = parseFloat(bird.investmentValue) || 0;
+                  const payback = invested > 0 ? (ret.profit / invested) * 100 : null;
+                  const splitOwners = ret.profit - ret.currentOwnerProfit > 0.005;
+                  return (
+                    <div style={{ flex: 1 }}>
+                      <div className="investor-stat-label">Lucro do Investidor</div>
+                      <div
+                        className="investor-stat-value"
+                        style={{ color: ret.profit > 0 ? 'var(--success)' : 'var(--text-muted)' }}
+                      >
+                        {formatCurrency(ret.profit)}
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                        {ret.saleCount > 0
+                          ? `${ret.saleCount} venda${ret.saleCount > 1 ? 's' : ''}`
+                          : 'sem vendas'}
+                        {payback !== null && ret.profit > 0 && ` · ${payback.toFixed(0)}% do investido`}
+                      </div>
+                      {splitOwners && (
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                          Titular atual: {formatCurrency(ret.currentOwnerProfit)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           );

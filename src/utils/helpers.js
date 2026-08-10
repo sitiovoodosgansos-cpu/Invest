@@ -401,6 +401,68 @@ export function calculateProfitDistribution(sales, birds, rates) {
   return { distribution, unmatchedSales };
 }
 
+// What each animal has returned so far.
+//
+// Walks every valid sale once and accumulates it against the animal it is
+// linked to, using exactly the same rate and ownership rules as
+// calculateProfitDistribution — so the numbers on a bird card always agree
+// with the investor's statement.
+//
+// Returns a map keyed by bird id:
+//   revenue            gross value of the sales attributed to this animal
+//   profit             investor profit across every owner it has ever had
+//   currentOwnerProfit the slice of that profit earned by its current owner
+//   eggProfit/birdProfit  profit split by sale type
+//   saleCount          number of sales counted
+export function calculateBirdReturns(sales, birds, rates) {
+  const birdList = Array.isArray(birds) ? birds : [];
+  const byBird = {};
+  for (const bird of birdList) {
+    byBird[bird.id] = {
+      revenue: 0, profit: 0, currentOwnerProfit: 0,
+      eggProfit: 0, birdProfit: 0, saleCount: 0,
+    };
+  }
+
+  for (const sale of filterValidTransactions(sales)) {
+    const description = sale.itemDescription || sale.descricaoItem || sale.item || '';
+    const totalValue = parseFloat(sale.totalValue || sale.valorTotal || sale.price || sale.preco || 0);
+    if (!description || totalValue <= 0) continue;
+
+    // An explicit link wins; only unlinked sales get a breed match. A link
+    // pointing at a deleted animal is skipped rather than re-matched, so a
+    // removed bird's history never lands on an unrelated one.
+    let bird = null;
+    if (sale.matchedBirdId) {
+      bird = birdList.find(b => b.id === sale.matchedBirdId);
+      if (!bird) continue;
+    } else {
+      bird = matchSaleToBird(description, birdList);
+    }
+    if (!bird) continue;
+
+    const acc = byBird[bird.id];
+    if (!acc) continue;
+
+    const { isEgg, rate } = getSaleRateInfo(sale, rates, bird);
+    const profit = totalValue * rate;
+    const owner = resolveBirdInvestorForDate(bird, normalizeDay(sale.date || sale.data || sale.importedAt));
+
+    acc.revenue += totalValue;
+    acc.saleCount += 1;
+    // A sale falling outside every ownership period credits nobody, so it
+    // counts as revenue but not as investor profit.
+    if (owner) {
+      acc.profit += profit;
+      if (isEgg) acc.eggProfit += profit;
+      else acc.birdProfit += profit;
+      if (owner === bird.investorId) acc.currentOwnerProfit += profit;
+    }
+  }
+
+  return byBird;
+}
+
 // Group sales by time period
 export function groupSalesByPeriod(sales, period) {
   const groups = {};
