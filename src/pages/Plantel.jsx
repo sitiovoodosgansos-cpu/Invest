@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { useApp, BIRD_SPECIES } from '../context/AppContext';
 import {
-  formatCurrency, getInitials, formatDate, getOwnershipPeriods,
+  formatCurrency, getInitials, formatDate, formatPercent, getOwnershipPeriods,
+  getEggProfitRate, getBirdProfitRate, resolveRateFor, hasRateOverride,
 } from '../utils/helpers';
 import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X, ArrowLeftRight, History } from 'lucide-react';
 import Portal from '../components/Portal';
@@ -9,7 +10,22 @@ import Portal from '../components/Portal';
 const EMPTY_BIRD_FORM = {
   investorId: '', species: '', breed: '', matrixCount: '', breederCount: '',
   investmentValue: '', ownershipStartDate: '', ownershipEndDate: '',
+  eggProfitRate: '', birdProfitRate: '',
 };
+
+// Form <-> stored value conversion for the optional per-animal rates.
+// The form holds a percentage string ('12,5'); storage holds a fraction
+// (0.125). An empty field means "no override — use the global rate".
+const pctToRate = (value) => {
+  const s = String(value ?? '').trim().replace(',', '.');
+  if (!s) return null;
+  const n = parseFloat(s);
+  return isFinite(n) && n >= 0 && n <= 100 ? n / 100 : null;
+};
+const rateToPct = (rate) =>
+  typeof rate === 'number' && isFinite(rate)
+    ? String((rate * 100).toFixed(4).replace(/0+$/, '').replace(/\.$/, ''))
+    : '';
 
 const SPECIES_EMOJI = {
   'Galinha': '🐔', 'Faisão': '🪶', 'Pavão': '🦚', 'Pato': '🦆',
@@ -23,7 +39,11 @@ export default function Plantel() {
   const {
     investors, birds, addBird, updateBird, deleteBird, transferBird,
     customSpecies, addCustomSpecies, deleteCustomSpecies,
+    eggProfitRate: globalEggRate, birdProfitRate: globalBirdRate,
   } = useApp();
+  // Global fallback rates, used as placeholders and to show each animal's
+  // effective rate when it has no override of its own.
+  const globals = { eggProfitRate: globalEggRate, birdProfitRate: globalBirdRate };
   const [showModal, setShowModal] = useState(false);
   const [showNewAnimalModal, setShowNewAnimalModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -59,10 +79,16 @@ export default function Plantel() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    // Blank rate fields persist as null, i.e. "fall back to the global rate".
+    const payload = {
+      ...form,
+      eggProfitRate: pctToRate(form.eggProfitRate),
+      birdProfitRate: pctToRate(form.birdProfitRate),
+    };
     if (editingId) {
-      updateBird(editingId, form);
+      updateBird(editingId, payload);
     } else {
-      addBird(form);
+      addBird(payload);
     }
     resetForm();
   };
@@ -83,6 +109,8 @@ export default function Plantel() {
       investmentValue: bird.investmentValue || '',
       ownershipStartDate: bird.ownershipStartDate || '',
       ownershipEndDate: bird.ownershipEndDate || '',
+      eggProfitRate: rateToPct(bird.eggProfitRate),
+      birdProfitRate: rateToPct(bird.birdProfitRate),
     });
     setEditingId(bird.id);
     setShowModal(true);
@@ -262,6 +290,37 @@ export default function Plantel() {
               </div>
 
               <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-light)' }}>
+                <div className="investor-stat-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  Taxa de Lucro
+                  {!hasRateOverride(bird) && (
+                    <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>(padrao geral)</span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                  <span
+                    className="badge"
+                    style={{
+                      background: typeof bird.eggProfitRate === 'number' ? '#fef3c7' : 'var(--bg-secondary)',
+                      color: typeof bird.eggProfitRate === 'number' ? '#d97706' : 'var(--text-secondary)',
+                    }}
+                    title={typeof bird.eggProfitRate === 'number' ? 'Taxa propria deste animal' : 'Usando a taxa geral'}
+                  >
+                    Ovos {formatPercent(resolveRateFor(bird, true, globals))}
+                  </span>
+                  <span
+                    className="badge"
+                    style={{
+                      background: typeof bird.birdProfitRate === 'number' ? '#dbeafe' : 'var(--bg-secondary)',
+                      color: typeof bird.birdProfitRate === 'number' ? '#2563eb' : 'var(--text-secondary)',
+                    }}
+                    title={typeof bird.birdProfitRate === 'number' ? 'Taxa propria deste animal' : 'Usando a taxa geral'}
+                  >
+                    Animal {formatPercent(resolveRateFor(bird, false, globals))}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-light)' }}>
                 <div className="investor-stat-label">Valor Investido</div>
                 <div className="investor-stat-value" style={{ color: 'var(--primary)' }}>
                   {formatCurrency(bird.investmentValue)}
@@ -360,6 +419,40 @@ export default function Plantel() {
                   onChange={e => setForm({ ...form, investmentValue: e.target.value })}
                   placeholder="0,00"
                 />
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Taxa de Lucro - Ovos (%)</label>
+                  <input
+                    className="form-input"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={form.eggProfitRate}
+                    onChange={e => setForm({ ...form, eggProfitRate: e.target.value })}
+                    placeholder={`Padrao: ${formatPercent(getEggProfitRate(globals))}`}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Taxa de Lucro - Venda do Animal (%)</label>
+                  <input
+                    className="form-input"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={form.birdProfitRate}
+                    onChange={e => setForm({ ...form, birdProfitRate: e.target.value })}
+                    placeholder={`Padrao: ${formatPercent(getBirdProfitRate(globals))}`}
+                  />
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -4, marginBottom: 8 }}>
+                Opcional. Deixe em branco para usar a taxa geral. Preencha so quando a margem deste
+                animal for diferente das demais. Vale para vendas novas — as ja registradas mantem
+                a taxa com que foram lancadas.
               </div>
 
               <div className="form-row">

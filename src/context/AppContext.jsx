@@ -4,7 +4,7 @@ import {
   doc, collection, onSnapshot, setDoc, getDoc, getDocs, deleteDoc, writeBatch,
 } from 'firebase/firestore';
 import {
-  partitionSaleDuplicates, isEggProduct, normalizeDay, previousDay,
+  partitionSaleDuplicates, isEggProduct, normalizeDay, previousDay, resolveRateFor,
   DEFAULT_EGG_PROFIT_RATE, DEFAULT_BIRD_PROFIT_RATE,
 } from '../utils/helpers';
 
@@ -886,6 +886,9 @@ export function AppProvider({ children }) {
     const eggRate = Number(eggProfitRate);
     const birdRate = Number(birdProfitRate);
     if (!isFinite(eggRate) || !isFinite(birdRate)) return { updated: 0 };
+    // Per-animal rate overrides win over the globals when repricing history.
+    const birdsNow = dataRef.current.birds || [];
+    const globals = { eggProfitRate: eggRate, birdProfitRate: birdRate };
     try {
       const CHUNK = 400;
       let updated = 0;
@@ -895,7 +898,10 @@ export function AppProvider({ children }) {
         for (const sale of chunk) {
           const description = sale.itemDescription || sale.item || '';
           const isEgg = typeof sale.isEgg === 'boolean' ? sale.isEgg : isEggProduct(description);
-          const rate = isEgg ? eggRate : birdRate;
+          const linkedBird = sale.matchedBirdId
+            ? birdsNow.find(x => x.id === sale.matchedBirdId)
+            : null;
+          const rate = resolveRateFor(linkedBird, isEgg, globals);
           const totalValue = Number(sale.totalValue) || 0;
           const payload = sanitizeSalePayload({
             ...sale,

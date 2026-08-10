@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import {
   formatCurrency, formatDate, formatPercent, calculateProfitDistribution,
   isEggProduct, getEggProfitRate, getBirdProfitRate, filterValidTransactions, matchSaleToBird,
-  resolveBirdInvestorForDate, getSaleRateInfo
+  resolveBirdInvestorForDate, getSaleRateInfo, resolveRateFor
 } from '../utils/helpers';
 import { parseCSV, readFileAsText } from '../utils/csvParser';
 import { parseWixOrderText } from '../utils/pdfParser';
@@ -58,6 +58,13 @@ export default function Sales() {
   const eggRate = getEggProfitRate(rates);
   const birdRate = getBirdProfitRate(rates);
 
+  // Lookup so each row can resolve the rate of the animal it is linked to.
+  const birdById = useMemo(() => {
+    const map = {};
+    birds.forEach(b => { map[b.id] = b; });
+    return map;
+  }, [birds]);
+
   const distribution = useMemo(
     () => calculateProfitDistribution(sales, birds, rates),
     [sales, birds, rates]
@@ -81,7 +88,6 @@ export default function Sales() {
       const description = row.itemDescription || row.item || '';
       const totalValue = parseFloat(row.totalValue || row.price || 0);
       const isEgg = isEggProduct(description);
-      const rate = isEgg ? eggRate : birdRate;
 
       // Credit the investor who owned the bird ON THE SALE DATE, so imports
       // that span an ownership transfer land on the right person.
@@ -89,6 +95,9 @@ export default function Sales() {
       const matchedBirdId = matchedBird ? matchedBird.id : null;
       const matchedInvestorId = matchedBird ? resolveBirdInvestorForDate(matchedBird, row.date) : null;
       const matchedBreed = matchedBird ? matchedBird.breed : null;
+
+      // The matched animal may carry its own rate; otherwise the global one.
+      const rate = resolveRateFor(matchedBird, isEgg, rates);
 
       return {
         ...row,
@@ -483,8 +492,8 @@ export default function Sales() {
     } else {
       // Imported sale: recompute type and re-link to a bird/investor by breed.
       const isEgg = isEggProduct(description);
-      const rate = isEgg ? eggRate : birdRate;
       const matchedBird = matchSaleToBird(description, birds);
+      const rate = resolveRateFor(matchedBird, isEgg, rates);
       updates = {
         itemDescription: description,
         quantity: parseInt(editingSale.quantity, 10) || 1,
@@ -517,7 +526,7 @@ export default function Sales() {
           <p>Importe vendas do Wix (CSV, texto colado ou manual) e distribua lucros</p>
         </div>
         <button className="btn btn-secondary" onClick={openRatesModal} style={{ whiteSpace: 'nowrap' }}>
-          <Percent size={14} /> Taxas de Lucro ({formatPercent(eggRate)} / {formatPercent(birdRate)})
+          <Percent size={14} /> Taxas Gerais ({formatPercent(eggRate)} / {formatPercent(birdRate)})
         </button>
       </div>
 
@@ -1099,13 +1108,14 @@ export default function Sales() {
                     </td>
                     <td>{sale.quantity || 1}</td>
                     <td>{formatCurrency(sale.totalValue)}</td>
-                    <td>{formatPercent(getSaleRateInfo(sale, rates).rate)}</td>
+                    <td>{formatPercent(getSaleRateInfo(sale, rates, birdById[sale.matchedBirdId]).rate)}</td>
                     <td style={{ color: 'var(--success)', fontWeight: 600 }}>
                       {sale.matchedInvestorId
                         ? formatCurrency(
                             typeof sale.profit === 'number'
                               ? sale.profit
-                              : (parseFloat(sale.totalValue) || 0) * getSaleRateInfo(sale, rates).rate
+                              : (parseFloat(sale.totalValue) || 0)
+                                * getSaleRateInfo(sale, rates, birdById[sale.matchedBirdId]).rate
                           )
                         : '-'}
                     </td>
@@ -1202,7 +1212,7 @@ export default function Sales() {
             width: '100%', maxWidth: 480, margin: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
           }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h3 style={{ margin: 0 }}>Taxas de Lucro</h3>
+              <h3 style={{ margin: 0 }}>Taxas Gerais de Lucro</h3>
               <button className="btn btn-sm btn-secondary" onClick={closeRatesModal} style={{ padding: '4px 6px' }}>
                 <X size={16} />
               </button>
@@ -1231,7 +1241,9 @@ export default function Sales() {
               /* Step 1: edit the percentages */
               <form onSubmit={handleRatesContinue}>
                 <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
-                  Porcentagem do valor da venda que vai para o investidor.
+                  Porcentagem do valor da venda que vai para o investidor. Vale para os animais que
+                  nao tem taxa propria — no Plantel voce pode definir uma taxa especifica por animal,
+                  e ela tem prioridade sobre esta.
                 </p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                   <div>
