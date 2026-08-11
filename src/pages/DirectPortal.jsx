@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useApp } from '../context/AppContext';
+import { usePortalData } from '../hooks/usePortalData';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
   getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod
@@ -46,16 +47,29 @@ class PortalErrorBoundary extends Component {
 function DirectPortalContent() {
   const { token } = useParams();
   const appData = useApp();
+  const portal = usePortalData(token);
   const [period, setPeriod] = useState('monthly');
 
+  // PRIVACY: when the server-side endpoint is active it has already resolved
+  // the token and scoped every array to this investor, so the browser never
+  // receives another investor's data. With VITE_PORTAL_API off, `portal.enabled`
+  // is false and the previous client-side path runs unchanged.
+  const serverScoped = portal.enabled && !!portal.data;
+  const src = serverScoped ? portal.data : appData;
+
   // Defensive data access - ensure arrays are always arrays
-  const investors = Array.isArray(appData.investors) ? appData.investors : [];
-  const birds = Array.isArray(appData.birds) ? appData.birds : [];
-  const sales = Array.isArray(appData.sales) ? appData.sales : [];
-  const financialInvestments = Array.isArray(appData.financialInvestments) ? appData.financialInvestments : [];
-  const payments = Array.isArray(appData.payments) ? appData.payments : [];
-  const loading = appData.loading;
-  const firestoreError = appData.firestoreError;
+  const investors = serverScoped
+    ? (portal.data.investor ? [portal.data.investor] : [])
+    : (Array.isArray(appData.investors) ? appData.investors : []);
+  const birds = Array.isArray(src.birds) ? src.birds : [];
+  const sales = Array.isArray(src.sales) ? src.sales : [];
+  const financialInvestments = Array.isArray(src.financialInvestments) ? src.financialInvestments : [];
+  const payments = Array.isArray(src.payments) ? src.payments : [];
+  const rates = serverScoped ? (portal.data.rates || {}) : appData;
+  const loading = portal.enabled ? portal.loading : appData.loading;
+  const firestoreError = portal.enabled
+    ? (portal.error && portal.error !== 'token_not_found' ? portal.error : null)
+    : appData.firestoreError;
 
   // Phase 2B: resolve the URL token against /shareTokens first. If the lookup
   // succeeds and the doc is tagged type=='investor', we use the stored
@@ -68,6 +82,12 @@ function DirectPortalContent() {
 
   useEffect(() => {
     let cancelled = false;
+    // With the server endpoint active the token was already resolved there;
+    // the browser must not query Firestore at all.
+    if (portal.enabled) {
+      setTokenChecked(true);
+      return undefined;
+    }
     if (!token) {
       setTokenChecked(true);
       return undefined;
@@ -88,7 +108,7 @@ function DirectPortalContent() {
       }
     })();
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, portal.enabled]);
 
   // Resolve the investor record. Order of preference:
   //   1) Canonical path — /shareTokens/{token}.investorId matches an investor.
@@ -96,6 +116,9 @@ function DirectPortalContent() {
   //      never been migrated to a portalTokenId. Once the admin generates a
   //      portal token the legacy URL stops working for that investor.
   const investor = useMemo(() => {
+    // Server-scoped mode: the endpoint returned exactly one investor (or none
+    // for an invalid token). No client-side lookup, no full investors array.
+    if (portal.enabled) return serverScoped ? portal.data.investor : null;
     if (!tokenChecked) return null;
     if (resolvedInvestorId) {
       return investors.find(i => i.id === resolvedInvestorId) || null;
@@ -103,18 +126,18 @@ function DirectPortalContent() {
     const legacyMatch = investors.find(i => i.id === token);
     if (legacyMatch && !legacyMatch.portalTokenId) return legacyMatch;
     return null;
-  }, [tokenChecked, resolvedInvestorId, investors, token]);
+  }, [tokenChecked, resolvedInvestorId, investors, token, portal.enabled, serverScoped, portal.data]);
 
   const distribution = useMemo(() => {
     try {
       return calculateProfitDistribution(sales, birds, {
-        eggProfitRate: appData.eggProfitRate,
-        birdProfitRate: appData.birdProfitRate,
+        eggProfitRate: rates.eggProfitRate,
+        birdProfitRate: rates.birdProfitRate,
       });
     } catch {
       return { distribution: {}, unmatchedSales: [] };
     }
-  }, [sales, birds, appData.eggProfitRate, appData.birdProfitRate]);
+  }, [sales, birds, rates.eggProfitRate, rates.birdProfitRate]);
 
   // ALL derived data computed here (before any early return) to respect Rules of Hooks
   const myBirds = useMemo(() => investor ? birds.filter(b => b.investorId === investor.id) : [], [birds, investor]);

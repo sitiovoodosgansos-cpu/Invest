@@ -7,6 +7,7 @@ import {
   partitionSaleDuplicates, isEggProduct, normalizeDay, previousDay, resolveRateFor,
   DEFAULT_EGG_PROFIT_RATE, DEFAULT_BIRD_PROFIT_RATE,
 } from '../utils/helpers';
+import { PORTAL_API_ENABLED, isPortalRoute } from '../hooks/usePortalData';
 
 // Generate a collision-free, non-enumerable ID for any locally-created entity.
 // Prefers the Web Crypto API (128 bits of entropy) and falls back to a
@@ -20,6 +21,17 @@ const newId = () => {
   // collisions inside a session, though not cryptographically strong.
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 };
+
+// PRIVACY: on a portal route the browser must not subscribe to Firestore at
+// all. Filtering in the component is not enough — the whole database would
+// still cross the wire and sit in the visitor's memory, which is exactly the
+// exposure the /api/portal endpoint exists to close. When this is true every
+// listener, migration and write-back below is skipped and the portal gets its
+// (already scoped) data from the server instead.
+//
+// Evaluated once at module load, so the admin app — which loads on a non-portal
+// URL — is unaffected. Inert until VITE_PORTAL_API=1.
+const PORTAL_MODE = PORTAL_API_ENABLED && isPortalRoute();
 
 const AppContext = createContext();
 
@@ -150,6 +162,8 @@ export function AppProvider({ children }) {
 
   // Listen to Firestore in real-time
   useEffect(() => {
+    // PRIVACY: portals never read the shared document directly.
+    if (PORTAL_MODE) { setLoading(false); return; }
     const unsubscribe = onSnapshot(FIRESTORE_DOC, (snapshot) => {
       setFirestoreError(null);
       if (snapshot.exists()) {
@@ -237,6 +251,8 @@ export function AppProvider({ children }) {
   const MAX_SALES_RETRIES = 3;
 
   useEffect(() => {
+    // PRIVACY: the full /sales collection must never reach a portal browser.
+    if (PORTAL_MODE) { setSalesLoading(false); return; }
     let unsubscribe = null;
 
     const startSalesListener = () => {
@@ -283,6 +299,7 @@ export function AppProvider({ children }) {
 
   // Listen to the /eggCollections collection.
   useEffect(() => {
+    if (PORTAL_MODE) { setEggCollectionsLoading(false); return; }
     const unsubscribe = onSnapshot(EGG_COLLECTIONS_COLLECTION, (snapshot) => {
       const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setEggCollections(docs);
@@ -301,6 +318,8 @@ export function AppProvider({ children }) {
   // legacy array is empty, we skip. Otherwise we batch the writes (Firestore
   // allows up to 500 ops per batch) and clear the legacy field on success.
   useEffect(() => {
+    // Migrations are an admin-only concern; a portal visitor must never write.
+    if (PORTAL_MODE) return;
     if (loading) return;
     if (!dataLoadedFromFirestore.current) return;
     if (typeof window === 'undefined') return;
@@ -365,6 +384,7 @@ export function AppProvider({ children }) {
   // One-shot migration: promote legacy appData.eggCollections into
   // /eggCollections/{id}. Same pattern as the sales migration above.
   useEffect(() => {
+    if (PORTAL_MODE) return;
     if (loading) return;
     if (!dataLoadedFromFirestore.current) return;
     if (typeof window === 'undefined') return;
@@ -410,6 +430,9 @@ export function AppProvider({ children }) {
 
   // PROTECTION: Save data before page closes or tab switches
   useEffect(() => {
+    // Never mirror the dataset onto a portal visitor's device, and never let
+    // an anonymous visitor push a write back to Firestore.
+    if (PORTAL_MODE) return;
     const saveToLocalStorage = () => {
       if (loadingRef.current) return;
       const currentData = dataRef.current;
@@ -455,6 +478,7 @@ export function AppProvider({ children }) {
   // Save to Firestore when data changes (with protection against empty overwrites)
   const isFirstRender = useRef(true);
   useEffect(() => {
+    if (PORTAL_MODE) return;
     if (loading) return;
     if (isFirstRender.current) {
       isFirstRender.current = false;
