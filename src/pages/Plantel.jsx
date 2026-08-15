@@ -5,13 +5,13 @@ import {
   getEggProfitRate, getBirdProfitRate, resolveRateFor, hasRateOverride,
   calculateBirdReturns,
 } from '../utils/helpers';
-import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X, ArrowLeftRight, History } from 'lucide-react';
+import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X, ArrowLeftRight, History, Link2 } from 'lucide-react';
 import Portal from '../components/Portal';
 
 const EMPTY_BIRD_FORM = {
   investorId: '', species: '', breed: '', matrixCount: '', breederCount: '',
   investmentValue: '', ownershipStartDate: '', ownershipEndDate: '',
-  eggProfitRate: '', birdProfitRate: '',
+  eggProfitRate: '', birdProfitRate: '', ornabirdGroupId: '',
 };
 
 // Form <-> stored value conversion for the optional per-animal rates.
@@ -93,6 +93,7 @@ export default function Plantel() {
       ...form,
       eggProfitRate: pctToRate(form.eggProfitRate),
       birdProfitRate: pctToRate(form.birdProfitRate),
+      ornabirdGroupId: (form.ornabirdGroupId || '').trim() || null,
     };
     if (editingId) {
       updateBird(editingId, payload);
@@ -120,6 +121,7 @@ export default function Plantel() {
       ownershipEndDate: bird.ownershipEndDate || '',
       eggProfitRate: rateToPct(bird.eggProfitRate),
       birdProfitRate: rateToPct(bird.birdProfitRate),
+      ornabirdGroupId: bird.ornabirdGroupId || '',
     });
     setEditingId(bird.id);
     setShowModal(true);
@@ -266,6 +268,16 @@ export default function Plantel() {
                   </button>
                 )}
               </div>
+
+              {bird.ornabirdGroupId && (
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4, marginBottom: 8,
+                  fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
+                  background: '#ede9fe', color: '#6C2BD9',
+                }} title={`Lote ${bird.ornabirdGroupId} no Ornabird`}>
+                  <Link2 size={11} /> Ornabird
+                </div>
+              )}
 
               {hasPeriod && (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
@@ -488,6 +500,22 @@ export default function Plantel() {
                   />
                 </div>
               </div>
+              <div className="form-group">
+                <label className="form-label">Vinculo com o Ornabird</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={form.ornabirdGroupId}
+                  onChange={e => setForm({ ...form, ornabirdGroupId: e.target.value })}
+                  placeholder="ID do lote (flock group) no Ornabird"
+                />
+                <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
+                  Opcional. Ao vincular, a coleta de ovos, a prateleira, a chocadeira e as vendas
+                  deste lote passam a vir do Ornabird automaticamente — inclusive as chocadas,
+                  cujos filhotes seguem este mesmo investidor.
+                </span>
+              </div>
+
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -4, marginBottom: 8 }}>
                 Opcional. Deixe em branco para usar a taxa geral. Preencha so quando a margem deste
                 animal for diferente das demais. Vale para vendas novas — as ja registradas mantem
