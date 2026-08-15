@@ -114,6 +114,70 @@ function employeeBird(bird) {
   };
 }
 
+
+// Egg collections belonging to a given set of animals.
+function publicEggCollection(c) {
+  return {
+    id: c.id,
+    date: c.date || '',
+    birdId: c.birdId || '',
+    quantity: Number(c.quantity) || 0,
+    cracked: Number(c.cracked) || 0,
+    notes: c.notes || '',
+  };
+}
+
+// An incubation batch can mix eggs from SEVERAL investors' animals, so the
+// per-bird maps have to be filtered down rather than passed through — the raw
+// `eggs` map would disclose other investors' bird ids and quantities, and the
+// stored totals (totalEggs, totalHatched, ...) are batch-wide. Everything here
+// is recomputed from this investor's share alone.
+function publicBatch(batch, myBirdIds) {
+  const eggs = {};
+  let myEggs = 0;
+  for (const [birdId, qty] of Object.entries(batch.eggs || {})) {
+    if (!myBirdIds.has(birdId)) continue;
+    const n = parseInt(qty, 10) || 0;
+    if (n <= 0) continue;
+    eggs[birdId] = n;
+    myEggs += n;
+  }
+  if (myEggs <= 0) return null;
+
+  const hatchResults = {};
+  let hatched = 0, infertil = 0, naoDesenvolveu = 0, morreuNoOvo = 0;
+  for (const [birdId, r] of Object.entries(batch.hatchResults || {})) {
+    if (!myBirdIds.has(birdId)) continue;
+    const row = {
+      hatched: parseInt(r?.hatched, 10) || 0,
+      infertil: parseInt(r?.infertil, 10) || 0,
+      naoDesenvolveu: parseInt(r?.naoDesenvolveu, 10) || 0,
+      morreuNoOvo: parseInt(r?.morreuNoOvo, 10) || 0,
+    };
+    hatchResults[birdId] = row;
+    hatched += row.hatched;
+    infertil += row.infertil;
+    naoDesenvolveu += row.naoDesenvolveu;
+    morreuNoOvo += row.morreuNoOvo;
+  }
+
+  return {
+    id: batch.id,
+    incubatorId: batch.incubatorId || '',
+    dateIn: batch.dateIn || '',
+    dateHatch: batch.dateHatch || '',
+    status: batch.status || '',
+    eggs,
+    hatchResults,
+    // Deliberately this investor's share, NOT the batch-wide stored totals.
+    totalEggs: myEggs,
+    totalHatched: hatched,
+    totalInfertil: infertil,
+    totalNaoDesenvolveu: naoDesenvolveu,
+    totalMorreuNoOvo: morreuNoOvo,
+  };
+}
+
 // Resolve a portal token to { type, investorId } without trusting the client.
 // Order matters: the /shareTokens collection is authoritative, and the legacy
 // forms are only accepted when no token document exists.
@@ -208,12 +272,35 @@ export async function buildPortalPayload(db, token) {
   // whose current owner is somebody else.
   const myBirds = allBirds.filter(b => b && b.investorId === investor.id);
 
+  const myBirdIds = new Set(myBirds.map(b => b.id));
+
+  // Egg collections and incubation batches for this investor's animals only.
+  const eggSnap = await db.collection('eggCollections').get();
+  const myEggCollections = eggSnap.docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .filter(c => c && myBirdIds.has(c.birdId))
+    .map(publicEggCollection);
+
+  const myBatches = (Array.isArray(app.incubatorBatches) ? app.incubatorBatches : [])
+    .map(b => publicBatch(b, myBirdIds))
+    .filter(Boolean);
+
+  // Only the incubators referenced by those batches, name only — a machine is
+  // not investor data, but there is no reason to ship the whole list either.
+  const usedIncubators = new Set(myBatches.map(b => b.incubatorId).filter(Boolean));
+  const myIncubators = (Array.isArray(app.incubators) ? app.incubators : [])
+    .filter(i => i && usedIncubators.has(i.id))
+    .map(i => ({ id: i.id, name: i.name || '' }));
+
   return {
     status: 200,
     body: {
       type: 'investor',
       investor: publicInvestor(investor),
       birds: myBirds.map(b => publicBird(b, investor.id)),
+      eggCollections: myEggCollections,
+      incubatorBatches: myBatches,
+      incubators: myIncubators,
       sales: (mine.items || []).map(sale => publicSale(sale, investor.id)),
       summary: {
         eggProfit: mine.eggProfit || 0,

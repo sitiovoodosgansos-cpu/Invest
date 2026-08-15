@@ -65,6 +65,11 @@ function DirectPortalContent() {
   const sales = Array.isArray(src.sales) ? src.sales : [];
   const financialInvestments = Array.isArray(src.financialInvestments) ? src.financialInvestments : [];
   const payments = Array.isArray(src.payments) ? src.payments : [];
+  // Operational data, already scoped to this investor by the server. Empty
+  // when running on the legacy client-side path, which never had these.
+  const myEggCollections = Array.isArray(src.eggCollections) ? src.eggCollections : [];
+  const myBatches = Array.isArray(src.incubatorBatches) ? src.incubatorBatches : [];
+  const myIncubators = Array.isArray(src.incubators) ? src.incubators : [];
   const rates = serverScoped ? (portal.data.rates || {}) : appData;
   const loading = portal.enabled ? portal.loading : appData.loading;
   const firestoreError = portal.enabled
@@ -156,6 +161,30 @@ function DirectPortalContent() {
     return s + calculateCompoundInterest(parseFloat(f.amount) || 0, 0.03, months);
   }, 0);
   const totalFinancialProfit = totalFinancialCurrent - totalFinancialInvested;
+
+  // Egg totals for this investor's animals.
+  const eggTotals = useMemo(() => {
+    let total = 0, cracked = 0;
+    const byBird = {};
+    for (const c of myEggCollections) {
+      const q = parseInt(c.quantity, 10) || 0;
+      const cr = parseInt(c.cracked, 10) || 0;
+      total += q; cracked += cr;
+      if (!byBird[c.birdId]) byBird[c.birdId] = { quantity: 0, cracked: 0 };
+      byBird[c.birdId].quantity += q;
+      byBird[c.birdId].cracked += cr;
+    }
+    return { total, cracked, byBird };
+  }, [myEggCollections]);
+
+  const batchTotals = useMemo(() => {
+    let eggs = 0, hatched = 0;
+    for (const b of myBatches) {
+      eggs += parseInt(b.totalEggs, 10) || 0;
+      hatched += parseInt(b.totalHatched, 10) || 0;
+    }
+    return { eggs, hatched, rate: eggs > 0 ? (hatched / eggs) * 100 : 0 };
+  }, [myBatches]);
 
   const myPayments = useMemo(() => {
     if (!investor) return [];
@@ -387,6 +416,92 @@ function DirectPortalContent() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* Egg collection — this investor's animals only */}
+        {myEggCollections.length > 0 && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Minha Coleta de Ovos</span>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                <strong style={{ color: 'var(--success)' }}>{eggTotals.total}</strong> ovos
+                {eggTotals.cracked > 0 && ` · ${eggTotals.cracked} trincados`}
+              </span>
+            </div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr><th>Ave / Raca</th><th>Ovos</th><th>Trincados</th><th>Bons</th></tr>
+                </thead>
+                <tbody>
+                  {Object.entries(eggTotals.byBird)
+                    .sort((a, b) => b[1].quantity - a[1].quantity)
+                    .map(([birdId, t]) => {
+                      const bird = myBirds.find(b => b.id === birdId);
+                      return (
+                        <tr key={birdId}>
+                          <td><strong>{bird ? `${bird.species} - ${bird.breed}` : 'Ave removida'}</strong></td>
+                          <td style={{ fontWeight: 600 }}>{t.quantity}</td>
+                          <td style={{ color: t.cracked > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>{t.cracked}</td>
+                          <td style={{ color: 'var(--success)', fontWeight: 600 }}>{t.quantity - t.cracked}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Incubation — only this investor's share of each batch */}
+        {myBatches.length > 0 && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Minhas Chocagens</span>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                {batchTotals.eggs} ovos · <strong style={{ color: 'var(--success)' }}>{batchTotals.hatched}</strong> nascidos
+                {batchTotals.eggs > 0 && ` · ${batchTotals.rate.toFixed(0)}% de eclosao`}
+              </span>
+            </div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Entrada</th><th>Chocadeira</th><th>Situacao</th>
+                    <th>Meus Ovos</th><th>Nascidos</th><th>Eclosao</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...myBatches]
+                    .sort((a, b) => (b.dateIn || '').localeCompare(a.dateIn || ''))
+                    .map(b => {
+                      const inc = myIncubators.find(i => i.id === b.incubatorId);
+                      const eggs = parseInt(b.totalEggs, 10) || 0;
+                      const hatched = parseInt(b.totalHatched, 10) || 0;
+                      const done = b.status === 'hatched' || hatched > 0;
+                      return (
+                        <tr key={b.id}>
+                          <td>{formatDate(b.dateIn)}</td>
+                          <td style={{ fontSize: 13 }}>{inc ? inc.name : '-'}</td>
+                          <td>
+                            <span className={`badge ${done ? 'badge-purple' : 'badge-blue'}`}>
+                              {done ? 'Eclodido' : 'Incubando'}
+                            </span>
+                          </td>
+                          <td style={{ fontWeight: 600 }}>{eggs}</td>
+                          <td style={{ color: 'var(--success)', fontWeight: 600 }}>{done ? hatched : '-'}</td>
+                          <td>{done && eggs > 0 ? `${((hatched / eggs) * 100).toFixed(0)}%` : '-'}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-muted)' }}>
+              Os numeros mostram apenas a sua parte de cada chocagem. Um mesmo lote pode
+              conter ovos de outros criadores.
             </div>
           </div>
         )}
