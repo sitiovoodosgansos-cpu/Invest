@@ -502,3 +502,33 @@ export function groupSalesByPeriod(sales, period) {
 
   return groups;
 }
+
+
+// ---------------------------------------------------------------------------
+// Ornabird mirror
+//
+// Rows synced from Ornabird carry the flock group they came from. Invest links
+// a Plantel row to a group through bird.ornabirdGroupId, which is what turns a
+// mirrored tray or sale into "this belongs to investor X".
+//
+// `originGroupId` wins over `ornabirdGroupId` when present: a sale of chicks
+// comes from a hatch group whose owner is inherited from the parent lot, and
+// the sync reports both.
+// ---------------------------------------------------------------------------
+
+// Index of ornabirdGroupId -> bird, built once per render rather than scanning
+// the flock for every row.
+export function buildOrnabirdGroupIndex(birds) {
+  const index = {};
+  for (const bird of Array.isArray(birds) ? birds : []) {
+    if (bird && bird.ornabirdGroupId) index[bird.ornabirdGroupId] = bird;
+  }
+  return index;
+}
+
+// The Plantel row a mirrored Ornabird record belongs to, or null when the
+// group was never linked.
+export function resolveMirrorBird(row, groupIndex) {
+  if (!row) return null;
+  return groupIndex[row.originGroupId] || groupIndex[row.ornabirdGroupId] || null;
+}

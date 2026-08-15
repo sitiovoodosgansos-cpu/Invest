@@ -70,6 +70,8 @@ function DirectPortalContent() {
   const myEggCollections = Array.isArray(src.eggCollections) ? src.eggCollections : [];
   const myBatches = Array.isArray(src.incubatorBatches) ? src.incubatorBatches : [];
   const myIncubators = Array.isArray(src.incubators) ? src.incubators : [];
+  const myTrays = Array.isArray(src.trays) ? src.trays : [];
+  const myVitrine = Array.isArray(src.vitrineSales) ? src.vitrineSales : [];
   const rates = serverScoped ? (portal.data.rates || {}) : appData;
   const loading = portal.enabled ? portal.loading : appData.loading;
   const firestoreError = portal.enabled
@@ -502,6 +504,82 @@ function DirectPortalContent() {
             <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-muted)' }}>
               Os numeros mostram apenas a sua parte de cada chocagem. Um mesmo lote pode
               conter ovos de outros criadores.
+            </div>
+          </div>
+        )}
+
+        {/* Prateleira — mirrored from Ornabird, this investor's lots only */}
+        {myTrays.length > 0 && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Minha Prateleira</span>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                <strong style={{ color: 'var(--success)' }}>
+                  {myTrays.reduce((s2, t) => s2 + (parseInt(t.eggCount, 10) || 0), 0)}
+                </strong> ovos guardados
+              </span>
+            </div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr><th>Bandeja</th><th>Raca</th><th>Ovos</th><th>Descartados</th><th>Entrada</th></tr>
+                </thead>
+                <tbody>
+                  {myTrays.map(t => (
+                    <tr key={t.id}>
+                      <td><strong>{t.label || '-'}</strong></td>
+                      <td style={{ fontSize: 13 }}>
+                        {t.breedLabel || '-'}
+                        {t.varietyLabel && <span style={{ color: 'var(--text-muted)' }}> · {t.varietyLabel}</span>}
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{parseInt(t.eggCount, 10) || 0}</td>
+                      <td style={{ color: (parseInt(t.discardedCount, 10) || 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                        {parseInt(t.discardedCount, 10) || 0}
+                      </td>
+                      <td style={{ fontSize: 13 }}>{formatDate(t.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Vitrine — mirrored sales already tied to this investor's lots */}
+        {myVitrine.length > 0 && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Minhas Vendas na Vitrine</span>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                Lucro: <strong style={{ color: 'var(--success)' }}>
+                  {formatCurrency(myVitrine.reduce((s2, v) => s2 + (Number(v.profit) || 0), 0))}
+                </strong>
+              </span>
+            </div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr><th>Data</th><th>Anuncio</th><th>Tipo</th><th>Qtd</th><th>Valor</th><th>Meu Lucro</th></tr>
+                </thead>
+                <tbody>
+                  {[...myVitrine]
+                    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+                    .map(v => (
+                      <tr key={v.id}>
+                        <td style={{ fontSize: 13 }}>{formatDate(v.date)}</td>
+                        <td>{v.description || '-'}</td>
+                        <td>
+                          <span className={`badge ${v.isEgg ? 'badge-purple' : 'badge-blue'}`}>
+                            {v.isEgg ? 'Ovo' : 'Ave'}
+                          </span>
+                        </td>
+                        <td>{parseInt(v.quantity, 10) || 1}</td>
+                        <td>{formatCurrency(v.amount)}</td>
+                        <td style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(v.profit)}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

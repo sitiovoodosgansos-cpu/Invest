@@ -28,7 +28,7 @@
 
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { calculateProfitDistribution } from '../src/utils/helpers.js';
+import { calculateProfitDistribution, resolveRateFor } from '../src/utils/helpers.js';
 
 // Reuse the Admin app across warm invocations; initializing twice throws.
 let cachedDb = null;
@@ -178,6 +178,46 @@ function publicBatch(batch, myBirdIds) {
   };
 }
 
+
+// Ornabird mirror rows for this investor. Both collections carry the flock
+// group they came from; a row only belongs to somebody once that group is
+// linked to a Plantel row (bird.ornabirdGroupId). Rows whose group is not
+// linked to THIS investor never leave the server.
+function mirrorBelongsTo(row, myGroupIds) {
+  if (!row) return false;
+  return myGroupIds.has(row.originGroupId) || myGroupIds.has(row.ornabirdGroupId);
+}
+
+function publicTray(t) {
+  return {
+    id: t.id,
+    label: t.label || '',
+    speciesLabel: t.speciesLabel || '',
+    breedLabel: t.breedLabel || '',
+    varietyLabel: t.varietyLabel || '',
+    eggCount: Number(t.eggCount) || 0,
+    discardedCount: Number(t.discardedCount) || 0,
+    status: t.status || '',
+    createdAt: t.createdAt || '',
+  };
+}
+
+// Customer names are dropped: they are the farm's clients, not the investor's,
+// and the portal has no reason to expose the buyer list.
+function publicVitrineSale(v, rate) {
+  const amount = Number(v.amount) || 0;
+  return {
+    id: v.id,
+    date: v.date || '',
+    description: v.description || '',
+    quantity: Number(v.quantity) || 1,
+    amount,
+    isEgg: !!v.isEgg,
+    rate,
+    profit: amount * rate,
+  };
+}
+
 // Resolve a portal token to { type, investorId } without trusting the client.
 // Order matters: the /shareTokens collection is authoritative, and the legacy
 // forms are only accepted when no token document exists.
@@ -273,6 +313,29 @@ export async function buildPortalPayload(db, token) {
   const myBirds = allBirds.filter(b => b && b.investorId === investor.id);
 
   const myBirdIds = new Set(myBirds.map(b => b.id));
+  const myGroupIds = new Set(myBirds.map(b => b.ornabirdGroupId).filter(Boolean));
+
+  // Ornabird mirror, scoped by the linked flock groups.
+  let myTrays = [];
+  let myVitrine = [];
+  if (myGroupIds.size > 0) {
+    const [traySnap, vitrineSnap] = await Promise.all([
+      db.collection('ornabirdTrays').get(),
+      db.collection('ornabirdVitrine').get(),
+    ]);
+    myTrays = traySnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(t => mirrorBelongsTo(t, myGroupIds))
+      .map(publicTray);
+    myVitrine = vitrineSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(v => mirrorBelongsTo(v, myGroupIds))
+      .map(v => {
+        const bird = myBirds.find(b =>
+          b.ornabirdGroupId === v.originGroupId || b.ornabirdGroupId === v.ornabirdGroupId);
+        return publicVitrineSale(v, resolveRateFor(bird, !!v.isEgg, rates));
+      });
+  }
 
   // Egg collections and incubation batches for this investor's animals only.
   const eggSnap = await db.collection('eggCollections').get();
@@ -299,6 +362,8 @@ export async function buildPortalPayload(db, token) {
       investor: publicInvestor(investor),
       birds: myBirds.map(b => publicBird(b, investor.id)),
       eggCollections: myEggCollections,
+      trays: myTrays,
+      vitrineSales: myVitrine,
       incubatorBatches: myBatches,
       incubators: myIncubators,
       sales: (mine.items || []).map(sale => publicSale(sale, investor.id)),

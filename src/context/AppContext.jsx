@@ -46,6 +46,11 @@ const SALES_COLLECTION = collection(db, 'sales');
 // reason as sales: the monolithic appData doc was hitting the 1 MiB cap
 // as daily egg records accumulated, silently rejecting writes.
 const EGG_COLLECTIONS_COLLECTION = collection(db, 'eggCollections');
+// Read-only mirror of Ornabird (ornabird.app). Bulk-replaced by the sync;
+// never edited by hand. Separate collections so they cannot re-create the
+// 1 MiB ceiling that already bit sales and egg collections.
+const ORNABIRD_TRAYS_COLLECTION = collection(db, 'ornabirdTrays');
+const ORNABIRD_VITRINE_COLLECTION = collection(db, 'ornabirdVitrine');
 // LocalStorage flag: once set, we know the /sales collection has been
 // hydrated from the legacy appData.sales array and the array has been
 // cleared. Prevents us from re-migrating on every session.
@@ -134,6 +139,8 @@ export function AppProvider({ children }) {
   // list without knowing where they're persisted.
   const [sales, setSales] = useState([]);
   const [eggCollections, setEggCollections] = useState([]);
+  const [ornabirdTrays, setOrnabirdTrays] = useState([]);
+  const [ornabirdVitrine, setOrnabirdVitrine] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salesLoading, setSalesLoading] = useState(true);
   const [eggCollectionsLoading, setEggCollectionsLoading] = useState(true);
@@ -157,6 +164,10 @@ export function AppProvider({ children }) {
   salesRef.current = sales;
   const eggCollectionsRef = useRef(eggCollections);
   eggCollectionsRef.current = eggCollections;
+  const ornabirdTraysRef = useRef(ornabirdTrays);
+  ornabirdTraysRef.current = ornabirdTrays;
+  const ornabirdVitrineRef = useRef(ornabirdVitrine);
+  ornabirdVitrineRef.current = ornabirdVitrine;
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
 
@@ -309,6 +320,24 @@ export function AppProvider({ children }) {
       setEggCollectionsLoading(false);
     });
     return () => unsubscribe();
+  }, []);
+
+  // Ornabird mirror listeners. Skipped on portal routes like every other
+  // subscription — the portal receives its already-scoped slice from the server.
+  useEffect(() => {
+    if (PORTAL_MODE) return;
+    const unsub = onSnapshot(ORNABIRD_TRAYS_COLLECTION, (snap) => {
+      setOrnabirdTrays(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => devError('Ornabird trays listen error:', error));
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (PORTAL_MODE) return;
+    const unsub = onSnapshot(ORNABIRD_VITRINE_COLLECTION, (snap) => {
+      setOrnabirdVitrine(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => devError('Ornabird vitrine listen error:', error));
+    return () => unsub();
   }, []);
 
   // One-shot migration: promote legacy appData.sales into /sales/{id}.
@@ -947,6 +976,44 @@ export function AppProvider({ children }) {
     }
   };
 
+  // -----------------------------------------------------------------
+  // Ornabird mirror
+  //
+  // The sync replaces a whole slice at once rather than diffing: Ornabird is
+  // the source of truth, so the local copy is disposable and a full replace
+  // can never drift. Rows carry the Ornabird ids so a re-sync is idempotent.
+  // -----------------------------------------------------------------
+  const replaceOrnabirdMirror = async (kind, rows) => {
+    const collectionName = kind === 'trays' ? 'ornabirdTrays' : 'ornabirdVitrine';
+    const existing = kind === 'trays' ? ornabirdTraysRef.current : ornabirdVitrineRef.current;
+    try {
+      // Drop what is no longer present upstream, then write the new rows.
+      const incomingIds = new Set(rows.map(r => r.id).filter(Boolean));
+      const stale = existing.filter(r => !incomingIds.has(r.id));
+      const CHUNK = 400;
+      for (let i = 0; i < stale.length; i += CHUNK) {
+        const b = writeBatch(db);
+        stale.slice(i, i + CHUNK).forEach(r => b.delete(doc(db, collectionName, r.id)));
+        await b.commit();
+      }
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const b = writeBatch(db);
+        for (const row of rows.slice(i, i + CHUNK)) {
+          const { id, ...rest } = row;
+          if (!id) continue;
+          b.set(doc(db, collectionName, id), JSON.parse(JSON.stringify(rest)));
+        }
+        await b.commit();
+      }
+      setSaveError(null);
+      return { written: rows.length, removed: stale.length };
+    } catch (err) {
+      devError('replaceOrnabirdMirror error:', err);
+      setSaveError(`Erro ao sincronizar com o Ornabird: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
+  };
+
   // Custom Species
   const addCustomSpecies = (speciesData) => {
     setData(prev => {
@@ -1392,6 +1459,9 @@ export function AppProvider({ children }) {
     ...data,
     sales,
     eggCollections,
+    ornabirdTrays,
+    ornabirdVitrine,
+    replaceOrnabirdMirror,
     loading: loading || salesLoading || eggCollectionsLoading,
     firestoreError,
     saveError,
