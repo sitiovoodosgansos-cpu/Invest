@@ -7,6 +7,7 @@ import {
   partitionSaleDuplicates, isEggProduct, normalizeDay, previousDay, resolveRateFor,
   DEFAULT_EGG_PROFIT_RATE, DEFAULT_BIRD_PROFIT_RATE,
 } from '../utils/helpers';
+import { PORTAL_API_ENABLED, isPortalRoute } from '../hooks/usePortalData';
 
 // Generate a collision-free, non-enumerable ID for any locally-created entity.
 // Prefers the Web Crypto API (128 bits of entropy) and falls back to a
@@ -21,6 +22,17 @@ const newId = () => {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
+// PRIVACY: on a portal route the browser must not subscribe to Firestore at
+// all. Filtering in the component is not enough — the whole database would
+// still cross the wire and sit in the visitor's memory, which is exactly the
+// exposure the /api/portal endpoint exists to close. When this is true every
+// listener, migration and write-back below is skipped and the portal gets its
+// (already scoped) data from the server instead.
+//
+// Evaluated once at module load, so the admin app — which loads on a non-portal
+// URL — is unaffected. Inert until VITE_PORTAL_API=1.
+const PORTAL_MODE = PORTAL_API_ENABLED && isPortalRoute();
+
 const AppContext = createContext();
 
 const STORAGE_KEY = 'sitio_voo_dos_gansos_data';
@@ -34,6 +46,11 @@ const SALES_COLLECTION = collection(db, 'sales');
 // reason as sales: the monolithic appData doc was hitting the 1 MiB cap
 // as daily egg records accumulated, silently rejecting writes.
 const EGG_COLLECTIONS_COLLECTION = collection(db, 'eggCollections');
+// Read-only mirror of Ornabird (ornabird.app). Bulk-replaced by the sync;
+// never edited by hand. Separate collections so they cannot re-create the
+// 1 MiB ceiling that already bit sales and egg collections.
+const ORNABIRD_TRAYS_COLLECTION = collection(db, 'ornabirdTrays');
+const ORNABIRD_VITRINE_COLLECTION = collection(db, 'ornabirdVitrine');
 // LocalStorage flag: once set, we know the /sales collection has been
 // hydrated from the legacy appData.sales array and the array has been
 // cleared. Prevents us from re-migrating on every session.
@@ -122,6 +139,8 @@ export function AppProvider({ children }) {
   // list without knowing where they're persisted.
   const [sales, setSales] = useState([]);
   const [eggCollections, setEggCollections] = useState([]);
+  const [ornabirdTrays, setOrnabirdTrays] = useState([]);
+  const [ornabirdVitrine, setOrnabirdVitrine] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salesLoading, setSalesLoading] = useState(true);
   const [eggCollectionsLoading, setEggCollectionsLoading] = useState(true);
@@ -145,11 +164,17 @@ export function AppProvider({ children }) {
   salesRef.current = sales;
   const eggCollectionsRef = useRef(eggCollections);
   eggCollectionsRef.current = eggCollections;
+  const ornabirdTraysRef = useRef(ornabirdTrays);
+  ornabirdTraysRef.current = ornabirdTrays;
+  const ornabirdVitrineRef = useRef(ornabirdVitrine);
+  ornabirdVitrineRef.current = ornabirdVitrine;
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
 
   // Listen to Firestore in real-time
   useEffect(() => {
+    // PRIVACY: portals never read the shared document directly.
+    if (PORTAL_MODE) { setLoading(false); return; }
     const unsubscribe = onSnapshot(FIRESTORE_DOC, (snapshot) => {
       setFirestoreError(null);
       if (snapshot.exists()) {
@@ -237,6 +262,8 @@ export function AppProvider({ children }) {
   const MAX_SALES_RETRIES = 3;
 
   useEffect(() => {
+    // PRIVACY: the full /sales collection must never reach a portal browser.
+    if (PORTAL_MODE) { setSalesLoading(false); return; }
     let unsubscribe = null;
 
     const startSalesListener = () => {
@@ -283,6 +310,7 @@ export function AppProvider({ children }) {
 
   // Listen to the /eggCollections collection.
   useEffect(() => {
+    if (PORTAL_MODE) { setEggCollectionsLoading(false); return; }
     const unsubscribe = onSnapshot(EGG_COLLECTIONS_COLLECTION, (snapshot) => {
       const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       setEggCollections(docs);
@@ -294,6 +322,24 @@ export function AppProvider({ children }) {
     return () => unsubscribe();
   }, []);
 
+  // Ornabird mirror listeners. Skipped on portal routes like every other
+  // subscription — the portal receives its already-scoped slice from the server.
+  useEffect(() => {
+    if (PORTAL_MODE) return;
+    const unsub = onSnapshot(ORNABIRD_TRAYS_COLLECTION, (snap) => {
+      setOrnabirdTrays(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => devError('Ornabird trays listen error:', error));
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (PORTAL_MODE) return;
+    const unsub = onSnapshot(ORNABIRD_VITRINE_COLLECTION, (snap) => {
+      setOrnabirdVitrine(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => devError('Ornabird vitrine listen error:', error));
+    return () => unsub();
+  }, []);
+
   // One-shot migration: promote legacy appData.sales into /sales/{id}.
   //
   // We wait until the main appData doc has loaded at least once so we know
@@ -301,6 +347,8 @@ export function AppProvider({ children }) {
   // legacy array is empty, we skip. Otherwise we batch the writes (Firestore
   // allows up to 500 ops per batch) and clear the legacy field on success.
   useEffect(() => {
+    // Migrations are an admin-only concern; a portal visitor must never write.
+    if (PORTAL_MODE) return;
     if (loading) return;
     if (!dataLoadedFromFirestore.current) return;
     if (typeof window === 'undefined') return;
@@ -365,6 +413,7 @@ export function AppProvider({ children }) {
   // One-shot migration: promote legacy appData.eggCollections into
   // /eggCollections/{id}. Same pattern as the sales migration above.
   useEffect(() => {
+    if (PORTAL_MODE) return;
     if (loading) return;
     if (!dataLoadedFromFirestore.current) return;
     if (typeof window === 'undefined') return;
@@ -410,6 +459,9 @@ export function AppProvider({ children }) {
 
   // PROTECTION: Save data before page closes or tab switches
   useEffect(() => {
+    // Never mirror the dataset onto a portal visitor's device, and never let
+    // an anonymous visitor push a write back to Firestore.
+    if (PORTAL_MODE) return;
     const saveToLocalStorage = () => {
       if (loadingRef.current) return;
       const currentData = dataRef.current;
@@ -455,6 +507,7 @@ export function AppProvider({ children }) {
   // Save to Firestore when data changes (with protection against empty overwrites)
   const isFirstRender = useRef(true);
   useEffect(() => {
+    if (PORTAL_MODE) return;
     if (loading) return;
     if (isFirstRender.current) {
       isFirstRender.current = false;
@@ -923,6 +976,44 @@ export function AppProvider({ children }) {
     }
   };
 
+  // -----------------------------------------------------------------
+  // Ornabird mirror
+  //
+  // The sync replaces a whole slice at once rather than diffing: Ornabird is
+  // the source of truth, so the local copy is disposable and a full replace
+  // can never drift. Rows carry the Ornabird ids so a re-sync is idempotent.
+  // -----------------------------------------------------------------
+  const replaceOrnabirdMirror = async (kind, rows) => {
+    const collectionName = kind === 'trays' ? 'ornabirdTrays' : 'ornabirdVitrine';
+    const existing = kind === 'trays' ? ornabirdTraysRef.current : ornabirdVitrineRef.current;
+    try {
+      // Drop what is no longer present upstream, then write the new rows.
+      const incomingIds = new Set(rows.map(r => r.id).filter(Boolean));
+      const stale = existing.filter(r => !incomingIds.has(r.id));
+      const CHUNK = 400;
+      for (let i = 0; i < stale.length; i += CHUNK) {
+        const b = writeBatch(db);
+        stale.slice(i, i + CHUNK).forEach(r => b.delete(doc(db, collectionName, r.id)));
+        await b.commit();
+      }
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const b = writeBatch(db);
+        for (const row of rows.slice(i, i + CHUNK)) {
+          const { id, ...rest } = row;
+          if (!id) continue;
+          b.set(doc(db, collectionName, id), JSON.parse(JSON.stringify(rest)));
+        }
+        await b.commit();
+      }
+      setSaveError(null);
+      return { written: rows.length, removed: stale.length };
+    } catch (err) {
+      devError('replaceOrnabirdMirror error:', err);
+      setSaveError(`Erro ao sincronizar com o Ornabird: ${err?.code || err?.message || 'erro desconhecido'}`);
+      throw err;
+    }
+  };
+
   // Custom Species
   const addCustomSpecies = (speciesData) => {
     setData(prev => {
@@ -1368,6 +1459,9 @@ export function AppProvider({ children }) {
     ...data,
     sales,
     eggCollections,
+    ornabirdTrays,
+    ornabirdVitrine,
+    replaceOrnabirdMirror,
     loading: loading || salesLoading || eggCollectionsLoading,
     firestoreError,
     saveError,

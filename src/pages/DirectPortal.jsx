@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useApp } from '../context/AppContext';
+import { usePortalData } from '../hooks/usePortalData';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
   getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod
@@ -46,16 +47,36 @@ class PortalErrorBoundary extends Component {
 function DirectPortalContent() {
   const { token } = useParams();
   const appData = useApp();
+  const portal = usePortalData(token);
   const [period, setPeriod] = useState('monthly');
 
+  // PRIVACY: when the server-side endpoint is active it has already resolved
+  // the token and scoped every array to this investor, so the browser never
+  // receives another investor's data. With VITE_PORTAL_API off, `portal.enabled`
+  // is false and the previous client-side path runs unchanged.
+  const serverScoped = portal.enabled && !!portal.data;
+  const src = serverScoped ? portal.data : appData;
+
   // Defensive data access - ensure arrays are always arrays
-  const investors = Array.isArray(appData.investors) ? appData.investors : [];
-  const birds = Array.isArray(appData.birds) ? appData.birds : [];
-  const sales = Array.isArray(appData.sales) ? appData.sales : [];
-  const financialInvestments = Array.isArray(appData.financialInvestments) ? appData.financialInvestments : [];
-  const payments = Array.isArray(appData.payments) ? appData.payments : [];
-  const loading = appData.loading;
-  const firestoreError = appData.firestoreError;
+  const investors = serverScoped
+    ? (portal.data.investor ? [portal.data.investor] : [])
+    : (Array.isArray(appData.investors) ? appData.investors : []);
+  const birds = Array.isArray(src.birds) ? src.birds : [];
+  const sales = Array.isArray(src.sales) ? src.sales : [];
+  const financialInvestments = Array.isArray(src.financialInvestments) ? src.financialInvestments : [];
+  const payments = Array.isArray(src.payments) ? src.payments : [];
+  // Operational data, already scoped to this investor by the server. Empty
+  // when running on the legacy client-side path, which never had these.
+  const myEggCollections = Array.isArray(src.eggCollections) ? src.eggCollections : [];
+  const myBatches = Array.isArray(src.incubatorBatches) ? src.incubatorBatches : [];
+  const myIncubators = Array.isArray(src.incubators) ? src.incubators : [];
+  const myTrays = Array.isArray(src.trays) ? src.trays : [];
+  const myVitrine = Array.isArray(src.vitrineSales) ? src.vitrineSales : [];
+  const rates = serverScoped ? (portal.data.rates || {}) : appData;
+  const loading = portal.enabled ? portal.loading : appData.loading;
+  const firestoreError = portal.enabled
+    ? (portal.error && portal.error !== 'token_not_found' ? portal.error : null)
+    : appData.firestoreError;
 
   // Phase 2B: resolve the URL token against /shareTokens first. If the lookup
   // succeeds and the doc is tagged type=='investor', we use the stored
@@ -68,6 +89,12 @@ function DirectPortalContent() {
 
   useEffect(() => {
     let cancelled = false;
+    // With the server endpoint active the token was already resolved there;
+    // the browser must not query Firestore at all.
+    if (portal.enabled) {
+      setTokenChecked(true);
+      return undefined;
+    }
     if (!token) {
       setTokenChecked(true);
       return undefined;
@@ -88,7 +115,7 @@ function DirectPortalContent() {
       }
     })();
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, portal.enabled]);
 
   // Resolve the investor record. Order of preference:
   //   1) Canonical path — /shareTokens/{token}.investorId matches an investor.
@@ -96,6 +123,9 @@ function DirectPortalContent() {
   //      never been migrated to a portalTokenId. Once the admin generates a
   //      portal token the legacy URL stops working for that investor.
   const investor = useMemo(() => {
+    // Server-scoped mode: the endpoint returned exactly one investor (or none
+    // for an invalid token). No client-side lookup, no full investors array.
+    if (portal.enabled) return serverScoped ? portal.data.investor : null;
     if (!tokenChecked) return null;
     if (resolvedInvestorId) {
       return investors.find(i => i.id === resolvedInvestorId) || null;
@@ -103,18 +133,18 @@ function DirectPortalContent() {
     const legacyMatch = investors.find(i => i.id === token);
     if (legacyMatch && !legacyMatch.portalTokenId) return legacyMatch;
     return null;
-  }, [tokenChecked, resolvedInvestorId, investors, token]);
+  }, [tokenChecked, resolvedInvestorId, investors, token, portal.enabled, serverScoped, portal.data]);
 
   const distribution = useMemo(() => {
     try {
       return calculateProfitDistribution(sales, birds, {
-        eggProfitRate: appData.eggProfitRate,
-        birdProfitRate: appData.birdProfitRate,
+        eggProfitRate: rates.eggProfitRate,
+        birdProfitRate: rates.birdProfitRate,
       });
     } catch {
       return { distribution: {}, unmatchedSales: [] };
     }
-  }, [sales, birds, appData.eggProfitRate, appData.birdProfitRate]);
+  }, [sales, birds, rates.eggProfitRate, rates.birdProfitRate]);
 
   // ALL derived data computed here (before any early return) to respect Rules of Hooks
   const myBirds = useMemo(() => investor ? birds.filter(b => b.investorId === investor.id) : [], [birds, investor]);
@@ -133,6 +163,30 @@ function DirectPortalContent() {
     return s + calculateCompoundInterest(parseFloat(f.amount) || 0, 0.03, months);
   }, 0);
   const totalFinancialProfit = totalFinancialCurrent - totalFinancialInvested;
+
+  // Egg totals for this investor's animals.
+  const eggTotals = useMemo(() => {
+    let total = 0, cracked = 0;
+    const byBird = {};
+    for (const c of myEggCollections) {
+      const q = parseInt(c.quantity, 10) || 0;
+      const cr = parseInt(c.cracked, 10) || 0;
+      total += q; cracked += cr;
+      if (!byBird[c.birdId]) byBird[c.birdId] = { quantity: 0, cracked: 0 };
+      byBird[c.birdId].quantity += q;
+      byBird[c.birdId].cracked += cr;
+    }
+    return { total, cracked, byBird };
+  }, [myEggCollections]);
+
+  const batchTotals = useMemo(() => {
+    let eggs = 0, hatched = 0;
+    for (const b of myBatches) {
+      eggs += parseInt(b.totalEggs, 10) || 0;
+      hatched += parseInt(b.totalHatched, 10) || 0;
+    }
+    return { eggs, hatched, rate: eggs > 0 ? (hatched / eggs) * 100 : 0 };
+  }, [myBatches]);
 
   const myPayments = useMemo(() => {
     if (!investor) return [];
@@ -362,6 +416,168 @@ function DirectPortalContent() {
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{formatDate(b.createdAt)}</td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Egg collection — this investor's animals only */}
+        {myEggCollections.length > 0 && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Minha Coleta de Ovos</span>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                <strong style={{ color: 'var(--success)' }}>{eggTotals.total}</strong> ovos
+                {eggTotals.cracked > 0 && ` · ${eggTotals.cracked} trincados`}
+              </span>
+            </div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr><th>Ave / Raca</th><th>Ovos</th><th>Trincados</th><th>Bons</th></tr>
+                </thead>
+                <tbody>
+                  {Object.entries(eggTotals.byBird)
+                    .sort((a, b) => b[1].quantity - a[1].quantity)
+                    .map(([birdId, t]) => {
+                      const bird = myBirds.find(b => b.id === birdId);
+                      return (
+                        <tr key={birdId}>
+                          <td><strong>{bird ? `${bird.species} - ${bird.breed}` : 'Ave removida'}</strong></td>
+                          <td style={{ fontWeight: 600 }}>{t.quantity}</td>
+                          <td style={{ color: t.cracked > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>{t.cracked}</td>
+                          <td style={{ color: 'var(--success)', fontWeight: 600 }}>{t.quantity - t.cracked}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Incubation — only this investor's share of each batch */}
+        {myBatches.length > 0 && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Minhas Chocagens</span>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                {batchTotals.eggs} ovos · <strong style={{ color: 'var(--success)' }}>{batchTotals.hatched}</strong> nascidos
+                {batchTotals.eggs > 0 && ` · ${batchTotals.rate.toFixed(0)}% de eclosao`}
+              </span>
+            </div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Entrada</th><th>Chocadeira</th><th>Situacao</th>
+                    <th>Meus Ovos</th><th>Nascidos</th><th>Eclosao</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...myBatches]
+                    .sort((a, b) => (b.dateIn || '').localeCompare(a.dateIn || ''))
+                    .map(b => {
+                      const inc = myIncubators.find(i => i.id === b.incubatorId);
+                      const eggs = parseInt(b.totalEggs, 10) || 0;
+                      const hatched = parseInt(b.totalHatched, 10) || 0;
+                      const done = b.status === 'hatched' || hatched > 0;
+                      return (
+                        <tr key={b.id}>
+                          <td>{formatDate(b.dateIn)}</td>
+                          <td style={{ fontSize: 13 }}>{inc ? inc.name : '-'}</td>
+                          <td>
+                            <span className={`badge ${done ? 'badge-purple' : 'badge-blue'}`}>
+                              {done ? 'Eclodido' : 'Incubando'}
+                            </span>
+                          </td>
+                          <td style={{ fontWeight: 600 }}>{eggs}</td>
+                          <td style={{ color: 'var(--success)', fontWeight: 600 }}>{done ? hatched : '-'}</td>
+                          <td>{done && eggs > 0 ? `${((hatched / eggs) * 100).toFixed(0)}%` : '-'}</td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-muted)' }}>
+              Os numeros mostram apenas a sua parte de cada chocagem. Um mesmo lote pode
+              conter ovos de outros criadores.
+            </div>
+          </div>
+        )}
+
+        {/* Prateleira — mirrored from Ornabird, this investor's lots only */}
+        {myTrays.length > 0 && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Minha Prateleira</span>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                <strong style={{ color: 'var(--success)' }}>
+                  {myTrays.reduce((s2, t) => s2 + (parseInt(t.eggCount, 10) || 0), 0)}
+                </strong> ovos guardados
+              </span>
+            </div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr><th>Bandeja</th><th>Raca</th><th>Ovos</th><th>Descartados</th><th>Entrada</th></tr>
+                </thead>
+                <tbody>
+                  {myTrays.map(t => (
+                    <tr key={t.id}>
+                      <td><strong>{t.label || '-'}</strong></td>
+                      <td style={{ fontSize: 13 }}>
+                        {t.breedLabel || '-'}
+                        {t.varietyLabel && <span style={{ color: 'var(--text-muted)' }}> · {t.varietyLabel}</span>}
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{parseInt(t.eggCount, 10) || 0}</td>
+                      <td style={{ color: (parseInt(t.discardedCount, 10) || 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
+                        {parseInt(t.discardedCount, 10) || 0}
+                      </td>
+                      <td style={{ fontSize: 13 }}>{formatDate(t.createdAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Vitrine — mirrored sales already tied to this investor's lots */}
+        {myVitrine.length > 0 && (
+          <div className="card" style={{ marginBottom: 24 }}>
+            <div className="card-header">
+              <span className="card-title">Minhas Vendas na Vitrine</span>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                Lucro: <strong style={{ color: 'var(--success)' }}>
+                  {formatCurrency(myVitrine.reduce((s2, v) => s2 + (Number(v.profit) || 0), 0))}
+                </strong>
+              </span>
+            </div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr><th>Data</th><th>Anuncio</th><th>Tipo</th><th>Qtd</th><th>Valor</th><th>Meu Lucro</th></tr>
+                </thead>
+                <tbody>
+                  {[...myVitrine]
+                    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+                    .map(v => (
+                      <tr key={v.id}>
+                        <td style={{ fontSize: 13 }}>{formatDate(v.date)}</td>
+                        <td>{v.description || '-'}</td>
+                        <td>
+                          <span className={`badge ${v.isEgg ? 'badge-purple' : 'badge-blue'}`}>
+                            {v.isEgg ? 'Ovo' : 'Ave'}
+                          </span>
+                        </td>
+                        <td>{parseInt(v.quantity, 10) || 1}</td>
+                        <td>{formatCurrency(v.amount)}</td>
+                        <td style={{ color: 'var(--success)', fontWeight: 600 }}>{formatCurrency(v.profit)}</td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>

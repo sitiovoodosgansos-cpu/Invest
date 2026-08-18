@@ -46,6 +46,8 @@ import Dashboard from './pages/Dashboard';
 import Investors from './pages/Investors';
 import Plantel from './pages/Plantel';
 import Sales from './pages/Sales';
+import Prateleira from './pages/Prateleira';
+import Vitrine from './pages/Vitrine';
 import Financial from './pages/Financial';
 import Reports from './pages/Reports';
 import Expenses from './pages/Expenses';
@@ -59,7 +61,7 @@ import DirectPortal from './pages/DirectPortal';
 import EmployeePortal from './pages/EmployeePortal';
 import {
   LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut, Receipt, Egg, Thermometer, Heart, Baby, AlertTriangle
-} from 'lucide-react';
+, Layers , Store } from 'lucide-react';
 
 function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -74,9 +76,11 @@ function AdminLayout() {
     { to: '/investidores', icon: <Users />, label: 'Investidores' },
     { to: '/plantel', icon: <Bird />, label: 'Plantel' },
     { to: '/coleta-ovos', icon: <Egg />, label: 'Coleta de Ovos' },
+    { to: '/prateleira', icon: <Layers />, label: 'Prateleira' },
     { to: '/chocadeiras', icon: <Thermometer />, label: 'Chocadeiras' },
     { to: '/pintinhos', icon: <Baby />, label: 'Pintinhos' },
     { to: '/sanidade', icon: <Heart />, label: 'Sanidade' },
+    { to: '/vitrine', icon: <Store />, label: 'Vitrine' },
     { to: '/vendas', icon: <ShoppingCart />, label: 'Vendas' },
     { to: '/financeiro', icon: <Wallet />, label: 'Financeiro' },
     { to: '/despesas', icon: <Receipt />, label: 'Despesas' },
@@ -159,9 +163,11 @@ function AdminLayout() {
           <Route path="/investidores" element={<Investors />} />
           <Route path="/plantel" element={<Plantel />} />
           <Route path="/coleta-ovos" element={<EggCollection />} />
+          <Route path="/prateleira" element={<Prateleira />} />
           <Route path="/chocadeiras" element={<Incubators />} />
           <Route path="/pintinhos" element={<Pintinhos />} />
           <Route path="/sanidade" element={<Sanidade />} />
+          <Route path="/vitrine" element={<Vitrine />} />
           <Route path="/vendas" element={<Sales />} />
           <Route path="/financeiro" element={<Financial />} />
           <Route path="/despesas" element={<Expenses />} />
