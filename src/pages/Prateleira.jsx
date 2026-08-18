@@ -4,6 +4,7 @@ import {
   formatDate, getInitials, buildOrnabirdGroupIndex, resolveMirrorBird,
 } from '../utils/helpers';
 import { Layers, Search, Link2, AlertCircle, Egg, Trash2 } from 'lucide-react';
+import OrnabirdSync from '../components/OrnabirdSync';
 
 // Read-only mirror of Ornabird's egg trays.
 //
@@ -58,6 +59,9 @@ export default function Prateleira() {
             depois que a sincronizacao estiver ligada e os lotes do Plantel estiverem
             vinculados ao Ornabird.
           </p>
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+            <OrnabirdSync />
+          </div>
         </div>
       </div>
     );
@@ -68,6 +72,7 @@ export default function Prateleira() {
       <div className="page-header">
         <h2>Prateleira</h2>
         <p>Bandejas de ovos espelhadas do Ornabird — somente leitura</p>
+        <OrnabirdSync />
       </div>
 
       <div className="stats-grid">
