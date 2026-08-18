@@ -5,6 +5,7 @@ import {
   buildOrnabirdGroupIndex, resolveMirrorBird, resolveRateFor,
 } from '../utils/helpers';
 import { Store, Search, Link2, AlertCircle, DollarSign, TrendingUp } from 'lucide-react';
+import OrnabirdSync from '../components/OrnabirdSync';
 
 // Read-only mirror of Ornabird's vitrine sales.
 //
@@ -69,6 +70,9 @@ export default function Vitrine() {
             de origem. Elas aparecem aqui depois que a sincronizacao estiver ligada e os
             lotes do Plantel estiverem vinculados.
           </p>
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+            <OrnabirdSync />
+          </div>
         </div>
       </div>
     );
@@ -79,6 +83,7 @@ export default function Vitrine() {
       <div className="page-header">
         <h2>Vitrine</h2>
         <p>Vendas espelhadas do Ornabird, vinculadas ao lote de origem — somente leitura</p>
+        <OrnabirdSync />
       </div>
 
       <div className="stats-grid">

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import {
   doc, collection, onSnapshot, setDoc, getDoc, getDocs, deleteDoc, writeBatch,
 } from 'firebase/firestore';
@@ -1014,6 +1014,84 @@ export function AppProvider({ children }) {
     }
   };
 
+  // Every Ornabird call goes through /api/ornabird. The credential is a secret
+  // that reads the whole criatório, so it stays server-side — and the CSP pins
+  // connect-src to 'self' anyway, so a direct fetch would be blocked.
+  const ORNABIRD_ERRORS = {
+    unauthorized: 'Sessão expirada. Entre novamente.',
+    forbidden: 'Só o administrador pode sincronizar com o Ornabird.',
+    not_configured: 'Integração não configurada (falta ORNABIRD_API_URL / ORNABIRD_API_TOKEN).',
+    ornabird_unauthorized: 'O Ornabird recusou a credencial. Gere um token novo lá.',
+    ornabird_subscription: 'A assinatura do Ornabird está irregular.',
+    ornabird_error: 'O Ornabird respondeu com erro.',
+  };
+
+  const ornabirdRequest = async (body) => {
+    const user = auth.currentUser;
+    if (!user) {
+      const err = new Error('not signed in');
+      err.code = 'unauthorized';
+      throw err;
+    }
+    const idToken = await user.getIdToken();
+    const res = await fetch('/api/ornabird', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify(body),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(payload?.error || 'ornabird_error');
+      err.code = payload?.error || 'ornabird_error';
+      throw err;
+    }
+    return payload;
+  };
+
+  // Catálogo de lotes do Ornabird, pra alimentar o seletor de vínculo do
+  // Plantel. Não passa pelo Firestore: é dado de leitura, sempre fresco.
+  const fetchOrnabirdGroups = async () => {
+    try {
+      const payload = await ornabirdRequest({ action: 'groups' });
+      setSaveError(null);
+      return payload.groups || [];
+    } catch (err) {
+      devError('fetchOrnabirdGroups error:', err);
+      setSaveError(ORNABIRD_ERRORS[err?.code] || 'Erro ao buscar os lotes do Ornabird.');
+      throw err;
+    }
+  };
+
+  // Puxa os lotes VINCULADOS e substitui os espelhos. Só sincroniza o que
+  // alguém ligou a uma linha do Plantel — lote sem vínculo não tem dono e não
+  // renderia nada no rateio.
+  const syncFromOrnabird = async ({ from = null, to = null } = {}) => {
+    const groupIds = [
+      ...new Set(
+        (dataRef.current.birds || []).map(b => b?.ornabirdGroupId).filter(Boolean)
+      ),
+    ];
+    try {
+      const payload = await ornabirdRequest({ action: 'sync', groupIds, from, to });
+      await replaceOrnabirdMirror('trays', payload.trays || []);
+      await replaceOrnabirdMirror('vitrine', payload.vitrine || []);
+      setSaveError(null);
+      return {
+        groupIds,
+        trays: (payload.trays || []).length,
+        vitrine: (payload.vitrine || []).length,
+        // Lote vinculado que o Ornabird não conhece — vínculo digitado errado
+        // ou lote apagado lá. Silenciar isso faria o investidor sumir do rateio.
+        unknownGroupIds: payload.unknownGroupIds || [],
+        warnings: payload.warnings || [],
+      };
+    } catch (err) {
+      devError('syncFromOrnabird error:', err);
+      setSaveError(ORNABIRD_ERRORS[err?.code] || 'Erro ao sincronizar com o Ornabird.');
+      throw err;
+    }
+  };
+
   // Custom Species
   const addCustomSpecies = (speciesData) => {
     setData(prev => {
@@ -1462,6 +1540,8 @@ export function AppProvider({ children }) {
     ornabirdTrays,
     ornabirdVitrine,
     replaceOrnabirdMirror,
+    fetchOrnabirdGroups,
+    syncFromOrnabird,
     loading: loading || salesLoading || eggCollectionsLoading,
     firestoreError,
     saveError,
