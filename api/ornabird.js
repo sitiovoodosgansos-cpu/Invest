@@ -148,9 +148,36 @@ async function callOrnabird(path, { method = 'GET', body } = {}) {
           ? 'ornabird_subscription'
           : 'ornabird_error';
     err.status = res.status;
+    err.contentType = res.headers.get('content-type');
     throw err;
   }
-  return res.json();
+
+  // Resposta 2xx que nao e JSON. Acontece quando algo se mete no caminho e
+  // devolve HTML — pagina de login da protecao de deploy da Vercel, portal de
+  // rede, proxy. Antes isso rebentava dentro de res.json() e virava 500 mudo:
+  // o erro parecia bug do Invest, quando a chamada nem chegou ao Ornabird.
+  try {
+    return await res.json();
+  } catch {
+    const err = new Error('ornabird respondeu algo que nao e JSON');
+    err.code = 'ornabird_not_json';
+    err.status = res.status;
+    err.contentType = res.headers.get('content-type');
+    throw err;
+  }
+}
+
+// O que da pra registrar do endereco SEM vazar segredo: se a pessoa colou o
+// token no lugar da URL, logar o valor inteiro publicaria a credencial no log.
+// origin (esquema + host) basta pra identificar o destino errado.
+function safeTarget() {
+  const raw = process.env.ORNABIRD_API_URL?.trim();
+  if (!raw) return '(vazio)';
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return `(nao e URL, ${raw.length} caracteres)`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +302,23 @@ export default async function handler(req, res) {
 
     return res.status(400).json({ error: 'unknown_action' });
   } catch (err) {
+    // O CLIENTE recebe um codigo grosso (nunca o erro cru, que pode revelar
+    // host e estado da credencial). Mas o LOG DO SERVIDOR precisa do detalhe:
+    // sem isto, um erro inesperado virava um "500" pelado no painel da Vercel,
+    // sem uma linha dizendo o que quebrou — foi assim que a investigacao deste
+    // bug ficou girando em suposicoes. Token nunca entra aqui; ver safeTarget.
+    console.error(
+      '[ornabird]',
+      JSON.stringify({
+        code: err?.code ?? null,
+        name: err?.name ?? null,
+        message: err?.message ?? null,
+        upstreamStatus: err?.status ?? null,
+        upstreamContentType: err?.contentType ?? null,
+        target: safeTarget(),
+      })
+    );
+
     if (err?.code === 'unauthorized') return res.status(401).json({ error: 'unauthorized' });
     if (err?.code === 'forbidden') return res.status(403).json({ error: 'forbidden' });
     // 503 = falta configuracao aqui no Invest. O codigo diz qual variavel,
@@ -297,6 +341,7 @@ export default async function handler(req, res) {
     if (err?.code === 'ornabird_subscription') {
       return res.status(502).json({ error: 'ornabird_subscription' });
     }
+    if (err?.code === 'ornabird_not_json') return res.status(502).json({ error: 'ornabird_not_json' });
     if (err?.code === 'ornabird_error') return res.status(502).json({ error: 'ornabird_error' });
     return res.status(500).json({ error: 'server_error' });
   }

@@ -1035,6 +1035,10 @@ export function AppProvider({ children }) {
       'O valor de ORNABIRD_API_URL no projeto "invest" não é um endereço válido. Precisa começar com https:// (ex.: https://ornabird.app). Confira se você não trocou os valores de ORNABIRD_API_URL e ORNABIRD_API_TOKEN.',
     ornabird_unreachable:
       'Não foi possível alcançar o Ornabird no endereço de ORNABIRD_API_URL. Confira o endereço, ou o Ornabird pode estar fora do ar.',
+    // Tipicamente a página de login da proteção de deploy da Vercel: o
+    // endereço responde, mas não é o Ornabird do outro lado.
+    ornabird_not_json:
+      'O endereço de ORNABIRD_API_URL respondeu, mas não com dados do Ornabird — costuma ser uma página de login no caminho. Se o endereço for um *.vercel.app, troque pelo domínio próprio (https://ornabird.app).',
     ornabird_unauthorized: 'O Ornabird recusou a credencial (segredo diferente nos dois lados).',
     ornabird_subscription: 'A assinatura do Ornabird está irregular.',
     ornabird_error: 'O Ornabird respondeu com erro.',
