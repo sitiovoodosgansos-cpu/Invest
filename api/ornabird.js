@@ -92,19 +92,49 @@ function ornabirdConfig() {
     err.code = 'missing_ornabird_token';
     throw err;
   }
+  // URL invalida fazia o fetch estourar um TypeError, que caia no catch-all
+  // como 500 "server_error" — um erro mudo, que nao diz nem qual variavel nem
+  // o que ha de errado com ela. Vale conferir aqui: o modo mais comum de
+  // errar essa configuracao e trocar os valores de URL e TOKEN entre si, e
+  // nesse caso a "URL" nem parece um endereco.
+  let parsed;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    const err = new Error('ORNABIRD_API_URL is not a valid URL');
+    err.code = 'bad_ornabird_url';
+    throw err;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    const err = new Error('ORNABIRD_API_URL must be http(s)');
+    err.code = 'bad_ornabird_url';
+    throw err;
+  }
+
   return { baseUrl: baseUrl.replace(/\/+$/, ''), token };
 }
 
 async function callOrnabird(path, { method = 'GET', body } = {}) {
   const { baseUrl, token } = ornabirdConfig();
-  const res = await fetch(`${baseUrl}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
+
+  // Falha de rede (DNS, conexao, TLS) faz o fetch REJEITAR em vez de devolver
+  // resposta. Sem este catch a excecao virava 500 generico e parecia bug do
+  // Invest, quando na verdade e endereco errado ou Ornabird fora do ar.
+  let res;
+  try {
+    res = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+  } catch {
+    const err = new Error('could not reach ornabird');
+    err.code = 'ornabird_unreachable';
+    throw err;
+  }
 
   if (!res.ok) {
     // 401/403 mean the credential is wrong or lacks a scope; 402 means the
@@ -255,6 +285,10 @@ export default async function handler(req, res) {
     }
     if (err?.code === 'missing_ornabird_token') {
       return res.status(503).json({ error: 'missing_ornabird_token' });
+    }
+    if (err?.code === 'bad_ornabird_url') return res.status(503).json({ error: 'bad_ornabird_url' });
+    if (err?.code === 'ornabird_unreachable') {
+      return res.status(502).json({ error: 'ornabird_unreachable' });
     }
     if (err?.code === 'not_configured') return res.status(503).json({ error: 'not_configured' });
     if (err?.code === 'ornabird_unauthorized') {
