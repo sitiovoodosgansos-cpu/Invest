@@ -1021,9 +1021,14 @@ export function AppProvider({ children }) {
     unauthorized: 'Sessão expirada. Entre novamente.',
     forbidden: 'Só o administrador pode sincronizar com o Ornabird.',
     not_configured: 'Integração não configurada (falta ORNABIRD_API_URL / ORNABIRD_API_TOKEN).',
-    ornabird_unauthorized: 'O Ornabird recusou a credencial. Gere um token novo lá.',
+    ornabird_unauthorized: 'O Ornabird recusou a credencial (segredo diferente nos dois lados).',
     ornabird_subscription: 'A assinatura do Ornabird está irregular.',
     ornabird_error: 'O Ornabird respondeu com erro.',
+    server_error: 'Falha aqui no Invest, antes de chegar ao Ornabird.',
+    // Resposta sem JSON = a função /api/ornabird nem chegou a rodar (erro de
+    // build/dependência). NÃO é culpa do Ornabird — dizer que era custou uma
+    // investigação inteira olhando o lado errado.
+    proxy_error: 'A função /api/ornabird do Invest não respondeu. Veja os logs do projeto invest na Vercel.',
   };
 
   const ornabirdRequest = async (body) => {
@@ -1039,13 +1044,17 @@ export function AppProvider({ children }) {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
       body: JSON.stringify(body),
     });
-    const payload = await res.json().catch(() => ({}));
+    // Um corpo que não é JSON significa que a resposta não veio do handler —
+    // é a página de erro da Vercel, de uma função que morreu antes de rodar.
+    // Cair em 'ornabird_error' aqui aponta o dedo pro sistema errado.
+    const payload = await res.json().catch(() => null);
     if (!res.ok) {
-      const err = new Error(payload?.error || 'ornabird_error');
-      err.code = payload?.error || 'ornabird_error';
+      const code = payload?.error || (payload === null ? 'proxy_error' : 'ornabird_error');
+      const err = new Error(code);
+      err.code = code;
       throw err;
     }
-    return payload;
+    return payload ?? {};
   };
 
   // Catálogo de lotes do Ornabird, pra alimentar o seletor de vínculo do
