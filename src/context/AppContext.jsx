@@ -1029,6 +1029,12 @@ export function AppProvider({ children }) {
       'Falta a variável ORNABIRD_API_URL no projeto "invest" da Vercel (o endereço do Ornabird).',
     missing_ornabird_token:
       'Falta a variável ORNABIRD_API_TOKEN no projeto "invest" da Vercel. Se você acabou de criá-la, refaça o Redeploy: a Vercel congela as variáveis no início do build.',
+    // O jeito mais comum de errar isto é trocar os valores de URL e TOKEN
+    // entre si — dizer isso na mensagem economiza uma rodada de investigação.
+    bad_ornabird_url:
+      'O valor de ORNABIRD_API_URL no projeto "invest" não é um endereço válido. Precisa começar com https:// (ex.: https://ornabird.app). Confira se você não trocou os valores de ORNABIRD_API_URL e ORNABIRD_API_TOKEN.',
+    ornabird_unreachable:
+      'Não foi possível alcançar o Ornabird no endereço de ORNABIRD_API_URL. Confira o endereço, ou o Ornabird pode estar fora do ar.',
     ornabird_unauthorized: 'O Ornabird recusou a credencial (segredo diferente nos dois lados).',
     ornabird_subscription: 'A assinatura do Ornabird está irregular.',
     ornabird_error: 'O Ornabird respondeu com erro.',
