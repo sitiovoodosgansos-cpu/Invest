@@ -35,8 +35,12 @@ let cachedDb = null;
 function getFirebase() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
   if (!raw) {
+    // Um codigo por variavel, em vez de um 'not_configured' generico. As tres
+    // variaveis moram em lugares diferentes, e um erro que nao diz QUAL falta
+    // custa um redeploy inteiro por palpite — foi o que aconteceu aqui.
+    // Nome de variavel nao e segredo; o VALOR nunca sai daqui.
     const err = new Error('FIREBASE_SERVICE_ACCOUNT is not configured');
-    err.code = 'not_configured';
+    err.code = 'missing_firebase';
     throw err;
   }
   if (!getApps().length) {
@@ -74,11 +78,18 @@ async function requireAdmin(req) {
 }
 
 function ornabirdConfig() {
-  const baseUrl = process.env.ORNABIRD_API_URL;
-  const token = process.env.ORNABIRD_API_TOKEN;
-  if (!baseUrl || !token) {
-    const err = new Error('ORNABIRD_API_URL / ORNABIRD_API_TOKEN are not configured');
-    err.code = 'not_configured';
+  // trim(): valor colado com espaco/quebra de linha sobrando e comum e daria
+  // um erro muito pior la na frente (401 do Ornabird) do que aqui.
+  const baseUrl = process.env.ORNABIRD_API_URL?.trim();
+  const token = process.env.ORNABIRD_API_TOKEN?.trim();
+  if (!baseUrl) {
+    const err = new Error('ORNABIRD_API_URL is not configured');
+    err.code = 'missing_ornabird_url';
+    throw err;
+  }
+  if (!token) {
+    const err = new Error('ORNABIRD_API_TOKEN is not configured');
+    err.code = 'missing_ornabird_token';
     throw err;
   }
   return { baseUrl: baseUrl.replace(/\/+$/, ''), token };
@@ -236,6 +247,15 @@ export default async function handler(req, res) {
   } catch (err) {
     if (err?.code === 'unauthorized') return res.status(401).json({ error: 'unauthorized' });
     if (err?.code === 'forbidden') return res.status(403).json({ error: 'forbidden' });
+    // 503 = falta configuracao aqui no Invest. O codigo diz qual variavel,
+    // pra nao ter que adivinhar uma por vez a cada redeploy.
+    if (err?.code === 'missing_firebase') return res.status(503).json({ error: 'missing_firebase' });
+    if (err?.code === 'missing_ornabird_url') {
+      return res.status(503).json({ error: 'missing_ornabird_url' });
+    }
+    if (err?.code === 'missing_ornabird_token') {
+      return res.status(503).json({ error: 'missing_ornabird_token' });
+    }
     if (err?.code === 'not_configured') return res.status(503).json({ error: 'not_configured' });
     if (err?.code === 'ornabird_unauthorized') {
       return res.status(502).json({ error: 'ornabird_unauthorized' });

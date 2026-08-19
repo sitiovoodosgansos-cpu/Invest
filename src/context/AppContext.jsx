@@ -1021,6 +1021,14 @@ export function AppProvider({ children }) {
     unauthorized: 'Sessão expirada. Entre novamente.',
     forbidden: 'Só o administrador pode sincronizar com o Ornabird.',
     not_configured: 'Integração não configurada (falta ORNABIRD_API_URL / ORNABIRD_API_TOKEN).',
+    // Cada uma diz o nome exato da variável E em qual projeto da Vercel ela
+    // mora — os nomes dos dois lados são espelhados e trocá-los é fácil.
+    missing_firebase:
+      'Falta a variável FIREBASE_SERVICE_ACCOUNT no projeto "invest" da Vercel.',
+    missing_ornabird_url:
+      'Falta a variável ORNABIRD_API_URL no projeto "invest" da Vercel (o endereço do Ornabird).',
+    missing_ornabird_token:
+      'Falta a variável ORNABIRD_API_TOKEN no projeto "invest" da Vercel. Se você acabou de criá-la, refaça o Redeploy: a Vercel congela as variáveis no início do build.',
     ornabird_unauthorized: 'O Ornabird recusou a credencial (segredo diferente nos dois lados).',
     ornabird_subscription: 'A assinatura do Ornabird está irregular.',
     ornabird_error: 'O Ornabird respondeu com erro.',
