@@ -7,6 +7,7 @@ import {
 } from '../utils/helpers';
 import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X, ArrowLeftRight, History, Link2 } from 'lucide-react';
 import Portal from '../components/Portal';
+import OrnabirdGroupPicker from '../components/OrnabirdGroupPicker';
 
 const EMPTY_BIRD_FORM = {
   investorId: '', species: '', breed: '', matrixCount: '', breederCount: '',
@@ -502,12 +503,9 @@ export default function Plantel() {
               </div>
               <div className="form-group">
                 <label className="form-label">Vinculo com o Ornabird</label>
-                <input
-                  className="form-input"
-                  type="text"
+                <OrnabirdGroupPicker
                   value={form.ornabirdGroupId}
-                  onChange={e => setForm({ ...form, ornabirdGroupId: e.target.value })}
-                  placeholder="ID do lote (flock group) no Ornabird"
+                  onChange={id => setForm({ ...form, ornabirdGroupId: id })}
                 />
                 <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
                   Opcional. Ao vincular, a coleta de ovos, a prateleira, a chocadeira e as vendas
