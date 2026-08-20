@@ -1114,7 +1114,23 @@ export function AppProvider({ children }) {
       };
     } catch (err) {
       devError('syncFromOrnabird error:', err);
-      setSaveError(ORNABIRD_ERRORS[err?.code] || 'Erro ao sincronizar com o Ornabird.');
+      // Erro conhecido da chamada ao Ornabird -> mensagem propria.
+      // Qualquer outro veio da GRAVAÇÃO no Firestore (replaceOrnabirdMirror),
+      // que já montou um texto com o código real. Cair no texto genérico aqui
+      // apagava esse código e escondia a causa — foi o que aconteceu com um
+      // 'permission-denied' que passou despercebido.
+      const conhecido = ORNABIRD_ERRORS[err?.code];
+      if (conhecido) {
+        setSaveError(conhecido);
+      } else if (err?.code || err?.message) {
+        setSaveError(
+          `Erro ao gravar os dados sincronizados: ${err.code || err.message}. ` +
+            'Se disser "permission-denied", as regras do Firestore precisam liberar ' +
+            'ornabirdTrays e ornabirdVitrine.'
+        );
+      } else {
+        setSaveError('Erro ao sincronizar com o Ornabird.');
+      }
       throw err;
     }
   };
