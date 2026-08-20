@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
   getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod,
-  mapOrnabirdEggCollections
+  mapOrnabirdEggCollections, mapOrnabirdIncubatorBatches
 } from '../utils/helpers';
 import { exportInvestorReport, exportGeneralReport } from '../utils/pdfExport';
 import {
@@ -138,7 +138,7 @@ function Pagination({ total, page, pageSize, onPage }) {
 export default function Reports() {
   const {
     investors, birds, sales, financialInvestments, payments, expenses,
-    ornabirdEggCollections, incubators, incubatorBatches,
+    ornabirdEggCollections, ornabirdIncubatorBatches,
     infirmaryBays, infirmaryAdmissions, treatments,
     nurseryRooms, nurseryBatches, nurseryEvents,
     eggProfitRate, birdProfitRate,
@@ -470,9 +470,25 @@ export default function Reports() {
     [ornabirdEggCollections, birds]
   );
   const filteredEggCollections = useMemo(() => filterItemsByDate(eggCollections, dateRange), [eggCollections, dateRange]);
+  // Chocadeira espelhada do Ornabird, mesma fonte da tela de Chocadeiras.
+  const incubatorBatches = useMemo(
+    () => mapOrnabirdIncubatorBatches(ornabirdIncubatorBatches, birds),
+    [ornabirdIncubatorBatches, birds]
+  );
+  // As "chocadeiras" agora sao deduzidas dos lotes espelhados: o cadastro
+  // manual de maquinas saiu junto com o resto do CRUD.
+  const incubators = useMemo(() => {
+    const porId = new Map();
+    for (const b of incubatorBatches) {
+      if (b.incubatorId && !porId.has(b.incubatorId)) {
+        porId.set(b.incubatorId, { id: b.incubatorId, name: b.incubatorName || 'Chocadeira' });
+      }
+    }
+    return Array.from(porId.values());
+  }, [incubatorBatches]);
   const filteredIncubatorBatches = useMemo(() => {
-    if (!dateRange) return incubatorBatches || [];
-    return (incubatorBatches || []).filter(b => {
+    if (!dateRange) return incubatorBatches;
+    return incubatorBatches.filter(b => {
       const d = new Date(b.dateIn || b.createdAt || 0);
       return d >= dateRange.start && d <= dateRange.end;
     });

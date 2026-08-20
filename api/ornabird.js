@@ -270,9 +270,40 @@ export function normaliseEggCollections(rootId, rows) {
 
 // Pulls every page of `sales` for the requested lots. The other lists are not
 // paginated upstream, so the first response already holds them in full.
+export function normaliseIncubatorBatches(rootId, rows) {
+  return (rows || []).map(b => ({
+    id: b.id,
+    // Data de entrada so o dia, como nas coletas: a tela agrupa por dia.
+    setDate: (b.setDate || '').slice(0, 10),
+    eggCount: b.eggCount ?? 0,
+    hatchedCount: b.hatchedCount ?? 0,
+    infertileCount: b.infertileCount ?? 0,
+    embryoLossCount: b.embryoLossCount ?? 0,
+    pippedDiedCount: b.pippedDiedCount ?? 0,
+    status: b.status ?? null,
+    hatchDate: b.hatchDate ?? null,
+    lotCode: b.lotCode ?? null,
+    notes: b.notes ?? null,
+    // Dias de incubacao ja resolvidos LA (Tabela de eclosao ou keyword);
+    // a previsao e recalculada na tela como setDate + incubationDays, em vez
+    // de viajar como "faltam N dias" — que azedaria parado no espelho.
+    incubationDays: b.incubationDays ?? null,
+    expectedHatchDate: b.expectedHatchDate ?? null,
+    speciesName: b.speciesName ?? null,
+    flockGroupTitle: b.flockGroupTitle ?? null,
+    incubatorId: b.incubatorId ?? null,
+    incubatorName: b.incubatorName ?? null,
+    incubatorStatus: b.incubatorStatus ?? null,
+    incubatorDescription: b.incubatorDescription ?? null,
+    ornabirdGroupId: rootId,
+    originGroupId: b.flockGroupId ?? null,
+  }));
+}
+
 export async function syncGroups({ groupIds, from, to }) {
   const trays = [];
   const eggCollections = [];
+  const incubatorBatches = [];
   const vitrine = [];
   const warnings = [];
   let unknownGroupIds = [];
@@ -291,6 +322,7 @@ export async function syncGroups({ groupIds, from, to }) {
       if (firstPage) {
         trays.push(...normaliseTrays(rootId, group.trays));
         eggCollections.push(...normaliseEggCollections(rootId, group.eggCollections));
+        incubatorBatches.push(...normaliseIncubatorBatches(rootId, group.incubatorBatches));
       }
       vitrine.push(...normaliseSales(rootId, group.sales));
     }
@@ -304,7 +336,7 @@ export async function syncGroups({ groupIds, from, to }) {
     cursor = payload.nextSalesCursor;
   }
 
-  return { trays, eggCollections, vitrine, warnings, unknownGroupIds };
+  return { trays, eggCollections, incubatorBatches, vitrine, warnings, unknownGroupIds };
 }
 
 export default async function handler(req, res) {
@@ -333,7 +365,8 @@ export default async function handler(req, res) {
         // Nothing linked yet — an empty mirror is the correct answer, and
         // calling upstream with an empty list would just 400.
         return res.status(200).json({
-          trays: [], eggCollections: [], vitrine: [], warnings: [], unknownGroupIds: [],
+          trays: [], eggCollections: [], incubatorBatches: [], vitrine: [],
+          warnings: [], unknownGroupIds: [],
         });
       }
       const result = await syncGroups({

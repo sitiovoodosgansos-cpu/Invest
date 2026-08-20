@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   formatCurrency, formatDate, calculateProfitDistribution, getMonthsDifference,
-  calculateCompoundInterest, groupSalesByPeriod, mapOrnabirdEggCollections
+  calculateCompoundInterest, groupSalesByPeriod, mapOrnabirdEggCollections,
+  mapOrnabirdIncubatorBatches
 } from '../utils/helpers';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -19,7 +20,7 @@ const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Se
 export default function Dashboard() {
   const {
     investors, birds, sales, financialInvestments, expenses,
-    ornabirdEggCollections, incubatorBatches, incubators,
+    ornabirdEggCollections, ornabirdIncubatorBatches,
     nurseryRooms, nurseryBatches, nurseryEvents,
     infirmaryBays, infirmaryAdmissions, treatments,
     eggProfitRate, birdProfitRate,
@@ -33,7 +34,12 @@ export default function Dashboard() {
     () => mapOrnabirdEggCollections(ornabirdEggCollections, birds),
     [ornabirdEggCollections, birds]
   );
-  const allIncBatches = incubatorBatches || [];
+  // Chocadeira tambem vem do espelho do Ornabird — mesma fonte da tela de
+  // Chocadeiras, para os numeros baterem.
+  const allIncBatches = useMemo(
+    () => mapOrnabirdIncubatorBatches(ornabirdIncubatorBatches, birds),
+    [ornabirdIncubatorBatches, birds]
+  );
   const allNurseryBatches = nurseryBatches || [];
   const allNurseryEvents = nurseryEvents || [];
   const allAdmissions = infirmaryAdmissions || [];
@@ -92,10 +98,13 @@ export default function Dashboard() {
 
   // ── Incubator stats ──
   const hatchStats = useMemo(() => {
-    const hatched = allIncBatches.filter(b => b.status === 'hatched');
     const incubating = allIncBatches.filter(b => b.status === 'incubating');
-    const totalHatched = hatched.reduce((s, b) => s + (parseInt(b.totalHatched) || 0), 0);
-    const totalEggs = hatched.reduce((s, b) => s + (parseInt(b.totalEggs) || 0), 0);
+    // Soma TODOS os lotes, nao so os finalizados. Um lote ainda ativo pode ter
+    // pintinho nascido (eclosao parcial), e ignora-lo fazia o Dashboard
+    // mostrar menos nascidos que a tela de Chocadeiras — a mesma divergencia
+    // que o espelho existe para acabar. Mesma conta do Ornabird.
+    const totalHatched = allIncBatches.reduce((s, b) => s + (parseInt(b.totalHatched) || 0), 0);
+    const totalEggs = allIncBatches.reduce((s, b) => s + (parseInt(b.totalEggs) || 0), 0);
     const hatchRate = totalEggs > 0 ? Math.round((totalHatched / totalEggs) * 100) : 0;
     return { totalHatched, hatchRate, incubatingCount: incubating.length, totalBatches: allIncBatches.length };
   }, [allIncBatches]);
@@ -330,7 +339,7 @@ export default function Dashboard() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div style={{ textAlign: 'center', padding: 8, background: 'var(--bg-secondary)', borderRadius: 8 }}>
               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Chocadeiras</div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{(incubators || []).length}</div>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>{new Set(allIncBatches.map(b => b.incubatorId).filter(Boolean)).size}</div>
             </div>
             <div style={{ textAlign: 'center', padding: 8, background: 'var(--bg-secondary)', borderRadius: 8 }}>
               <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Incubando</div>

@@ -543,6 +543,60 @@ export function resolveMirrorBird(row, groupIndex) {
 //
 // `quantity` e o total coletado e `cracked` os trincados, entao "bons"
 // continua sendo quantity - cracked em toda parte, como no cadastro antigo.
+// Lotes de chocadeira espelhados do Ornabird traduzidos para a forma que
+// Dashboard, Relatorios, Pintinhos e portais ja esperavam do cadastro manual
+// antigo: { dateIn, status minusculo, totalEggs, totalHatched, totalInfertil,
+// eggs: { birdId: qtd } }. Os campos novos do clone (lotCode, chocadeira,
+// incubationDays...) seguem junto para a tela de Chocadeiras.
+//
+// O mapa `eggs` tinha uma entrada por ave no cadastro manual; no Ornabird um
+// batch pertence a UM lote, entao vira uma entrada unica da ave vinculada —
+// e vazio quando o lote nao esta vinculado no Plantel (nao pertence a
+// investidor nenhum, mesma regra dos outros espelhos).
+const MIRROR_BATCH_STATUS = {
+  ACTIVE: 'incubating',
+  HATCHED: 'hatched',
+  FAILED: 'failed',
+  CANCELED: 'canceled',
+};
+
+export function mapOrnabirdIncubatorBatches(rows, birds) {
+  const groupIndex = buildOrnabirdGroupIndex(birds);
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const bird = resolveMirrorBird(row, groupIndex);
+    const eggCount = row.eggCount ?? 0;
+    return {
+      id: row.id,
+      dateIn: row.setDate || '',
+      status: MIRROR_BATCH_STATUS[row.status] || 'incubating',
+      totalEggs: eggCount,
+      totalHatched: row.hatchedCount ?? 0,
+      totalInfertil: row.infertileCount ?? 0,
+      eggs: bird ? { [bird.id]: eggCount } : {},
+      birdId: bird?.id ?? null,
+      bird,
+      // Nome antigo do cadastro manual, mantido para nao quebrar quem ja lia
+      // (Dashboard e o rotulo do lote em Pintinhos).
+      dateHatch: (row.hatchDate || '').slice(0, 10),
+      // Campos do clone da tela de Chocadeiras.
+      embryoLossCount: row.embryoLossCount ?? 0,
+      pippedDiedCount: row.pippedDiedCount ?? 0,
+      lotCode: row.lotCode ?? null,
+      notes: row.notes ?? '',
+      incubationDays: row.incubationDays ?? null,
+      hatchDate: row.hatchDate ?? null,
+      speciesName: row.speciesName ?? null,
+      flockGroupTitle: row.flockGroupTitle ?? null,
+      incubatorId: row.incubatorId ?? null,
+      incubatorName: row.incubatorName ?? null,
+      incubatorStatus: row.incubatorStatus ?? null,
+      incubatorDescription: row.incubatorDescription ?? null,
+      ornabirdGroupId: row.ornabirdGroupId ?? null,
+      originGroupId: row.originGroupId ?? null,
+    };
+  });
+}
+
 export function mapOrnabirdEggCollections(rows, birds) {
   const groupIndex = buildOrnabirdGroupIndex(birds);
   return (Array.isArray(rows) ? rows : []).map((row) => {
