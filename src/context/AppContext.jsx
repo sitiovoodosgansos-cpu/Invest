@@ -87,12 +87,6 @@ const defaultData = {
   payments: [],
   expenses: [],
   customExpenseCategories: [],
-  // Legado: cadastro manual de chocadeiras/chocagens, descontinuado em favor
-  // do espelho /ornabirdIncubatorBatches. As chaves ficam para o documento
-  // nao mudar de forma e o guarda anti-perda (countItems) seguir contando o
-  // mesmo dos dois lados; nenhuma tela le mais estes arrays.
-  incubators: [],
-  incubatorBatches: [],
   infirmaryBays: [],
   infirmaryAdmissions: [],
   treatments: [],
@@ -108,6 +102,24 @@ const defaultData = {
   birdProfitRate: DEFAULT_BIRD_PROFIT_RATE,
 };
 
+// Cadastro manual de chocadeiras/chocagens, descontinuado em favor do espelho
+// /ornabirdIncubatorBatches. Os arrays sao descartados ao CARREGAR: como o
+// documento e regravado inteiro (setDoc sem merge), a proxima gravacao apaga
+// os campos do Firestore sozinha.
+//
+// Descartar na leitura, e nao so parar de ler, importa por causa do guarda
+// anti-perda abaixo: se os campos sumissem do Firestore com o app ainda
+// carregando-os, o guarda veria menos itens do que tem em memoria e devolveria
+// os antigos por cima — ressuscitando o que se quer apagar.
+const CAMPOS_LEGADOS = ['incubators', 'incubatorBatches'];
+
+function semCamposLegados(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const limpo = { ...obj };
+  for (const chave of CAMPOS_LEGADOS) delete limpo[chave];
+  return limpo;
+}
+
 // Count total items across all arrays in data. Sales are tracked separately
 // now and deliberately NOT counted here — this function is only used to
 // guard /config/appData writes.
@@ -119,8 +131,6 @@ const countItems = (d) =>
   (d.payments?.length || 0) +
   (d.expenses?.length || 0) +
   (d.customExpenseCategories?.length || 0) +
-  (d.incubators?.length || 0) +
-  (d.incubatorBatches?.length || 0) +
   (d.infirmaryBays?.length || 0) +
   (d.infirmaryAdmissions?.length || 0) +
   (d.treatments?.length || 0) +
@@ -188,7 +198,7 @@ export function AppProvider({ children }) {
           setLoading(false);
           return;
         }
-        const firestoreData = { ...defaultData, ...snapshot.data() };
+        const firestoreData = { ...defaultData, ...semCamposLegados(snapshot.data()) };
         const incomingCount = countItems(firestoreData);
         const currentCount = countItems(dataRef.current);
 
@@ -226,7 +236,7 @@ export function AppProvider({ children }) {
         try {
           const stored = localStorage.getItem(STORAGE_KEY);
           if (stored) {
-            const parsed = { ...defaultData, ...JSON.parse(stored) };
+            const parsed = { ...defaultData, ...semCamposLegados(JSON.parse(stored)) };
             lastLocalWriteTime.current = Date.now();
             setDoc(FIRESTORE_DOC, parsed);
             setData(parsed);
@@ -242,7 +252,7 @@ export function AppProvider({ children }) {
       // Fallback to localStorage if Firestore fails
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        setData(stored ? { ...defaultData, ...JSON.parse(stored) } : defaultData);
+        setData(stored ? { ...defaultData, ...semCamposLegados(JSON.parse(stored)) } : defaultData);
       } catch {
         setData(defaultData);
       }
