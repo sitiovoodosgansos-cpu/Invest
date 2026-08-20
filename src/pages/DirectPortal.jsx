@@ -7,7 +7,7 @@ import { usePortalData } from '../hooks/usePortalData';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
   getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod,
-  mapOrnabirdEggCollections
+  mapOrnabirdEggCollections, mapOrnabirdIncubatorBatches
 } from '../utils/helpers';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -75,8 +75,19 @@ function DirectPortalContent() {
   const myEggCollections = serverScoped
     ? (Array.isArray(src.eggCollections) ? src.eggCollections : [])
     : mapOrnabirdEggCollections(appData.ornabirdEggCollections, appData.birds);
-  const myBatches = Array.isArray(src.incubatorBatches) ? src.incubatorBatches : [];
-  const myIncubators = Array.isArray(src.incubators) ? src.incubators : [];
+  // Mesmo desenho da coleta: no caminho servidor a chocagem ja vem filtrada e
+  // traduzida; no caminho legado ela e derivada do espelho do Ornabird, porque
+  // o cadastro manual de chocadeiras foi descontinuado.
+  const myBatches = serverScoped
+    ? (Array.isArray(src.incubatorBatches) ? src.incubatorBatches : [])
+    : mapOrnabirdIncubatorBatches(appData.ornabirdIncubatorBatches, appData.birds);
+  const myIncubators = serverScoped
+    ? (Array.isArray(src.incubators) ? src.incubators : [])
+    : Array.from(new Map(
+        myBatches
+          .filter(b => b.incubatorId)
+          .map(b => [b.incubatorId, { id: b.incubatorId, name: b.incubatorName || 'Chocadeira' }])
+      ).values());
   const myTrays = Array.isArray(src.trays) ? src.trays : [];
   const myVitrine = Array.isArray(src.vitrineSales) ? src.vitrineSales : [];
   const rates = serverScoped ? (portal.data.rates || {}) : appData;

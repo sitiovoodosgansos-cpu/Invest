@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatDate } from '../utils/helpers';
+import { formatDate, mapOrnabirdIncubatorBatches } from '../utils/helpers';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
@@ -38,7 +38,7 @@ const EVENT_TYPES = {
 
 export default function Pintinhos() {
   const {
-    birds, incubators, incubatorBatches,
+    birds, ornabirdIncubatorBatches,
     nurseryRooms, nurseryBatches, nurseryEvents,
     addNurseryRoom, updateNurseryRoom, deleteNurseryRoom,
     addNurseryBatch, updateNurseryBatch, deleteNurseryBatch,
@@ -48,8 +48,25 @@ export default function Pintinhos() {
   const allRooms = nurseryRooms || [];
   const allBatches = nurseryBatches || [];
   const allEvents = nurseryEvents || [];
-  const allIncubators = incubators || [];
-  const allIncBatches = (incubatorBatches || []).filter(b => b.status === 'hatched');
+  // Lotes de chocagem vem do espelho do Ornabird; so os que ja eclodiram
+  // podem originar um lote de pintinhos.
+  const espelhoBatches = useMemo(
+    () => mapOrnabirdIncubatorBatches(ornabirdIncubatorBatches, birds),
+    [ornabirdIncubatorBatches, birds]
+  );
+  const allIncubators = useMemo(() => {
+    const porId = new Map();
+    for (const b of espelhoBatches) {
+      if (b.incubatorId && !porId.has(b.incubatorId)) {
+        porId.set(b.incubatorId, { id: b.incubatorId, name: b.incubatorName || 'Chocadeira' });
+      }
+    }
+    return Array.from(porId.values());
+  }, [espelhoBatches]);
+  const allIncBatches = useMemo(
+    () => espelhoBatches.filter(b => b.status === 'hatched'),
+    [espelhoBatches]
+  );
 
   // Tab state
   const [activeTab, setActiveTab] = useState('rooms');

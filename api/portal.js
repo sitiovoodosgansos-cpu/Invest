@@ -137,57 +137,35 @@ function mirrorBird(row, birds) {
     b.ornabirdGroupId === row.originGroupId || b.ornabirdGroupId === row.ornabirdGroupId) || null;
 }
 
-// An incubation batch can mix eggs from SEVERAL investors' animals, so the
-// per-bird maps have to be filtered down rather than passed through — the raw
-// `eggs` map would disclose other investors' bird ids and quantities, and the
-// stored totals (totalEggs, totalHatched, ...) are batch-wide. Everything here
-// is recomputed from this investor's share alone.
-function publicBatch(batch, myBirdIds) {
-  const eggs = {};
-  let myEggs = 0;
-  for (const [birdId, qty] of Object.entries(batch.eggs || {})) {
-    if (!myBirdIds.has(birdId)) continue;
-    const n = parseInt(qty, 10) || 0;
-    if (n <= 0) continue;
-    eggs[birdId] = n;
-    myEggs += n;
-  }
-  if (myEggs <= 0) return null;
-
-  const hatchResults = {};
-  let hatched = 0, infertil = 0, naoDesenvolveu = 0, morreuNoOvo = 0;
-  for (const [birdId, r] of Object.entries(batch.hatchResults || {})) {
-    if (!myBirdIds.has(birdId)) continue;
-    const row = {
-      hatched: parseInt(r?.hatched, 10) || 0,
-      infertil: parseInt(r?.infertil, 10) || 0,
-      naoDesenvolveu: parseInt(r?.naoDesenvolveu, 10) || 0,
-      morreuNoOvo: parseInt(r?.morreuNoOvo, 10) || 0,
-    };
-    hatchResults[birdId] = row;
-    hatched += row.hatched;
-    infertil += row.infertil;
-    naoDesenvolveu += row.naoDesenvolveu;
-    morreuNoOvo += row.morreuNoOvo;
-  }
-
+// Lote de chocagem espelhado do Ornabird, na forma que o portal ja servia do
+// cadastro manual. A posse vem do VINCULO do lote com o Plantel, como no resto
+// do espelho; o mapa `eggs` (que era por ave) vira uma entrada unica da ave
+// vinculada, para o portal continuar somando do mesmo jeito.
+function publicBatch(batch, bird) {
+  const eggCount = Number(batch.eggCount) || 0;
+  const hatched = Number(batch.hatchedCount) || 0;
+  const infertil = Number(batch.infertileCount) || 0;
+  const naoDesenvolveu = Number(batch.embryoLossCount) || 0;
+  const morreuNoOvo = Number(batch.pippedDiedCount) || 0;
+  const birdId = bird ? bird.id : '';
   return {
     id: batch.id,
     incubatorId: batch.incubatorId || '',
-    dateIn: batch.dateIn || '',
-    dateHatch: batch.dateHatch || '',
+    incubatorName: batch.incubatorName || '',
+    dateIn: (batch.setDate || '').slice(0, 10),
+    dateHatch: (batch.hatchDate || '').slice(0, 10),
     status: batch.status || '',
-    eggs,
-    hatchResults,
-    // Deliberately this investor's share, NOT the batch-wide stored totals.
-    totalEggs: myEggs,
+    eggs: birdId ? { [birdId]: eggCount } : {},
+    hatchResults: birdId
+      ? { [birdId]: { hatched, infertil, naoDesenvolveu, morreuNoOvo } }
+      : {},
+    totalEggs: eggCount,
     totalHatched: hatched,
     totalInfertil: infertil,
     totalNaoDesenvolveu: naoDesenvolveu,
     totalMorreuNoOvo: morreuNoOvo,
   };
 }
-
 
 // Ornabird mirror rows for this investor. Both collections carry the flock
 // group they came from; a row only belongs to somebody once that group is
@@ -283,8 +261,15 @@ export async function buildPortalPayload(db, token) {
   };
 
   if (resolved.type === 'employee') {
-    const eggSnap = await db.collection('ornabirdEggCollections').get();
+    const [eggSnap, batchSnap] = await Promise.all([
+      db.collection('ornabirdEggCollections').get(),
+      db.collection('ornabirdIncubatorBatches').get(),
+    ]);
     const employeeBirds = Array.isArray(app.birds) ? app.birds : [];
+    const employeeBatches = batchSnap.docs.map(d => {
+      const row = { id: d.id, ...d.data() };
+      return publicBatch(row, mirrorBird(row, employeeBirds));
+    });
     return {
       status: 200,
       body: {
@@ -294,8 +279,16 @@ export async function buildPortalPayload(db, token) {
           const row = { id: d.id, ...d.data() };
           return publicEggCollection(row, mirrorBird(row, employeeBirds));
         }),
-        incubators: app.incubators || [],
-        incubatorBatches: app.incubatorBatches || [],
+        // As maquinas nao tem cadastro proprio: sao deduzidas dos lotes
+        // espelhados, que ja trazem id e nome.
+        incubators: Array.from(
+          new Map(
+            employeeBatches
+              .filter(b => b.incubatorId)
+              .map(b => [b.incubatorId, { id: b.incubatorId, name: b.incubatorName || 'Chocadeira' }])
+          ).values()
+        ),
+        incubatorBatches: employeeBatches,
         nurseryRooms: app.nurseryRooms || [],
         nurseryBatches: app.nurseryBatches || [],
         nurseryEvents: app.nurseryEvents || [],
@@ -333,11 +326,13 @@ export async function buildPortalPayload(db, token) {
   let myTrays = [];
   let myVitrine = [];
   let myEggCollections = [];
+  let myBatches = [];
   if (myGroupIds.size > 0) {
-    const [traySnap, vitrineSnap, eggSnap] = await Promise.all([
+    const [traySnap, vitrineSnap, eggSnap, batchSnap] = await Promise.all([
       db.collection('ornabirdTrays').get(),
       db.collection('ornabirdVitrine').get(),
       db.collection('ornabirdEggCollections').get(),
+      db.collection('ornabirdIncubatorBatches').get(),
     ]);
     myTrays = traySnap.docs
       .map(d => ({ id: d.id, ...d.data() }))
@@ -355,19 +350,23 @@ export async function buildPortalPayload(db, token) {
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(c => mirrorBelongsTo(c, myGroupIds))
       .map(c => publicEggCollection(c, mirrorBird(c, myBirds)));
+    // Chocagem segue a mesma regra de posse: lote nao vinculado, ou vinculado
+    // a outro investidor, nao sai do servidor.
+    myBatches = batchSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(b => mirrorBelongsTo(b, myGroupIds))
+      .map(b => publicBatch(b, mirrorBird(b, myBirds)));
   }
 
-  // Incubation batches for this investor's animals only.
-  const myBatches = (Array.isArray(app.incubatorBatches) ? app.incubatorBatches : [])
-    .map(b => publicBatch(b, myBirdIds))
-    .filter(Boolean);
-
-  // Only the incubators referenced by those batches, name only — a machine is
-  // not investor data, but there is no reason to ship the whole list either.
-  const usedIncubators = new Set(myBatches.map(b => b.incubatorId).filter(Boolean));
-  const myIncubators = (Array.isArray(app.incubators) ? app.incubators : [])
-    .filter(i => i && usedIncubators.has(i.id))
-    .map(i => ({ id: i.id, name: i.name || '' }));
+  // Só as chocadeiras referenciadas por esses lotes, nome apenas — a maquina
+  // nao e dado do investidor, mas nao ha razao pra esconder o nome tampouco.
+  const myIncubators = Array.from(
+    new Map(
+      myBatches
+        .filter(b => b.incubatorId)
+        .map(b => [b.incubatorId, { id: b.incubatorId, name: b.incubatorName || 'Chocadeira' }])
+    ).values()
+  );
 
   return {
     status: 200,

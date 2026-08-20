@@ -49,6 +49,7 @@ const SALES_COLLECTION = collection(db, 'sales');
 const ORNABIRD_TRAYS_COLLECTION = collection(db, 'ornabirdTrays');
 const ORNABIRD_VITRINE_COLLECTION = collection(db, 'ornabirdVitrine');
 const ORNABIRD_EGGS_COLLECTION = collection(db, 'ornabirdEggCollections');
+const ORNABIRD_BATCHES_COLLECTION = collection(db, 'ornabirdIncubatorBatches');
 // LocalStorage flag: once set, we know the /sales collection has been
 // hydrated from the legacy appData.sales array and the array has been
 // cleared. Prevents us from re-migrating on every session.
@@ -86,6 +87,10 @@ const defaultData = {
   payments: [],
   expenses: [],
   customExpenseCategories: [],
+  // Legado: cadastro manual de chocadeiras/chocagens, descontinuado em favor
+  // do espelho /ornabirdIncubatorBatches. As chaves ficam para o documento
+  // nao mudar de forma e o guarda anti-perda (countItems) seguir contando o
+  // mesmo dos dois lados; nenhuma tela le mais estes arrays.
   incubators: [],
   incubatorBatches: [],
   infirmaryBays: [],
@@ -137,6 +142,7 @@ export function AppProvider({ children }) {
   const [ornabirdTrays, setOrnabirdTrays] = useState([]);
   const [ornabirdVitrine, setOrnabirdVitrine] = useState([]);
   const [ornabirdEggCollections, setOrnabirdEggCollections] = useState([]);
+  const [ornabirdIncubatorBatches, setOrnabirdIncubatorBatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salesLoading, setSalesLoading] = useState(true);
   const [firestoreError, setFirestoreError] = useState(null);
@@ -163,6 +169,8 @@ export function AppProvider({ children }) {
   ornabirdVitrineRef.current = ornabirdVitrine;
   const ornabirdEggsRef = useRef(ornabirdEggCollections);
   ornabirdEggsRef.current = ornabirdEggCollections;
+  const ornabirdBatchesRef = useRef(ornabirdIncubatorBatches);
+  ornabirdBatchesRef.current = ornabirdIncubatorBatches;
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
 
@@ -335,6 +343,15 @@ export function AppProvider({ children }) {
     const unsub = onSnapshot(ORNABIRD_EGGS_COLLECTION, (snap) => {
       setOrnabirdEggCollections(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (error) => devError('Ornabird egg collections listen error:', error));
+    return () => unsub();
+  }, []);
+
+  // Lotes de chocadeira espelhados do Ornabird.
+  useEffect(() => {
+    if (PORTAL_MODE) return;
+    const unsub = onSnapshot(ORNABIRD_BATCHES_COLLECTION, (snap) => {
+      setOrnabirdIncubatorBatches(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => devError('Ornabird incubator batches listen error:', error));
     return () => unsub();
   }, []);
 
@@ -942,6 +959,7 @@ export function AppProvider({ children }) {
     trays: { collection: 'ornabirdTrays', ref: ornabirdTraysRef },
     vitrine: { collection: 'ornabirdVitrine', ref: ornabirdVitrineRef },
     eggCollections: { collection: 'ornabirdEggCollections', ref: ornabirdEggsRef },
+    incubatorBatches: { collection: 'ornabirdIncubatorBatches', ref: ornabirdBatchesRef },
   };
 
   const replaceOrnabirdMirror = async (kind, rows) => {
@@ -1067,12 +1085,14 @@ export function AppProvider({ children }) {
       const payload = await ornabirdRequest({ action: 'sync', groupIds, from, to });
       await replaceOrnabirdMirror('trays', payload.trays || []);
       await replaceOrnabirdMirror('eggCollections', payload.eggCollections || []);
+      await replaceOrnabirdMirror('incubatorBatches', payload.incubatorBatches || []);
       await replaceOrnabirdMirror('vitrine', payload.vitrine || []);
       setSaveError(null);
       return {
         groupIds,
         trays: (payload.trays || []).length,
         eggCollections: (payload.eggCollections || []).length,
+        incubatorBatches: (payload.incubatorBatches || []).length,
         vitrine: (payload.vitrine || []).length,
         // Lote vinculado que o Ornabird não conhece — vínculo digitado errado
         // ou lote apagado lá. Silenciar isso faria o investidor sumir do rateio.
@@ -1093,7 +1113,8 @@ export function AppProvider({ children }) {
         setSaveError(
           `Erro ao gravar os dados sincronizados: ${err.code || err.message}. ` +
             'Se disser "permission-denied", as regras do Firestore precisam liberar ' +
-            'ornabirdTrays, ornabirdVitrine e ornabirdEggCollections.'
+            'ornabirdTrays, ornabirdVitrine, ornabirdEggCollections e ' +
+            'ornabirdIncubatorBatches.'
         );
       } else {
         setSaveError('Erro ao sincronizar com o Ornabird.');
@@ -1245,35 +1266,10 @@ export function AppProvider({ children }) {
   // /ornabirdEggCollections. Manter funcoes de escrita para uma colecao que
   // ninguem le so criaria um segundo lugar onde o mesmo ovo pode divergir.
 
-  // Incubators
-  const addIncubator = (incubator) => {
-    const newIncubator = { ...incubator, id: newId(), createdAt: new Date().toISOString() };
-    setData(prev => ({ ...prev, incubators: [...(prev.incubators || []), newIncubator] }));
-    return newIncubator;
-  };
-  const updateIncubator = (id, updates) => {
-    setData(prev => ({ ...prev, incubators: (prev.incubators || []).map(i => i.id === id ? { ...i, ...updates } : i) }));
-  };
-  const deleteIncubator = (id) => {
-    setDataWithDelete(prev => ({
-      ...prev,
-      incubators: (prev.incubators || []).filter(i => i.id !== id),
-      incubatorBatches: (prev.incubatorBatches || []).filter(b => b.incubatorId !== id),
-    }));
-  };
-
-  // Incubator Batches
-  const addIncubatorBatch = (batch) => {
-    const newBatch = { ...batch, id: newId(), createdAt: new Date().toISOString() };
-    setData(prev => ({ ...prev, incubatorBatches: [...(prev.incubatorBatches || []), newBatch] }));
-    return newBatch;
-  };
-  const updateIncubatorBatch = (id, updates) => {
-    setData(prev => ({ ...prev, incubatorBatches: (prev.incubatorBatches || []).map(b => b.id === id ? { ...b, ...updates } : b) }));
-  };
-  const deleteIncubatorBatch = (id) => {
-    setDataWithDelete(prev => ({ ...prev, incubatorBatches: (prev.incubatorBatches || []).filter(b => b.id !== id) }));
-  };
+  // O CRUD manual de chocadeiras e chocagens saiu junto: a Chocadeira e
+  // registrada no Ornabird e chega aqui pela sincronizacao, em
+  // /ornabirdIncubatorBatches. As "maquinas" nao tem mais cadastro proprio —
+  // sao deduzidas dos lotes espelhados, que ja trazem id, nome e capacidade.
 
   // Infirmary Bays
   const addInfirmaryBay = (bay) => {
@@ -1472,6 +1468,7 @@ export function AppProvider({ children }) {
     ornabirdTrays,
     ornabirdVitrine,
     ornabirdEggCollections,
+    ornabirdIncubatorBatches,
     replaceOrnabirdMirror,
     fetchOrnabirdGroups,
     syncFromOrnabird,
@@ -1486,8 +1483,6 @@ export function AppProvider({ children }) {
     addPayment, deletePayment,
     addExpense, bulkAddExpenses, updateExpense, deleteExpense,
     addCustomExpenseCategory, deleteCustomExpenseCategory,
-    addIncubator, updateIncubator, deleteIncubator,
-    addIncubatorBatch, updateIncubatorBatch, deleteIncubatorBatch,
     addInfirmaryBay, updateInfirmaryBay, deleteInfirmaryBay,
     addInfirmaryAdmission, updateInfirmaryAdmission, deleteInfirmaryAdmission,
     addTreatment, updateTreatment, deleteTreatment,
