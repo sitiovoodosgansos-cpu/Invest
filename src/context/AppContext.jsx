@@ -1093,7 +1093,7 @@ export function AppProvider({ children }) {
         setSaveError(
           `Erro ao gravar os dados sincronizados: ${err.code || err.message}. ` +
             'Se disser "permission-denied", as regras do Firestore precisam liberar ' +
-            'ornabirdTrays e ornabirdVitrine.'
+            'ornabirdTrays, ornabirdVitrine e ornabirdEggCollections.'
         );
       } else {
         setSaveError('Erro ao sincronizar com o Ornabird.');
