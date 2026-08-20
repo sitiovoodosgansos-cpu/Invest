@@ -532,3 +532,30 @@ export function resolveMirrorBird(row, groupIndex) {
   if (!row) return null;
   return groupIndex[row.originGroupId] || groupIndex[row.ornabirdGroupId] || null;
 }
+
+// Coletas espelhadas do Ornabird traduzidas para a forma que as telas ja
+// esperavam do cadastro manual antigo: { date, birdId, quantity, cracked }.
+//
+// Fica aqui, e nao dentro de uma tela, porque tres lugares somam ovos: Coleta
+// de Ovos, Dashboard e Relatorios. Se cada um traduzisse do seu jeito,
+// voltariamos ao problema que motivou o espelho — os mesmos ovos contados de
+// formas diferentes em telas diferentes.
+//
+// `quantity` e o total coletado e `cracked` os trincados, entao "bons"
+// continua sendo quantity - cracked em toda parte, como no cadastro antigo.
+export function mapOrnabirdEggCollections(rows, birds) {
+  const groupIndex = buildOrnabirdGroupIndex(birds);
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const bird = resolveMirrorBird(row, groupIndex);
+    return {
+      id: row.id,
+      date: row.date,
+      birdId: bird?.id ?? null,
+      quantity: row.totalEggs ?? 0,
+      cracked: row.crackedEggs ?? 0,
+      notes: row.notes ?? '',
+      flockGroupTitle: row.flockGroupTitle ?? null,
+      bird,
+    };
+  });
+}

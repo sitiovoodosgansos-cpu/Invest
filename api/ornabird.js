@@ -246,10 +246,28 @@ export function normaliseSales(rootId, sales) {
   }));
 }
 
+export function normaliseEggCollections(rootId, rows) {
+  return (rows || []).map(c => ({
+    id: c.id,
+    // Só a data, sem hora: a tela agrupa por dia (calendário, somatórios de
+    // semana/mês/ano) e comparar string ISO completa com "YYYY-MM-DD" nunca
+    // casaria.
+    date: (c.date || '').slice(0, 10),
+    totalEggs: c.totalEggs ?? c.quantity ?? 0,
+    goodEggs: c.goodEggs ?? 0,
+    crackedEggs: c.crackedEggs ?? 0,
+    notes: c.notes ?? null,
+    flockGroupTitle: c.flockGroupTitle ?? null,
+    ornabirdGroupId: rootId,
+    originGroupId: c.flockGroupId ?? null,
+  }));
+}
+
 // Pulls every page of `sales` for the requested lots. The other lists are not
 // paginated upstream, so the first response already holds them in full.
 export async function syncGroups({ groupIds, from, to }) {
   const trays = [];
+  const eggCollections = [];
   const vitrine = [];
   const warnings = [];
   let unknownGroupIds = [];
@@ -263,7 +281,12 @@ export async function syncGroups({ groupIds, from, to }) {
     });
 
     for (const [rootId, group] of Object.entries(payload.groups || {})) {
-      if (firstPage) trays.push(...normaliseTrays(rootId, group.trays));
+      // Só `sales` pagina lá em cima; bandejas e coletas ja vem inteiras na
+      // primeira resposta, e repetir nas paginas seguintes duplicaria tudo.
+      if (firstPage) {
+        trays.push(...normaliseTrays(rootId, group.trays));
+        eggCollections.push(...normaliseEggCollections(rootId, group.eggCollections));
+      }
       vitrine.push(...normaliseSales(rootId, group.sales));
     }
     if (firstPage) {
@@ -276,7 +299,7 @@ export async function syncGroups({ groupIds, from, to }) {
     cursor = payload.nextSalesCursor;
   }
 
-  return { trays, vitrine, warnings, unknownGroupIds };
+  return { trays, eggCollections, vitrine, warnings, unknownGroupIds };
 }
 
 export default async function handler(req, res) {
@@ -304,7 +327,9 @@ export default async function handler(req, res) {
       if (groupIds.length === 0) {
         // Nothing linked yet — an empty mirror is the correct answer, and
         // calling upstream with an empty list would just 400.
-        return res.status(200).json({ trays: [], vitrine: [], warnings: [], unknownGroupIds: [] });
+        return res.status(200).json({
+          trays: [], eggCollections: [], vitrine: [], warnings: [], unknownGroupIds: [],
+        });
       }
       const result = await syncGroups({
         groupIds,

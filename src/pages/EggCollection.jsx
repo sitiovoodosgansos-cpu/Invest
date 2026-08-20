@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp, BIRD_SPECIES } from '../context/AppContext';
-import { formatDate } from '../utils/helpers';
+import { mapOrnabirdEggCollections } from '../utils/helpers';
+import OrnabirdSync from '../components/OrnabirdSync';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   AreaChart, Area
@@ -8,7 +9,7 @@ import {
 import {
   Plus, Trash2, Edit2, Egg, TrendingUp, AlertTriangle, Calendar,
   ChevronDown, ChevronUp, Target, Save, X, ChevronLeft, ChevronRight,
-  Search, ArrowUpAZ, ArrowDownAZ, Heart, HeartOff, Link, Copy, RefreshCw, Trash
+  Search, ArrowUpAZ, Heart, Link, Copy, RefreshCw, Trash
 } from 'lucide-react';
 import Portal from '../components/Portal';
 
@@ -57,23 +58,16 @@ function getActiveBirdCount(bird) {
 
 export default function EggCollection() {
   const {
-    birds, eggCollections, customSpecies,
-    addEggCollections, updateEggCollection, deleteEggCollection,
+    birds, ornabirdEggCollections, customSpecies,
     updateBird,
     employeeToken, generateEmployeeToken, revokeEmployeeToken,
     saveError,
   } = useApp();
 
-  const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState(null);
   const [chartPeriod, setChartPeriod] = useState('weekly');
   const [expandedBird, setExpandedBird] = useState(null);
   const [showBirdConfigModal, setShowBirdConfigModal] = useState(null);
   const [birdConfigForm, setBirdConfigForm] = useState({ annualEggPotential: '', notes: '', individuals: [] });
-  const [batchDate, setBatchDate] = useState(new Date().toISOString().slice(0, 10));
-  const [batchEntries, setBatchEntries] = useState({});
-  const [batchNotes, setBatchNotes] = useState('');
-  const [editForm, setEditForm] = useState({ date: '', birdId: '', quantity: '', cracked: '0', notes: '' });
   const [successMsg, setSuccessMsg] = useState('');
   // Calendar state
   const [calendarDate, setCalendarDate] = useState(new Date());
@@ -84,7 +78,20 @@ export default function EggCollection() {
   const [showEmployeeLink, setShowEmployeeLink] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
 
-  const allCollections = eggCollections || [];
+  // Coletas espelhadas do Ornabird, traduzidas para a forma que o resto desta
+  // tela já esperava (quantity / cracked / birdId). Assim os somatórios, o
+  // calendário, os gráficos e o desempenho por ave continuam valendo sem
+  // reescrita — muda só de onde vem o dado.
+  //
+  // A ave é resolvida pelo VÍNCULO do lote com o Plantel, a mesma regra da
+  // Prateleira e da Vitrine: coleta de um lote não vinculado fica sem ave e
+  // não entra no rateio de ninguém.
+  const allCollections = useMemo(
+    () => mapOrnabirdEggCollections(ornabirdEggCollections, birds),
+    [ornabirdEggCollections, birds]
+  );
+
+  const semVinculo = allCollections.filter(c => !c.birdId).length;
 
   const allSpecies = useMemo(() => {
     const merged = BIRD_SPECIES.map(s => {
@@ -313,53 +320,10 @@ export default function EggCollection() {
   const maxDayEggs = useMemo(() => Math.max(1, ...Object.values(calendarDaysData).map(d => d.total)), [calendarDaysData]);
 
   // ===== HANDLERS =====
-  const handleBatchSubmit = async (e) => {
-    e.preventDefault();
-    const entries = Object.entries(batchEntries).filter(([, v]) => (parseInt(v.quantity) || 0) > 0);
-    if (entries.length === 0) return;
-    const totalEggs = entries.reduce((s, [, v]) => s + (parseInt(v.quantity) || 0), 0);
-    try {
-      const collections = entries.map(([birdId, entry]) => ({
-        date: batchDate, birdId,
-        quantity: parseInt(entry.quantity) || 0,
-        cracked: parseInt(entry.cracked) || 0,
-        notes: batchNotes.trim(),
-      }));
-      await addEggCollections(collections);
-      setBatchEntries({}); setBatchNotes(''); setBatchDate(new Date().toISOString().slice(0, 10)); setShowModal(false);
-      setSuccessMsg(`${entries.length} coleta(s) registrada(s) — ${totalEggs} ovos`);
-      setTimeout(() => setSuccessMsg(''), 4000);
-    } catch {
-      // Error already surfaced via saveError
-    }
-  };
-
-  const handleEditSubmit = async (e) => {
-    e.preventDefault();
-    if (!editForm.birdId || !editForm.quantity) return;
-    try {
-      await updateEggCollection(editingId, { date: editForm.date, birdId: editForm.birdId, quantity: parseInt(editForm.quantity) || 0, cracked: parseInt(editForm.cracked) || 0, notes: editForm.notes.trim() });
-      setEditingId(null); setShowModal(false);
-      setSuccessMsg('Coleta atualizada');
-      setTimeout(() => setSuccessMsg(''), 3000);
-    } catch {
-      // Error already surfaced via saveError
-    }
-  };
-
-  const handleEdit = (collection) => {
-    setEditForm({ date: collection.date, birdId: collection.birdId, quantity: String(collection.quantity), cracked: String(collection.cracked || 0), notes: collection.notes || '' });
-    setEditingId(collection.id); setShowModal(true);
-  };
-
-  const updateBatchEntry = (birdId, field, value) => {
-    setBatchEntries(prev => ({ ...prev, [birdId]: { ...(prev[birdId] || { quantity: '', cracked: '' }), [field]: value } }));
-  };
-
-  const batchTotal = useMemo(() => Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.quantity) || 0), 0), [batchEntries]);
-  const batchCrackedTotal = useMemo(() => Object.values(batchEntries).reduce((s, e) => s + (parseInt(e.cracked) || 0), 0), [batchEntries]);
-
-  const handleDelete = async (id) => { if (window.confirm('Remover esta coleta?')) { try { await deleteEggCollection(id); } catch { /* surfaced via saveError */ } } };
+  // O cadastro manual de coletas saiu: esta tela virou espelho do Ornabird,
+  // que e a fonte da verdade. Ter os dois lugares gravando a mesma coleta
+  // garantiria divergencia — e foi divergencia que trouxe a gente ate aqui.
+  // Para lancar coleta, use o Ornabird; aparece aqui na proxima sincronizacao.
 
   const handleBirdConfig = (bird) => {
     const individuals = getIndividuals(bird);
@@ -423,9 +387,6 @@ export default function EggCollection() {
     return '-';
   };
 
-  const openNewCollection = () => {
-    setBatchDate(new Date().toISOString().slice(0, 10)); setBatchEntries({}); setBatchNotes(''); setEditingId(null); setShowModal(true);
-  };
 
   return (
     <div className="animate-in">
@@ -456,15 +417,13 @@ export default function EggCollection() {
       <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2>Coleta de Ovos</h2>
-          <p>Controle diario de coleta e desempenho de postura</p>
+          <p>Coletas espelhadas do Ornabird — somente leitura</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn btn-secondary" onClick={() => setShowEmployeeLink(!showEmployeeLink)} style={{ whiteSpace: 'nowrap' }}>
             <Link size={14} /> Acesso Funcionário
           </button>
-          <button className="btn btn-primary" onClick={openNewCollection} style={{ whiteSpace: 'nowrap' }}>
-            <Plus size={16} /> Nova Coleta
-          </button>
+          <OrnabirdSync />
         </div>
       </div>
 
@@ -530,7 +489,7 @@ export default function EggCollection() {
                 </button>
               </div>
               <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8, margin: 0 }}>
-                Os funcionários poderão editar dados de Coleta de Ovos, Chocadeiras, Pintinhos e Sanidade diretamente. As alterações aparecem na conta principal.
+                Os funcionários poderão editar dados de Chocadeiras, Pintinhos e Sanidade diretamente; as alterações aparecem na conta principal. A Coleta de Ovos é somente consulta — o registro é feito no Ornabird.
               </p>
             </div>
           ) : (
@@ -543,6 +502,27 @@ export default function EggCollection() {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Coleta de lote nao vinculado nao pertence a investidor nenhum: entra
+          nos totais gerais mas some do desempenho por ave. Avisar em vez de
+          esconder — ovo que nao rende pra ninguem precisa ser notado. */}
+      {semVinculo > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 16px',
+          marginBottom: 16, background: '#fef3c7', border: '1px solid #f59e0b',
+          borderRadius: 8, color: '#92400e', fontSize: 13,
+        }}>
+          <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <strong>{semVinculo} coleta(s) sem investidor.</strong>
+            <div style={{ marginTop: 2 }}>
+              O lote de origem no Ornabird ainda nao foi vinculado a nenhuma linha do
+              Plantel. Abra o Plantel, edite o animal correspondente e escolha o lote
+              em &quot;Vinculo com o Ornabird&quot;.
+            </div>
+          </div>
         </div>
       )}
 
@@ -716,25 +696,29 @@ export default function EggCollection() {
                       <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 12 }}>Trincados</th>
                       <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 12 }}>Bons</th>
                       <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 12 }}>Obs</th>
-                      <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 12, width: 70 }}>Acoes</th>
                     </tr>
                   </thead>
                   <tbody>
                     {selectedDayCollections.map(c => {
-                      const bird = birds.find(b => b.id === c.birdId);
+                      const bird = c.bird;
                       return (
                         <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                          <td style={{ padding: '6px 8px', fontSize: 13 }}><strong>{bird ? getBirdLabel(bird) : 'Ave removida'}</strong></td>
+                          <td style={{ padding: '6px 8px', fontSize: 13 }}>
+                            {/* Sem vinculo mostramos o lote do Ornabird em vez de um
+                                traco: o dado existe, o que falta e a ligacao com o
+                                Plantel — e o nome do lote e o que o usuario procura
+                                la para criar o vinculo. */}
+                            <strong>{bird ? getBirdLabel(bird) : (c.flockGroupTitle || 'Lote sem nome')}</strong>
+                            {!bird && (
+                              <div style={{ fontSize: 11, color: 'var(--warning)', fontWeight: 600 }}>
+                                sem vinculo no Plantel
+                              </div>
+                            )}
+                          </td>
                           <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>{c.quantity}</td>
                           <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600, color: (parseInt(c.cracked) || 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>{c.cracked || 0}</td>
                           <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600, color: 'var(--success)' }}>{(parseInt(c.quantity) || 0) - (parseInt(c.cracked) || 0)}</td>
                           <td style={{ padding: '6px 8px', fontSize: 12, color: 'var(--text-secondary)' }}>{c.notes || '-'}</td>
-                          <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                            <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                              <button className="btn-icon" title="Editar" onClick={() => handleEdit(c)}><Edit2 size={13} /></button>
-                              <button className="btn-icon" title="Excluir" onClick={() => handleDelete(c.id)} style={{ color: 'var(--danger)' }}><Trash2 size={13} /></button>
-                            </div>
-                          </td>
                         </tr>
                       );
                     })}
@@ -948,129 +932,9 @@ export default function EggCollection() {
       {allCollections.length === 0 && (
         <div className="empty-state">
           <Egg size={48} />
-          <h3>Nenhuma coleta registrada</h3>
-          <p>Registre a coleta diaria de ovos para acompanhar o desempenho do plantel</p>
+          <h3>Nenhuma coleta espelhada</h3>
+          <p>Registre as coletas no Ornabird e clique em &quot;Sincronizar com o Ornabird&quot; para vê-las aqui</p>
         </div>
-      )}
-
-      {/* Add/Edit Collection Modal */}
-      {showModal && (
-        <Portal><div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={!editingId ? { maxWidth: 620 } : undefined}>
-            {editingId ? (
-              <>
-                <h3 className="modal-title">Editar Coleta</h3>
-                <form onSubmit={handleEditSubmit}>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">Data *</label>
-                      <input className="form-input" type="date" required value={editForm.date} onChange={e => setEditForm({ ...editForm, date: e.target.value })} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Ave / Raca *</label>
-                      <select className="form-input" required value={editForm.birdId} onChange={e => setEditForm({ ...editForm, birdId: e.target.value })}>
-                        <option value="">Selecione a ave</option>
-                        {[...birds].sort((a, b) => getBirdLabel(a).localeCompare(getBirdLabel(b))).map(b => <option key={b.id} value={b.id}>{getBirdLabel(b)}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">Quantidade de Ovos *</label>
-                      <input className="form-input" type="number" min="0" required value={editForm.quantity} onChange={e => setEditForm({ ...editForm, quantity: e.target.value })} placeholder="0" />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Ovos Trincados</label>
-                      <input className="form-input" type="number" min="0" value={editForm.cracked} onChange={e => setEditForm({ ...editForm, cracked: e.target.value })} placeholder="0" />
-                    </div>
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Observacoes</label>
-                    <input className="form-input" type="text" value={editForm.notes} onChange={e => setEditForm({ ...editForm, notes: e.target.value })} placeholder="Ex: Ovos para chocadeira..." />
-                  </div>
-                  <div className="modal-actions">
-                    <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
-                    <button type="submit" className="btn btn-primary">Salvar</button>
-                  </div>
-                </form>
-              </>
-            ) : (
-              <>
-                <h3 className="modal-title">Nova Coleta de Ovos</h3>
-                <form onSubmit={handleBatchSubmit}>
-                  <div className="form-row" style={{ marginBottom: 16 }}>
-                    <div className="form-group">
-                      <label className="form-label">Data da Coleta *</label>
-                      <input className="form-input" type="date" required value={batchDate} onChange={e => setBatchDate(e.target.value)} />
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, paddingBottom: 2 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>
-                        Total: <span style={{ color: 'var(--primary)', fontSize: 16 }}>{batchTotal}</span> ovos
-                      </div>
-                      {batchCrackedTotal > 0 && (
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--danger)' }}>{batchCrackedTotal} trincados</div>
-                      )}
-                    </div>
-                  </div>
-                  {birds.length === 0 ? (
-                    <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-                      Nenhuma ave cadastrada. Cadastre aves na pagina do Plantel primeiro.
-                    </div>
-                  ) : (
-                    <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead>
-                          <tr style={{ background: 'var(--bg-secondary)', position: 'sticky', top: 0, zIndex: 1 }}>
-                            <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 12, fontWeight: 600 }}>Ave / Raca</th>
-                            <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, fontWeight: 600, width: 100 }}>Ovos</th>
-                            <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 12, fontWeight: 600, width: 100 }}>Trincados</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {[...birds].sort((a, b) => getBirdLabel(a).localeCompare(getBirdLabel(b))).map(bird => {
-                            const entry = batchEntries[bird.id] || { quantity: '', cracked: '' };
-                            const active = getActiveBirdCount(bird);
-                            const total = (getIndividuals(bird)).length;
-                            return (
-                              <tr key={bird.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                                <td style={{ padding: '8px 12px' }}>
-                                  <div style={{ fontWeight: 600, fontSize: 13 }}>{bird.species} - {bird.breed}</div>
-                                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                    {active} ativa{active !== 1 ? 's' : ''} de {total}
-                                  </div>
-                                </td>
-                                <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                                  <input className="form-input" type="number" min="0" value={entry.quantity}
-                                    onChange={e => updateBatchEntry(bird.id, 'quantity', e.target.value)}
-                                    placeholder="0" style={{ width: 70, textAlign: 'center', padding: '6px 4px', margin: '0 auto' }} />
-                                </td>
-                                <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                                  <input className="form-input" type="number" min="0" value={entry.cracked}
-                                    onChange={e => updateBatchEntry(bird.id, 'cracked', e.target.value)}
-                                    placeholder="0" style={{ width: 70, textAlign: 'center', padding: '6px 4px', margin: '0 auto' }} />
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                  <div className="form-group" style={{ marginTop: 12 }}>
-                    <label className="form-label">Observacoes</label>
-                    <input className="form-input" type="text" value={batchNotes} onChange={e => setBatchNotes(e.target.value)} placeholder="Ex: Ovos para chocadeira, ovos para venda..." />
-                  </div>
-                  <div className="modal-actions">
-                    <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
-                    <button type="submit" className="btn btn-primary" disabled={batchTotal === 0}>
-                      <Egg size={14} /> Registrar {batchTotal > 0 ? `${batchTotal} ovos` : 'Coleta'}
-                    </button>
-                  </div>
-                </form>
-              </>
-            )}
-          </div>
-        </div></Portal>
       )}
 
       {/* Bird Config Modal - Individual bird management */}

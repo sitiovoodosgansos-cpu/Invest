@@ -158,20 +158,22 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Phase 2C: egg collections moved to their own collection.
+    // DESCONTINUADA: cadastro manual de coleta de ovos.
     //
-    // Same rationale as /sales: the monolithic /config/appData doc was hitting
-    // the 1 MiB cap as daily egg records accumulated, silently rejecting
-    // writes and causing data loss. One doc per collection entry lifts that
-    // ceiling.
+    // A coleta agora e registrada no Ornabird e chega ao Invest espelhada em
+    // /ornabirdEggCollections (abaixo). Nenhuma tela le ou grava esta colecao.
+    //
+    // Escrita esta NEGADA de proposito. Sem isso, uma aba antiga ainda aberta
+    // no navegador poderia recriar um registro manual depois que os
+    // documentos velhos forem apagados no console — um numero fantasma numa
+    // colecao que ninguem le. Leitura fica aberta so para nao quebrar um
+    // cliente em cache enquanto o deploy novo se espalha.
+    //
+    // Apagar os documentos antigos e feito pelo console do Firebase, que
+    // ignora estas regras; nao e preciso reabrir a escrita para isso.
     match /eggCollections/{collectionId} {
       allow read: if true;
-
-      allow create, update: if isAdmin()
-        && request.resource.data.birdId is string
-        && request.resource.data.quantity is number;
-
-      allow delete: if isAdmin();
+      allow write: if false;
     }
 
     // Ornabird mirror. These two collections are a READ-ONLY copy of data that
@@ -189,6 +191,15 @@ service cloud.firestore {
     }
 
     match /ornabirdVitrine/{saleId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Coletas de ovos espelhadas do Ornabird. Separada da /eggCollections
+    // antiga (cadastro manual, descontinuado) de proposito: a sincronizacao
+    // apaga o que nao veio do Ornabird, e aponta-la para a colecao manual
+    // engoliria aquele historico sem aviso.
+    match /ornabirdEggCollections/{collectionId} {
       allow read: if true;
       allow create, update, delete: if isAdmin();
     }
