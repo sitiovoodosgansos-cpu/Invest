@@ -206,6 +206,20 @@ export function normaliseTrays(rootId, trays) {
     eggCount: t.eggCount ?? 0,
     discardedCount: t.discardedCount ?? 0,
     status: t.status,
+    // Validade. expiresAt e DATA ABSOLUTA de proposito: este espelho fica
+    // guardado no Firestore e so e reescrito na proxima sincronizacao, entao
+    // guardar "faltam 2 dias" azedaria sozinho. A tela calcula na hora.
+    expiryDays: t.expiryDays ?? null,
+    entries: (t.entries || []).map(e => ({
+      id: e.id,
+      entryDate: e.entryDate,
+      initialCount: e.initialCount ?? 0,
+      soldCount: e.soldCount ?? 0,
+      discardedCount: e.discardedCount ?? 0,
+      transferredCount: e.transferredCount ?? 0,
+      available: e.available ?? 0,
+      expiresAt: e.expiresAt ?? null,
+    })),
     createdAt: t.createdAt ?? null,
     ornabirdGroupId: rootId,
     originGroupId: t.flockGroupId ?? null,
