@@ -1,26 +1,27 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import {
-  formatDate, getInitials, buildOrnabirdGroupIndex, resolveMirrorBird,
+  getInitials, buildOrnabirdGroupIndex, resolveMirrorBird,
 } from '../utils/helpers';
 import { Layers, Search, Link2, AlertCircle, Egg, Hourglass, CalendarX } from 'lucide-react';
 import OrnabirdSync from '../components/OrnabirdSync';
 
-// Espelho somente-leitura da Prateleira do Ornabird.
+// Espelho somente-leitura da Prateleira do Ornabird, em cards.
 //
-// Esta tela imita a de lá de propósito — mesmos cartões, mesmos limiares de
-// validade — porque as duas descrevem a MESMA prateleira, e números diferentes
-// nos dois lugares corroem a confiança no rateio. O Ornabird segue como fonte
-// da verdade: aqui nada é editado.
+// A tela imita a de lá de propósito — mesmo card, mesmas cores de urgência,
+// mesmos textos de contagem regressiva — porque as duas descrevem a MESMA
+// prateleira. Ver a mesma bandeja com aparência diferente em cada sistema faz
+// duvidar de qual está certa, e essa dúvida contamina o rateio.
 //
-// O que esta tela acrescenta é a coluna Investidor: a mesma bandeja, vista pela
-// ótica de quem vai receber.
+// Duas diferenças deliberadas em relação ao Ornabird:
+//   1. Não há botões de vender / chocar / descartar. Isto aqui é espelho; a
+//      ação acontece no Ornabird, que é a fonte da verdade.
+//   2. Cada card mostra o INVESTIDOR. É o que o Invest acrescenta: a mesma
+//      bandeja, vista pela ótica de quem vai receber.
 
-// Dias restantes até vencer, contados na HORA DA EXIBIÇÃO.
-//
-// A API manda expiresAt (data absoluta) em vez de "faltam N dias" justamente
-// por isto: o espelho fica guardado no Firestore até a próxima sincronização, e
-// um contador congelado passaria a mentir a cada dia.
+// Dias restantes calculados NA EXIBIÇÃO, a partir da data absoluta que a API
+// manda. Guardar "faltam N dias" no Firestore daria um número que azeda
+// sozinho entre uma sincronização e outra.
 function diasRestantes(expiresAt) {
   if (!expiresAt) return null;
   const inicioDoDia = (v) => {
@@ -35,32 +36,167 @@ function diasRestantes(expiresAt) {
   return Math.round((venc - hoje) / 86400000);
 }
 
-// A bandeja vence junto com a entrada mais velha que ainda tem ovo — é ela que
-// obriga a usar ou descartar. Mesma regra do Ornabird (oldestRemaining).
-function vencimentoDaBandeja(tray) {
-  const vivos = (tray.entries || []).filter((e) => (e.available ?? 0) > 0);
-  const dias = vivos.map((e) => diasRestantes(e.expiresAt)).filter((d) => d !== null);
-  if (dias.length === 0) return null;
-  return Math.min(...dias);
+// Mesmos limiares do Ornabird (urgencyTone).
+function tom(dias) {
+  if (dias === null) return 'neutro';
+  if (dias < 0) return 'vencido';
+  if (dias <= 3) return 'alerta';
+  return 'fresco';
 }
 
-function EtiquetaValidade({ dias }) {
-  if (dias === null) return <span style={{ color: 'var(--text-muted)' }}>-</span>;
-  if (dias < 0) {
-    return (
-      <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c' }}>
-        vencida ha {Math.abs(dias)}d
-      </span>
-    );
-  }
-  if (dias <= 3) {
-    return (
-      <span className="badge" style={{ background: '#fef3c7', color: '#b45309' }}>
-        {dias === 0 ? 'vence hoje' : `${dias}d`}
-      </span>
-    );
-  }
-  return <span style={{ fontSize: 13 }}>{dias}d</span>;
+const PALETA = {
+  vencido: { borda: '#fecdd3', fundo: '#fff1f2', chip: '#ffe4e6', texto: '#be123c', barra: '#f43f5e' },
+  alerta: { borda: '#fde68a', fundo: '#fffbeb', chip: '#fef3c7', texto: '#b45309', barra: '#f59e0b' },
+  fresco: { borda: '#a7f3d0', fundo: '#f0fdf4', chip: '#d1fae5', texto: '#047857', barra: '#10b981' },
+  neutro: { borda: '#e5e7eb', fundo: '#fff', chip: '#f3f4f6', texto: '#6b7280', barra: '#9ca3af' },
+};
+
+// Mesmo texto do Ornabird (countdownLabel).
+function textoContagem(dias) {
+  if (dias === null) return 'sem validade';
+  if (dias < 0) return `Vencido ha ${Math.abs(dias)}d`;
+  if (dias === 0) return 'Vence hoje';
+  if (dias === 1) return '1 dia restante';
+  return `${dias} dias restantes`;
+}
+
+function dataCurta(v) {
+  if (!v) return '-';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+}
+
+// Cabeçalho do card: título do lote quando existe, senão espécie · raça ·
+// variedade. Mesma regra do trayHeader do Ornabird — bandeja externa não tem
+// lote e cai no segundo caso.
+function cabecalho(tray) {
+  if (tray.flockGroupTitle) return tray.flockGroupTitle;
+  const partes = [tray.speciesLabel, tray.breedLabel, tray.varietyLabel].filter(Boolean);
+  return partes.join(' · ') || 'Bandeja';
+}
+
+// A bandeja vence junto com a entrada mais velha que ainda tem ovo — é ela que
+// obriga a usar ou descartar. Mesma regra do Ornabird (oldestRemaining).
+function vencimentoDaBandeja(entradasVivas) {
+  const dias = entradasVivas.map((e) => e.dias).filter((d) => d !== null);
+  return dias.length === 0 ? null : Math.min(...dias);
+}
+
+function LinhaEntrada({ entrada }) {
+  const p = PALETA[tom(entrada.dias)];
+  // A barra mostra a IDADE do ovo: quanto da validade já passou. Cheia e
+  // vermelha = no fim do prazo. É a mesma leitura do Ornabird.
+  const ini = new Date(entrada.entryDate).getTime();
+  const fim = new Date(entrada.expiresAt).getTime();
+  const total = Math.max(1, fim - ini);
+  const idade = Math.min(100, Math.max(0, ((Date.now() - ini) / total) * 100));
+
+  return (
+    <div style={{ border: '1px solid #fff', background: 'rgba(255,255,255,0.8)', borderRadius: 8, padding: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#52525b' }}>{dataCurta(entrada.entryDate)}</span>
+          {entrada.source === 'EXTERNAL' && (
+            <span style={{
+              background: '#ede9fe', color: '#6d28d9', borderRadius: 999,
+              padding: '1px 6px', fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+            }}>
+              ext
+            </span>
+          )}
+          <span style={{
+            background: p.chip, color: p.texto, borderRadius: 999,
+            padding: '1px 6px', fontSize: 10, fontWeight: 600,
+          }}>
+            {textoContagem(entrada.dias)}
+          </span>
+        </div>
+        <span style={{ fontSize: 10, color: '#71717a' }}>
+          {entrada.available}/{entrada.initialCount}
+        </span>
+      </div>
+      <div style={{ marginTop: 4, height: 4, borderRadius: 999, background: '#e4e4e7', overflow: 'hidden' }}>
+        <div style={{ height: '100%', borderRadius: 999, background: p.barra, width: `${idade}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function CardBandeja({ tray }) {
+  const [aberto, setAberto] = useState(false);
+  const p = PALETA[tom(tray.dias)];
+  const entradas = tray.entradasVivas;
+  const visiveis = aberto ? entradas : entradas.slice(0, 3);
+
+  return (
+    <div style={{
+      border: `1px solid ${p.borda}`, background: p.fundo, borderRadius: 16,
+      padding: 14, display: 'flex', flexDirection: 'column', gap: 10,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, minWidth: 0 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 12, background: p.chip,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>
+            <Egg size={16} style={{ color: p.texto }} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#18181b' }}>{cabecalho(tray)}</div>
+            <div style={{ fontSize: 11, color: '#71717a' }}>
+              {entradas.length} {entradas.length === 1 ? 'data' : 'datas'}
+              {tray.expiryDays ? ` · ${tray.expiryDays}d` : ''}
+            </div>
+          </div>
+        </div>
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#a1a1aa' }}>
+            Disponiveis
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 600, color: '#18181b' }}>{tray.eggCount}</div>
+        </div>
+      </div>
+
+      {/* O que o Invest acrescenta ao card do Ornabird: de quem sao estes ovos. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {tray.investor ? (
+          <>
+            <div className="investor-avatar" style={{ width: 20, height: 20, fontSize: 9, borderRadius: 6 }}>
+              {getInitials(tray.investor.name)}
+            </div>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{tray.investor.name}</span>
+          </>
+        ) : (
+          <span className="badge" style={{ background: '#fef3c7', color: '#d97706', fontSize: 10 }}>
+            Sem vinculo — nao entra no rateio
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {visiveis.map((e) => <LinhaEntrada key={e.id} entrada={e} />)}
+        {entradas.length > 3 && (
+          <button
+            type="button"
+            onClick={() => setAberto(!aberto)}
+            style={{
+              width: '100%', border: '1px dashed #d4d4d8', borderRadius: 8, padding: '4px 0',
+              fontSize: 11, fontWeight: 600, color: '#71717a', background: 'transparent', cursor: 'pointer',
+            }}
+          >
+            {aberto ? 'Recolher' : `+${entradas.length - 3} datas`}
+          </button>
+        )}
+      </div>
+
+      {tray.discardedCount > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          {tray.discardedCount} descartado(s) nesta bandeja
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Prateleira() {
@@ -74,22 +210,25 @@ export default function Prateleira() {
   // uma linha do Plantel. Bandeja sem vínculo aparece em vez de sumir: sumir
   // faria os ovos desaparecerem do rateio em silêncio.
   const groupIndex = useMemo(() => buildOrnabirdGroupIndex(birds), [birds]);
-  const rows = useMemo(() => trays.map(t => {
+  const rows = useMemo(() => trays.map((t) => {
     const bird = resolveMirrorBird(t, groupIndex);
-    const investor = bird ? investors.find(i => i.id === bird.investorId) : null;
-    return { ...t, bird, investor, dias: vencimentoDaBandeja(t) };
+    const investor = bird ? investors.find((i) => i.id === bird.investorId) : null;
+    const entradasVivas = (t.entries || [])
+      .filter((e) => (e.available ?? 0) > 0)
+      .map((e) => ({ ...e, dias: diasRestantes(e.expiresAt) }));
+    return { ...t, bird, investor, entradasVivas, dias: vencimentoDaBandeja(entradasVivas) };
   }), [trays, groupIndex, investors]);
 
-  const filtered = useMemo(() => rows.filter(r => {
-    const haystack = `${r.label || ''} ${r.breedLabel || ''} ${r.speciesLabel || ''} ${r.varietyLabel || ''}`.toLowerCase();
+  const filtered = useMemo(() => rows.filter((r) => {
+    const haystack = `${r.flockGroupTitle || ''} ${r.label || ''} ${r.breedLabel || ''} ${r.speciesLabel || ''} ${r.varietyLabel || ''}`.toLowerCase();
     const matchSearch = !search.trim() || haystack.includes(search.toLowerCase());
     const matchInvestor = !filterInvestor
       || (filterInvestor === '__none__' ? !r.investor : r.investor?.id === filterInvestor);
     return matchSearch && matchInvestor;
   }), [rows, search, filterInvestor]);
 
-  // Os mesmos quatro números do Ornabird, com os mesmos limiares (<= 3 dias
-  // "vencendo", < 0 "vencida"), para as duas telas nunca discordarem.
+  // Os mesmos quatro números do Ornabird, com os mesmos limiares, para as duas
+  // telas nunca discordarem.
   const totals = useMemo(() => filtered.reduce((acc, r) => {
     acc.eggs += parseInt(r.eggCount, 10) || 0;
     if (r.dias !== null && r.dias < 0) acc.vencidas += 1;
@@ -97,7 +236,7 @@ export default function Prateleira() {
     return acc;
   }, { eggs: 0, vencendo: 0, vencidas: 0 }), [filtered]);
 
-  const unlinked = rows.filter(r => !r.bird).length;
+  const unlinked = rows.filter((r) => !r.bird).length;
 
   if (trays.length === 0) {
     return (
@@ -190,91 +329,37 @@ export default function Prateleira() {
             style={{ paddingLeft: 36 }}
             placeholder="Buscar bandeja, raca..."
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <select
           className="form-input"
           style={{ width: 'auto', minWidth: 200 }}
           value={filterInvestor}
-          onChange={e => setFilterInvestor(e.target.value)}
+          onChange={(e) => setFilterInvestor(e.target.value)}
         >
           <option value="">Todos os investidores</option>
-          {investors.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+          {investors.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
           <option value="__none__">— Sem vinculo —</option>
         </select>
       </div>
 
-      <div className="card">
-        <div className="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Bandeja</th>
-                <th>Raca / Variedade</th>
-                <th>Investidor</th>
-                <th>Ovos</th>
-                <th>Descartados</th>
-                <th>Vence em</th>
-                <th>Entradas</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Mais urgente primeiro: quem vence antes precisa de decisao antes. */}
-              {[...filtered]
-                .sort((a, b) => {
-                  if (a.dias === null) return 1;
-                  if (b.dias === null) return -1;
-                  return a.dias - b.dias;
-                })
-                .map(r => (
-                  <tr key={r.id}>
-                    <td><strong>{r.label || '-'}</strong></td>
-                    <td style={{ fontSize: 13 }}>
-                      {r.breedLabel || '-'}
-                      {r.varietyLabel && <span style={{ color: 'var(--text-muted)' }}> · {r.varietyLabel}</span>}
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.speciesLabel || ''}</div>
-                    </td>
-                    <td>
-                      {r.investor ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <div className="investor-avatar" style={{ width: 22, height: 22, fontSize: 9, borderRadius: 6 }}>
-                            {getInitials(r.investor.name)}
-                          </div>
-                          <span style={{ fontSize: 13 }}>{r.investor.name}</span>
-                        </div>
-                      ) : (
-                        <span className="badge" style={{ background: '#fef3c7', color: '#d97706' }}>Sem vinculo</span>
-                      )}
-                    </td>
-                    <td style={{ fontWeight: 600 }}>{parseInt(r.eggCount, 10) || 0}</td>
-                    <td style={{ color: (parseInt(r.discardedCount, 10) || 0) > 0 ? 'var(--danger)' : 'var(--text-muted)' }}>
-                      {parseInt(r.discardedCount, 10) || 0}
-                    </td>
-                    <td><EtiquetaValidade dias={r.dias} /></td>
-                    {/* Uma bandeja acumula varias entradas, cada uma com sua
-                        validade. O detalhe explica por que ela vence quando vence. */}
-                    <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                      {(r.entries || []).filter(e => (e.available ?? 0) > 0).map(e => (
-                        <div key={e.id}>
-                          {formatDate(e.entryDate)} · {e.available} ovo(s)
-                        </div>
-                      ))}
-                      {(r.entries || []).filter(e => (e.available ?? 0) > 0).length === 0 && (
-                        <span style={{ color: 'var(--text-muted)' }}>-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-        <div style={{ padding: '10px 16px', fontSize: 12, color: 'var(--text-muted)' }}>
-          Espelho da prateleira do Ornabird: so bandejas ativas, so entradas que ainda
-          tem ovo — as mesmas regras da tela de la. Para criar, mover ou descartar
-          bandejas, use o Ornabird; as alteracoes aparecem aqui na proxima
-          sincronizacao. &quot;Vencendo em breve&quot; sao 3 dias ou menos.
-        </div>
+      {/* Mais urgente primeiro: quem vence antes precisa de decisao antes. */}
+      <div className="tray-grid">
+        {[...filtered]
+          .sort((a, b) => {
+            if (a.dias === null) return 1;
+            if (b.dias === null) return -1;
+            return a.dias - b.dias;
+          })
+          .map((t) => <CardBandeja key={t.id} tray={t} />)}
+      </div>
+
+      <div style={{ padding: '12px 4px', fontSize: 12, color: 'var(--text-muted)' }}>
+        Espelho da prateleira do Ornabird: so bandejas ativas, so entradas que ainda
+        tem ovo — as mesmas regras da tela de la. A barra de cada data mostra quanto
+        da validade ja passou. Para vender, chocar ou descartar, use o Ornabird; as
+        alteracoes aparecem aqui na proxima sincronizacao.
       </div>
     </div>
   );

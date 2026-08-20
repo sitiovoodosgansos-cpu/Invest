@@ -204,6 +204,25 @@ input, select, textarea {
   letter-spacing: 0.5px;
 }
 
+/* Grade de bandejas da Prateleira.
+   Mesmas colunas do Ornabird (1 / 2 / 3) pra tela ficar igual nos dois.
+   align-items: start da a cada card a altura do proprio conteudo — sem isso
+   uma bandeja com 5 datas estica as vizinhas e abre um vazio grande. */
+.tray-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: start;
+  gap: 12px;
+}
+
+@media (min-width: 768px) {
+  .tray-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (min-width: 1280px) {
+  .tray-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
 /* Stats Grid */
 .stats-grid {
   display: grid;
