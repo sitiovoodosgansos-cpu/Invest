@@ -200,6 +200,9 @@ export function normaliseTrays(rootId, trays) {
   return (trays || []).map(t => ({
     id: t.id,
     label: t.label,
+    // O card usa o titulo do lote como cabecalho; so cai pra raca quando a
+    // bandeja nao tem lote (bandeja externa).
+    flockGroupTitle: t.flockGroupTitle ?? null,
     speciesLabel: t.speciesLabel,
     breedLabel: t.breedLabel,
     varietyLabel: t.varietyLabel ?? null,
@@ -219,6 +222,8 @@ export function normaliseTrays(rootId, trays) {
       transferredCount: e.transferredCount ?? 0,
       available: e.available ?? 0,
       expiresAt: e.expiresAt ?? null,
+      // COLLECTION (do próprio criatório) ou EXTERNAL (ovo comprado de fora).
+      source: e.source ?? null,
     })),
     createdAt: t.createdAt ?? null,
     ornabirdGroupId: rootId,
