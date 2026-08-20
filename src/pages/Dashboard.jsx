@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   formatCurrency, formatDate, calculateProfitDistribution, getMonthsDifference,
-  calculateCompoundInterest, groupSalesByPeriod
+  calculateCompoundInterest, groupSalesByPeriod, mapOrnabirdEggCollections
 } from '../utils/helpers';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -19,7 +19,7 @@ const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Se
 export default function Dashboard() {
   const {
     investors, birds, sales, financialInvestments, expenses,
-    eggCollections, incubatorBatches, incubators,
+    ornabirdEggCollections, incubatorBatches, incubators,
     nurseryRooms, nurseryBatches, nurseryEvents,
     infirmaryBays, infirmaryAdmissions, treatments,
     eggProfitRate, birdProfitRate,
@@ -27,7 +27,12 @@ export default function Dashboard() {
 
   const [period, setPeriod] = useState('monthly');
 
-  const allCollections = eggCollections || [];
+  // Ovos vem do espelho do Ornabird, nao do cadastro manual antigo — mesma
+  // fonte da tela de Coleta de Ovos e dos Relatorios, para os tres baterem.
+  const allCollections = useMemo(
+    () => mapOrnabirdEggCollections(ornabirdEggCollections, birds),
+    [ornabirdEggCollections, birds]
+  );
   const allIncBatches = incubatorBatches || [];
   const allNurseryBatches = nurseryBatches || [];
   const allNurseryEvents = nurseryEvents || [];

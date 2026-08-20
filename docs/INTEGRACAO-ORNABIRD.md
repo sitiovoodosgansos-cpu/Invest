@@ -175,8 +175,12 @@ Resposta `200`:
       "descendantIds": ["clx789..."],
 
       "eggCollections": [
-        { "id": "...", "date": "2026-03-04", "quantity": 12,
-          "flockGroupId": "clx123..." }
+        { "id": "...", "date": "2026-03-04T...",
+          "quantity": 12,          // = totalEggs (nome antigo mantido)
+          "totalEggs": 12, "goodEggs": 10, "crackedEggs": 2,
+          "notes": "coleta da manhã",
+          "flockGroupId": "clx123...",
+          "flockGroupTitle": "Gansos Matriz" }
       ],
 
       "trays": [                     // PRATELEIRA
@@ -239,7 +243,11 @@ Se o período pedido produzir muitos registros, paginar por
    um seletor alimentado por 4.1
 2. **Herança automática:** grupos de chocada nunca precisam ser vinculados à
    mão — entram pelo `includeDescendants`
-3. **Coleta de ovos:** espelhada por lote, alimentando os relatórios
+3. **Coleta de ovos:** espelho total em `/ornabirdEggCollections`. A tela
+   Coleta de Ovos, o Dashboard, os Relatórios e os portais leem só o espelho;
+   o cadastro manual foi descontinuado (a coleção `/eggCollections` ficou
+   somente-leitura nas regras até os documentos antigos serem apagados no
+   console)
 4. **Prateleira:** página nova no Invest, mostrando as bandejas por lote
 5. **Chocadeira:** lotes de chocagem e taxa de eclosão por investidor
 6. **Vendas:** substituem a atribuição atual por **texto** — hoje o Invest

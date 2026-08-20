@@ -6,7 +6,8 @@ import { useApp } from '../context/AppContext';
 import { usePortalData } from '../hooks/usePortalData';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
-  getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod
+  getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod,
+  mapOrnabirdEggCollections
 } from '../utils/helpers';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -67,7 +68,13 @@ function DirectPortalContent() {
   const payments = Array.isArray(src.payments) ? src.payments : [];
   // Operational data, already scoped to this investor by the server. Empty
   // when running on the legacy client-side path, which never had these.
-  const myEggCollections = Array.isArray(src.eggCollections) ? src.eggCollections : [];
+  // No caminho servidor a coleta ja vem filtrada e traduzida; no caminho
+  // legado (flag desligada) ela e derivada do espelho do Ornabird — a
+  // /eggCollections manual foi descontinuada e nao e mais lida em lugar
+  // nenhum do app.
+  const myEggCollections = serverScoped
+    ? (Array.isArray(src.eggCollections) ? src.eggCollections : [])
+    : mapOrnabirdEggCollections(appData.ornabirdEggCollections, appData.birds);
   const myBatches = Array.isArray(src.incubatorBatches) ? src.incubatorBatches : [];
   const myIncubators = Array.isArray(src.incubators) ? src.incubators : [];
   const myTrays = Array.isArray(src.trays) ? src.trays : [];

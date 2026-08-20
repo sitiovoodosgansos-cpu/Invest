@@ -54,7 +54,8 @@ export default function OrnabirdSync({ label = 'Sincronizar com o Ornabird' }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div className="badge badge-green" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <CheckCircle2 size={14} />
-            {result.groupIds.length} lote(s) · {result.trays} bandeja(s) · {result.vitrine} venda(s)
+            {result.groupIds.length} lote(s) · {result.trays} bandeja(s) ·{' '}
+            {result.eggCollections} coleta(s) · {result.vitrine} venda(s)
           </div>
 
           {result.groupIds.length === 0 && (

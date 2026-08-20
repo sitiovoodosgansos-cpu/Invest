@@ -115,16 +115,26 @@ function employeeBird(bird) {
 }
 
 
-// Egg collections belonging to a given set of animals.
-function publicEggCollection(c) {
+// Coleta de ovos espelhada do Ornabird, na forma que o portal ja servia do
+// cadastro manual antigo. O `birdId` nao vem mais do documento: a coleta
+// pertence a um LOTE, e a linha do Plantel e resolvida pelo vinculo — a mesma
+// regra de posse das bandejas e da vitrine.
+function publicEggCollection(c, bird) {
   return {
     id: c.id,
     date: c.date || '',
-    birdId: c.birdId || '',
-    quantity: Number(c.quantity) || 0,
-    cracked: Number(c.cracked) || 0,
+    birdId: bird ? bird.id : '',
+    quantity: Number(c.totalEggs) || 0,
+    cracked: Number(c.crackedEggs) || 0,
     notes: c.notes || '',
   };
+}
+
+// A linha do Plantel dona de uma linha espelhada, ou null quando o lote nunca
+// foi vinculado. Mesma precedencia do resto: originGroupId primeiro.
+function mirrorBird(row, birds) {
+  return birds.find(b =>
+    b.ornabirdGroupId === row.originGroupId || b.ornabirdGroupId === row.ornabirdGroupId) || null;
 }
 
 // An incubation batch can mix eggs from SEVERAL investors' animals, so the
@@ -273,13 +283,17 @@ export async function buildPortalPayload(db, token) {
   };
 
   if (resolved.type === 'employee') {
-    const eggSnap = await db.collection('eggCollections').get();
+    const eggSnap = await db.collection('ornabirdEggCollections').get();
+    const employeeBirds = Array.isArray(app.birds) ? app.birds : [];
     return {
       status: 200,
       body: {
         type: 'employee',
-        birds: (app.birds || []).map(employeeBird),
-        eggCollections: eggSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        birds: employeeBirds.map(employeeBird),
+        eggCollections: eggSnap.docs.map(d => {
+          const row = { id: d.id, ...d.data() };
+          return publicEggCollection(row, mirrorBird(row, employeeBirds));
+        }),
         incubators: app.incubators || [],
         incubatorBatches: app.incubatorBatches || [],
         nurseryRooms: app.nurseryRooms || [],
@@ -318,10 +332,12 @@ export async function buildPortalPayload(db, token) {
   // Ornabird mirror, scoped by the linked flock groups.
   let myTrays = [];
   let myVitrine = [];
+  let myEggCollections = [];
   if (myGroupIds.size > 0) {
-    const [traySnap, vitrineSnap] = await Promise.all([
+    const [traySnap, vitrineSnap, eggSnap] = await Promise.all([
       db.collection('ornabirdTrays').get(),
       db.collection('ornabirdVitrine').get(),
+      db.collection('ornabirdEggCollections').get(),
     ]);
     myTrays = traySnap.docs
       .map(d => ({ id: d.id, ...d.data() }))
@@ -330,20 +346,18 @@ export async function buildPortalPayload(db, token) {
     myVitrine = vitrineSnap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(v => mirrorBelongsTo(v, myGroupIds))
-      .map(v => {
-        const bird = myBirds.find(b =>
-          b.ornabirdGroupId === v.originGroupId || b.ornabirdGroupId === v.ornabirdGroupId);
-        return publicVitrineSale(v, resolveRateFor(bird, !!v.isEgg, rates));
-      });
+      .map(v => publicVitrineSale(v, resolveRateFor(mirrorBird(v, myBirds), !!v.isEgg, rates)));
+    // A coleta agora e espelhada do Ornabird, entao ela e filtrada pelo LOTE e
+    // nao pelo birdId gravado no documento — que nao existe mais. Mesma regra
+    // das bandejas: lote nao vinculado nao pertence a investidor nenhum e nao
+    // sai do servidor.
+    myEggCollections = eggSnap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(c => mirrorBelongsTo(c, myGroupIds))
+      .map(c => publicEggCollection(c, mirrorBird(c, myBirds)));
   }
 
-  // Egg collections and incubation batches for this investor's animals only.
-  const eggSnap = await db.collection('eggCollections').get();
-  const myEggCollections = eggSnap.docs
-    .map(d => ({ id: d.id, ...d.data() }))
-    .filter(c => c && myBirdIds.has(c.birdId))
-    .map(publicEggCollection);
-
+  // Incubation batches for this investor's animals only.
   const myBatches = (Array.isArray(app.incubatorBatches) ? app.incubatorBatches : [])
     .map(b => publicBatch(b, myBirdIds))
     .filter(Boolean);

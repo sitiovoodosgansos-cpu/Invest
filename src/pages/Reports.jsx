@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
-  getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod
+  getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod,
+  mapOrnabirdEggCollections
 } from '../utils/helpers';
 import { exportInvestorReport, exportGeneralReport } from '../utils/pdfExport';
 import {
@@ -137,7 +138,7 @@ function Pagination({ total, page, pageSize, onPage }) {
 export default function Reports() {
   const {
     investors, birds, sales, financialInvestments, payments, expenses,
-    eggCollections, incubators, incubatorBatches,
+    ornabirdEggCollections, incubators, incubatorBatches,
     infirmaryBays, infirmaryAdmissions, treatments,
     nurseryRooms, nurseryBatches, nurseryEvents,
     eggProfitRate, birdProfitRate,
@@ -462,7 +463,13 @@ export default function Reports() {
   // ====== Module data aggregates (date-filtered where applicable) ======
   const filteredExpenses = useMemo(() => filterItemsByDate(expenses || [], dateRange), [expenses, dateRange]);
   const filteredPayments = useMemo(() => filterItemsByDate(payments || [], dateRange), [payments, dateRange]);
-  const filteredEggCollections = useMemo(() => filterItemsByDate(eggCollections || [], dateRange), [eggCollections, dateRange]);
+  // Ovos vem do espelho do Ornabird, nao do cadastro manual antigo — mesma
+  // fonte da tela de Coleta de Ovos e do Dashboard, para os tres baterem.
+  const eggCollections = useMemo(
+    () => mapOrnabirdEggCollections(ornabirdEggCollections, birds),
+    [ornabirdEggCollections, birds]
+  );
+  const filteredEggCollections = useMemo(() => filterItemsByDate(eggCollections, dateRange), [eggCollections, dateRange]);
   const filteredIncubatorBatches = useMemo(() => {
     if (!dateRange) return incubatorBatches || [];
     return (incubatorBatches || []).filter(b => {
@@ -498,6 +505,36 @@ export default function Reports() {
     if (!b) return '-';
     return `${b.species || ''} - ${b.breed || ''}`.trim();
   };
+  // Coletas agrupadas por raca. Um so calculo para a tela e para o PDF: eram
+  // dois blocos identicos, e dois blocos identicos e so uma divergencia que
+  // ainda nao aconteceu.
+  //
+  // Coleta de lote nao vinculado nao tem raca — ela entra numa linha propria
+  // em vez de virar um "-" mudo, senao o total da tabela nao fecha com a soma
+  // das linhas e ninguem descobre por que.
+  const ovosAggregate = useMemo(() => {
+    const byBird = {};
+    for (const c of filteredEggCollections) {
+      const key = c.birdId || 'sem-vinculo';
+      if (!byBird[key]) {
+        byBird[key] = {
+          birdId: c.birdId || null,
+          label: c.birdId ? birdLabel(c.birdId) : 'Lote sem vinculo no Plantel',
+          quantity: 0, cracked: 0, count: 0,
+        };
+      }
+      byBird[key].quantity += parseInt(c.quantity) || 0;
+      byBird[key].cracked += parseInt(c.cracked) || 0;
+      byBird[key].count += 1;
+    }
+    return {
+      totalEggs: filteredEggCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0),
+      totalCracked: filteredEggCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0),
+      aggregated: Object.values(byBird).sort((a, b) => b.quantity - a.quantity),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredEggCollections, birds]);
+
   const incubatorName = (id) => (incubators.find(i => i.id === id) || {}).name || '-';
   const nurseryRoomName = (id) => (nurseryRooms.find(r => r.id === id) || {}).name || '-';
   const bayName = (id) => (infirmaryBays.find(b => b.id === id) || {}).name || '-';
@@ -594,17 +631,7 @@ export default function Reports() {
           }],
         });
       } else if (viewMode === 'ovos') {
-        const totalEggs = filteredEggCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
-        const totalCracked = filteredEggCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
-        const byBird = {};
-        filteredEggCollections.forEach(c => {
-          const key = c.birdId || 'unknown';
-          if (!byBird[key]) byBird[key] = { birdId: c.birdId, quantity: 0, cracked: 0, count: 0 };
-          byBird[key].quantity += parseInt(c.quantity) || 0;
-          byBird[key].cracked += parseInt(c.cracked) || 0;
-          byBird[key].count += 1;
-        });
-        const aggregated = Object.values(byBird).sort((a, b) => b.quantity - a.quantity);
+        const { totalEggs, totalCracked, aggregated } = ovosAggregate;
         exportGeneralReport({
           title: 'Relatorio Geral - Coleta de Ovos',
           subtitle,
@@ -617,9 +644,7 @@ export default function Reports() {
           sections: [{
             heading: 'Coletas por Raca',
             head: ['Raca', 'Total Coletado', 'Total Trincados', 'Coletas'],
-            rows: aggregated.map(r => [
-              birdLabel(r.birdId), r.quantity, r.cracked, r.count,
-            ]),
+            rows: aggregated.map(r => [r.label, r.quantity, r.cracked, r.count]),
             color: [245, 158, 11],
           }],
         });
@@ -892,18 +917,7 @@ export default function Reports() {
   };
 
   const renderOvosReport = () => {
-    const totalEggs = filteredEggCollections.reduce((s, c) => s + (parseInt(c.quantity) || 0), 0);
-    const totalCracked = filteredEggCollections.reduce((s, c) => s + (parseInt(c.cracked) || 0), 0);
-    // Aggregate by bird: one row per bird (species+breed) with totals for the period
-    const byBird = {};
-    filteredEggCollections.forEach(c => {
-      const key = c.birdId || 'unknown';
-      if (!byBird[key]) byBird[key] = { birdId: c.birdId, quantity: 0, cracked: 0, count: 0 };
-      byBird[key].quantity += parseInt(c.quantity) || 0;
-      byBird[key].cracked += parseInt(c.cracked) || 0;
-      byBird[key].count += 1;
-    });
-    const aggregated = Object.values(byBird).sort((a, b) => b.quantity - a.quantity);
+    const { totalEggs, totalCracked, aggregated } = ovosAggregate;
     const pageItems = paginate(aggregated);
     return (
       <>
@@ -933,8 +947,8 @@ export default function Reports() {
                   </thead>
                   <tbody>
                     {pageItems.map(r => (
-                      <tr key={r.birdId || 'unknown'}>
-                        <td><strong>{birdLabel(r.birdId)}</strong></td>
+                      <tr key={r.birdId || 'sem-vinculo'}>
+                        <td><strong>{r.label}</strong></td>
                         <td style={{ color: 'var(--success)', fontWeight: 600 }}>{r.quantity}</td>
                         <td style={{ color: 'var(--danger)' }}>{r.cracked}</td>
                         <td style={{ color: 'var(--text-secondary)' }}>{r.count}</td>
