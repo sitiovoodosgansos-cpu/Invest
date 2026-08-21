@@ -213,7 +213,11 @@ async function resolveToken(db, token, app) {
   const snap = await db.doc(`shareTokens/${token}`).get();
   if (snap.exists) {
     const data = snap.data() || {};
-    if (data.type === 'investor' && data.investorId) {
+    // 'investor' = link antigo do relatorio. 'investor_pages' = link novo das
+    // telas operacionais. Os dois resolvem para a MESMA fatia de dados; o que
+    // muda e a tela que o portal renderiza. Sao tipos separados para revogar
+    // um sem derrubar o outro.
+    if ((data.type === 'investor' || data.type === 'investor_pages') && data.investorId) {
       return { type: 'investor', investorId: data.investorId };
     }
     if (data.type === 'employee') {
@@ -327,13 +331,35 @@ export async function buildPortalPayload(db, token) {
   let myVitrine = [];
   let myEggCollections = [];
   let myBatches = [];
+  // Linhas do espelho como estao guardadas, ja filtradas pelos lotes deste
+  // investidor. Alimentam as telas operacionais do portal, que esperam esta
+  // forma; os campos "public*" acima continuam servindo o portal de relatorio
+  // antigo, que nao muda.
+  const paginas = {
+    ornabirdTrays: [],
+    ornabirdEggCollections: [],
+    ornabirdIncubatorBatches: [],
+    ornabirdVitrineListings: [],
+    ornabirdVitrine: [],
+  };
   if (myGroupIds.size > 0) {
-    const [traySnap, vitrineSnap, eggSnap, batchSnap] = await Promise.all([
+    const [traySnap, vitrineSnap, eggSnap, batchSnap, listingSnap] = await Promise.all([
       db.collection('ornabirdTrays').get(),
       db.collection('ornabirdVitrine').get(),
       db.collection('ornabirdEggCollections').get(),
       db.collection('ornabirdIncubatorBatches').get(),
+      db.collection('ornabirdVitrineListings').get(),
     ]);
+    const meu = (snap) => snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .filter(r => mirrorBelongsTo(r, myGroupIds));
+    paginas.ornabirdTrays = meu(traySnap);
+    paginas.ornabirdEggCollections = meu(eggSnap);
+    paginas.ornabirdIncubatorBatches = meu(batchSnap);
+    paginas.ornabirdVitrineListings = meu(listingSnap);
+    // Nome do cliente sai: e cliente do criatorio, nao do investidor. Mesma
+    // decisao ja tomada em publicVitrineSale.
+    paginas.ornabirdVitrine = meu(vitrineSnap).map(({ customer, ...resto }) => resto);
     myTrays = traySnap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(t => mirrorBelongsTo(t, myGroupIds))
@@ -379,6 +405,8 @@ export async function buildPortalPayload(db, token) {
       vitrineSales: myVitrine,
       incubatorBatches: myBatches,
       incubators: myIncubators,
+      // Fatia crua para as telas operacionais do portal do investidor.
+      paginas,
       sales: (mine.items || []).map(sale => publicSale(sale, investor.id)),
       summary: {
         eggProfit: mine.eggProfit || 0,

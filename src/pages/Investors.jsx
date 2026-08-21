@@ -10,6 +10,7 @@ export default function Investors() {
     investors, birds, sales,
     addInvestor, updateInvestor, deleteInvestor,
     generateInvestorPortalToken, revokeInvestorPortalToken,
+    generateInvestorPagesToken, revokeInvestorPagesToken,
     eggProfitRate, birdProfitRate,
   } = useApp();
   const [showModal, setShowModal] = useState(false);
@@ -37,6 +38,52 @@ export default function Investors() {
       setCopiedId(investorId);
       setTimeout(() => setCopiedId(null), 2000);
     });
+  };
+
+  // Link das TELAS (Plantel, Coleta, Prateleira, Chocadeiras, Vitrine).
+  // Vive ao lado do link do relatorio, com token proprio: revogar um nao
+  // derruba o outro.
+  const [copiedPagesId, setCopiedPagesId] = useState(null);
+  const [pendingPagesId, setPendingPagesId] = useState(null);
+
+  const buildPagesLink = (token) => {
+    const baseUrl = window.location.origin + window.location.pathname;
+    return `${baseUrl}#/investidor/${token}`;
+  };
+
+  const copyPagesLink = (token, investorId) => {
+    if (!token) return;
+    navigator.clipboard.writeText(buildPagesLink(token)).then(() => {
+      setCopiedPagesId(investorId);
+      setTimeout(() => setCopiedPagesId(null), 2000);
+    });
+  };
+
+  const handleGeneratePagesToken = async (investorId) => {
+    if (pendingPagesId) return;
+    setPendingPagesId(investorId);
+    try {
+      await generateInvestorPagesToken(investorId);
+    } catch {
+      window.alert('Nao foi possivel gerar o link. Verifique sua conexao e tente novamente.');
+    } finally {
+      setPendingPagesId(null);
+    }
+  };
+
+  const handleRevokePagesToken = async (investorId) => {
+    if (pendingPagesId) return;
+    if (!window.confirm('Revogar o link das telas deste investidor? Ele deixara de abrir imediatamente.')) {
+      return;
+    }
+    setPendingPagesId(investorId);
+    try {
+      await revokeInvestorPagesToken(investorId);
+    } catch {
+      window.alert('Nao foi possivel revogar o link. Tente novamente.');
+    } finally {
+      setPendingPagesId(null);
+    }
   };
 
   const handleGeneratePortalToken = async (investorId) => {
@@ -295,6 +342,73 @@ export default function Investors() {
                 >
                   <Link size={16} />
                   {pendingTokenId === investor.id ? 'Gerando...' : 'Gerar link do relatorio'}
+                </button>
+              )}
+
+              {/* Link das TELAS: Plantel, Coleta de Ovos, Prateleira,
+                  Chocadeiras e Vitrine, so com as aves deste investidor e
+                  somente para consulta. */}
+              {investor.pagesTokenId ? (
+                <div style={{ marginTop: 8 }}>
+                  <button
+                    onClick={() => copyPagesLink(investor.pagesTokenId, investor.id)}
+                    disabled={pendingPagesId === investor.id}
+                    style={{
+                      width: '100%', padding: '10px 16px', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', gap: 8,
+                      border: copiedPagesId === investor.id ? '2px solid var(--success)' : '2px solid var(--info, #3B82F6)',
+                      borderRadius: 'var(--radius-sm)',
+                      background: copiedPagesId === investor.id ? 'var(--success-bg)' : '#eff6ff',
+                      color: copiedPagesId === investor.id ? 'var(--success)' : 'var(--info, #3B82F6)',
+                      fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all 0.2s',
+                    }}
+                  >
+                    {copiedPagesId === investor.id ? <Check size={16} /> : <Link size={16} />}
+                    {copiedPagesId === investor.id ? 'Link copiado!' : 'Copiar link das telas'}
+                  </button>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 6 }}>
+                    <button
+                      onClick={() => handleGeneratePagesToken(investor.id)}
+                      disabled={pendingPagesId === investor.id}
+                      style={{
+                        background: 'none', border: 'none', color: 'var(--text-secondary)',
+                        fontSize: 11, cursor: pendingPagesId === investor.id ? 'wait' : 'pointer',
+                        textDecoration: 'underline',
+                      }}
+                    >
+                      Renovar link
+                    </button>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>|</span>
+                    <button
+                      onClick={() => handleRevokePagesToken(investor.id)}
+                      disabled={pendingPagesId === investor.id}
+                      style={{
+                        background: 'none', border: 'none', color: 'var(--danger)',
+                        fontSize: 11, cursor: pendingPagesId === investor.id ? 'wait' : 'pointer',
+                        textDecoration: 'underline', display: 'inline-flex',
+                        alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      <XCircle size={11} /> Revogar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => handleGeneratePagesToken(investor.id)}
+                  disabled={pendingPagesId === investor.id}
+                  style={{
+                    width: '100%', marginTop: 8, padding: '10px 16px', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', gap: 8,
+                    border: '2px dashed var(--info, #3B82F6)',
+                    borderRadius: 'var(--radius-sm)', background: '#eff6ff',
+                    color: 'var(--info, #3B82F6)', fontWeight: 600, fontSize: 13,
+                    cursor: pendingPagesId === investor.id ? 'wait' : 'pointer',
+                    opacity: pendingPagesId === investor.id ? 0.6 : 1, transition: 'all 0.2s',
+                  }}
+                >
+                  <Link size={16} />
+                  {pendingPagesId === investor.id ? 'Gerando...' : 'Gerar link das telas'}
                 </button>
               )}
             </div>

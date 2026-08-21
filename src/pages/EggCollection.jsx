@@ -61,7 +61,7 @@ export default function EggCollection() {
     birds, ornabirdEggCollections, customSpecies,
     updateBird,
     employeeToken, generateEmployeeToken, revokeEmployeeToken,
-    saveError,
+    saveError, somenteLeitura,
   } = useApp();
 
   const [chartPeriod, setChartPeriod] = useState('weekly');
@@ -420,9 +420,11 @@ export default function EggCollection() {
           <p>Coletas espelhadas do Ornabird — somente leitura</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button className="btn btn-secondary" onClick={() => setShowEmployeeLink(!showEmployeeLink)} style={{ whiteSpace: 'nowrap' }}>
-            <Link size={14} /> Acesso Funcionário
-          </button>
+          {!somenteLeitura && (
+            <button className="btn btn-secondary" onClick={() => setShowEmployeeLink(!showEmployeeLink)} style={{ whiteSpace: 'nowrap' }}>
+              <Link size={14} /> Acesso Funcionário
+            </button>
+          )}
           <OrnabirdSync />
         </div>
       </div>
@@ -798,9 +800,11 @@ export default function EggCollection() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn-icon" title="Gerenciar aves" onClick={() => handleBirdConfig(bird)} style={{ color: 'var(--primary)' }}>
-                        <Edit2 size={14} />
-                      </button>
+                      {!somenteLeitura && (
+                        <button className="btn-icon" title="Gerenciar aves" onClick={() => handleBirdConfig(bird)} style={{ color: 'var(--primary)' }}>
+                          <Edit2 size={14} />
+                        </button>
+                      )}
                       <button className="btn-icon" onClick={() => setExpandedBird(isExpanded ? null : bird.id)}>
                         {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                       </button>

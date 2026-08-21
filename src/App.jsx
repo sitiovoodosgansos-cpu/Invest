@@ -59,6 +59,7 @@ import Login from './pages/Login';
 import InvestorPortal from './pages/InvestorPortal';
 import DirectPortal from './pages/DirectPortal';
 import EmployeePortal from './pages/EmployeePortal';
+import InvestorPagesPortal from './pages/InvestorPagesPortal';
 import {
   LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut, Receipt, Egg, Thermometer, Heart, Baby, AlertTriangle
 , Layers , Store } from 'lucide-react';
@@ -217,6 +218,9 @@ export default function App() {
             <Routes>
               <Route path="/portal/:token" element={<DirectPortal />} />
               <Route path="/funcionario/:token/*" element={<EmployeePortal />} />
+              {/* Portal do investidor: telas operacionais com as aves dele.
+                  Separado de /portal/:token, que segue sendo o relatorio. */}
+              <Route path="/investidor/:token/*" element={<InvestorPagesPortal />} />
               <Route path="*" element={<AppRouter />} />
             </Routes>
           </HashRouter>

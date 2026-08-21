@@ -71,5 +71,7 @@ export function usePortalData(token) {
 export function isPortalRoute() {
   if (typeof window === 'undefined') return false;
   const hash = window.location.hash || '';
-  return hash.startsWith('#/portal/') || hash.startsWith('#/funcionario/');
+  return hash.startsWith('#/portal/')
+    || hash.startsWith('#/funcionario/')
+    || hash.startsWith('#/investidor/');
 }
