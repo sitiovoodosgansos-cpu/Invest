@@ -124,6 +124,16 @@ function semCamposLegados(obj) {
 // Count total items across all arrays in data. Sales are tracked separately
 // now and deliberately NOT counted here — this function is only used to
 // guard /config/appData writes.
+// JSON com as chaves em ordem, para comparar dois objetos sem depender da
+// ordem em que cada um foi montado. Sem isso, o mesmo conteudo vindo do
+// Firestore e da API compararia como diferente e gravaria a toa.
+function jsonEstavel(valor) {
+  if (valor === null || typeof valor !== 'object') return JSON.stringify(valor) ?? 'null';
+  if (Array.isArray(valor)) return `[${valor.map(jsonEstavel).join(',')}]`;
+  const chaves = Object.keys(valor).sort();
+  return `{${chaves.map(k => `${JSON.stringify(k)}:${jsonEstavel(valor[k])}`).join(',')}}`;
+}
+
 const countItems = (d) =>
   (d.investors?.length || 0) +
   (d.birds?.length || 0) +
@@ -995,26 +1005,47 @@ export function AppProvider({ children }) {
     const collectionName = alvo.collection;
     const existing = alvo.ref.current;
     try {
-      // Drop what is no longer present upstream, then write the new rows.
+      // Apaga o que sumiu la em cima e grava SO o que mudou.
+      //
+      // Antes esta funcao regravava todas as linhas a cada sincronizacao. Com
+      // ~1.600 vendas espelhadas isso custava ~1.600 gravacoes por clique, e
+      // poucas sincronizacoes estouravam a cota diaria do Firestore — foi
+      // exatamente o que aconteceu ("RESOURCE_EXHAUSTED: Quota exceeded").
+      // O espelho quase nunca muda por inteiro: o normal e uma venda nova e o
+      // resto identico. Comparando antes de gravar, uma sincronizacao sem
+      // novidade custa zero gravacoes.
       const incomingIds = new Set(rows.map(r => r.id).filter(Boolean));
       const stale = existing.filter(r => !incomingIds.has(r.id));
+      const anteriorPorId = new Map(existing.map(r => [r.id, r]));
       const CHUNK = 400;
       for (let i = 0; i < stale.length; i += CHUNK) {
         const b = writeBatch(db);
         stale.slice(i, i + CHUNK).forEach(r => b.delete(doc(db, collectionName, r.id)));
         await b.commit();
       }
-      for (let i = 0; i < rows.length; i += CHUNK) {
+
+      const mudadas = [];
+      for (const row of rows) {
+        const { id, ...rest } = row;
+        if (!id) continue;
+        const payload = JSON.parse(JSON.stringify(rest));
+        const anterior = anteriorPorId.get(id);
+        if (anterior) {
+          const { id: _ignorado, ...anteriorSemId } = anterior;
+          if (jsonEstavel(anteriorSemId) === jsonEstavel(payload)) continue;
+        }
+        mudadas.push({ id, payload });
+      }
+
+      for (let i = 0; i < mudadas.length; i += CHUNK) {
         const b = writeBatch(db);
-        for (const row of rows.slice(i, i + CHUNK)) {
-          const { id, ...rest } = row;
-          if (!id) continue;
-          b.set(doc(db, collectionName, id), JSON.parse(JSON.stringify(rest)));
+        for (const { id, payload } of mudadas.slice(i, i + CHUNK)) {
+          b.set(doc(db, collectionName, id), payload);
         }
         await b.commit();
       }
       setSaveError(null);
-      return { written: rows.length, removed: stale.length };
+      return { written: mudadas.length, removed: stale.length, unchanged: rows.length - mudadas.length };
     } catch (err) {
       devError('replaceOrnabirdMirror error:', err);
       setSaveError(`Erro ao sincronizar com o Ornabird: ${err?.code || err?.message || 'erro desconhecido'}`);
@@ -1108,11 +1139,17 @@ export function AppProvider({ children }) {
     ];
     try {
       const payload = await ornabirdRequest({ action: 'sync', groupIds, from, to });
-      await replaceOrnabirdMirror('trays', payload.trays || []);
-      await replaceOrnabirdMirror('eggCollections', payload.eggCollections || []);
-      await replaceOrnabirdMirror('incubatorBatches', payload.incubatorBatches || []);
-      await replaceOrnabirdMirror('vitrineListings', payload.vitrineListings || []);
-      await replaceOrnabirdMirror('vitrine', payload.vitrine || []);
+      const escritas = { gravadas: 0, apagadas: 0 };
+      const espelhar = async (kind, linhas) => {
+        const r = await replaceOrnabirdMirror(kind, linhas || []);
+        escritas.gravadas += r.written;
+        escritas.apagadas += r.removed;
+      };
+      await espelhar('trays', payload.trays);
+      await espelhar('eggCollections', payload.eggCollections);
+      await espelhar('incubatorBatches', payload.incubatorBatches);
+      await espelhar('vitrineListings', payload.vitrineListings);
+      await espelhar('vitrine', payload.vitrine);
       setSaveError(null);
       return {
         groupIds,
@@ -1121,6 +1158,11 @@ export function AppProvider({ children }) {
         incubatorBatches: (payload.incubatorBatches || []).length,
         vitrineListings: (payload.vitrineListings || []).length,
         vitrine: (payload.vitrine || []).length,
+        // Quantas linhas realmente mudaram. Fica visivel porque e o que
+        // consome cota do Firestore — um numero alto toda vez seria sinal de
+        // que a comparacao parou de funcionar.
+        gravadas: escritas.gravadas,
+        apagadas: escritas.apagadas,
         // Lote vinculado que o Ornabird não conhece — vínculo digitado errado
         // ou lote apagado lá. Silenciar isso faria o investidor sumir do rateio.
         unknownGroupIds: payload.unknownGroupIds || [],
