@@ -55,7 +55,16 @@ export default function OrnabirdSync({ label = 'Sincronizar com o Ornabird' }) {
           <div className="badge badge-green" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <CheckCircle2 size={14} />
             {result.groupIds.length} lote(s) · {result.trays} bandeja(s) ·{' '}
-            {result.eggCollections} coleta(s) · {result.vitrine} venda(s)
+            {result.eggCollections} coleta(s) · {result.incubatorBatches} chocagem(ns) ·{' '}
+            {result.vitrineListings} anuncio(s) · {result.vitrine} venda(s)
+          </div>
+
+          {/* O que de fato foi gravado. A sincronizacao so escreve o que
+              mudou, entao repetir o clique sem novidade custa zero. */}
+          <div className="badge" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {result.gravadas === 0 && result.apagadas === 0
+              ? 'Nada mudou — nenhuma gravacao'
+              : `${result.gravadas} linha(s) gravada(s)${result.apagadas ? ` · ${result.apagadas} apagada(s)` : ''}`}
           </div>
 
           {result.groupIds.length === 0 && (
