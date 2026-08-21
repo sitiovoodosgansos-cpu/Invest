@@ -5,7 +5,7 @@ import {
 } from 'firebase/firestore';
 import {
   partitionSaleDuplicates, isEggProduct, normalizeDay, previousDay, resolveRateFor,
-  DEFAULT_EGG_PROFIT_RATE, DEFAULT_BIRD_PROFIT_RATE,
+  DEFAULT_EGG_PROFIT_RATE, DEFAULT_BIRD_PROFIT_RATE, jsonEstavel,
 } from '../utils/helpers';
 import { PORTAL_API_ENABLED, isPortalRoute } from '../hooks/usePortalData';
 
@@ -54,6 +54,13 @@ const ORNABIRD_VITRINE_COLLECTION = collection(db, 'ornabirdVitrine');
 const ORNABIRD_EGGS_COLLECTION = collection(db, 'ornabirdEggCollections');
 const ORNABIRD_BATCHES_COLLECTION = collection(db, 'ornabirdIncubatorBatches');
 const ORNABIRD_LISTINGS_COLLECTION = collection(db, 'ornabirdVitrineListings');
+// Ordens de pagamento diarias. Colecao propria, e nao um campo do appData,
+// pela mesma razao das vendas: a lista so cresce, e um array crescendo dentro
+// do documento unico ja bateu no teto de 1 MiB duas vezes nesta base.
+const PAYMENT_ORDERS_COLLECTION = collection(db, 'paymentOrders');
+// Como foi a ultima rodada da rotina das 6h. Sem isto, "hoje ninguem vendeu" e
+// "a rotina nem rodou" ficam com a mesma cara na tela.
+const ROTINA_DOC = doc(db, 'config', 'rotinaDiaria');
 // LocalStorage flag: once set, we know the /sales collection has been
 // hydrated from the legacy appData.sales array and the array has been
 // cleared. Prevents us from re-migrating on every session.
@@ -127,16 +134,6 @@ function semCamposLegados(obj) {
 // Count total items across all arrays in data. Sales are tracked separately
 // now and deliberately NOT counted here — this function is only used to
 // guard /config/appData writes.
-// JSON com as chaves em ordem, para comparar dois objetos sem depender da
-// ordem em que cada um foi montado. Sem isso, o mesmo conteudo vindo do
-// Firestore e da API compararia como diferente e gravaria a toa.
-function jsonEstavel(valor) {
-  if (valor === null || typeof valor !== 'object') return JSON.stringify(valor) ?? 'null';
-  if (Array.isArray(valor)) return `[${valor.map(jsonEstavel).join(',')}]`;
-  const chaves = Object.keys(valor).sort();
-  return `{${chaves.map(k => `${JSON.stringify(k)}:${jsonEstavel(valor[k])}`).join(',')}}`;
-}
-
 const countItems = (d) =>
   (d.investors?.length || 0) +
   (d.birds?.length || 0) +
@@ -168,6 +165,8 @@ export function AppProvider({ children }) {
   const [ornabirdEggCollections, setOrnabirdEggCollections] = useState([]);
   const [ornabirdIncubatorBatches, setOrnabirdIncubatorBatches] = useState([]);
   const [ornabirdVitrineListings, setOrnabirdVitrineListings] = useState([]);
+  const [paymentOrders, setPaymentOrders] = useState([]);
+  const [rotinaDiaria, setRotinaDiaria] = useState(null);
   const [loading, setLoading] = useState(true);
   const [salesLoading, setSalesLoading] = useState(true);
   const [firestoreError, setFirestoreError] = useState(null);
@@ -390,6 +389,18 @@ export function AppProvider({ children }) {
       setOrnabirdVitrineListings(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (error) => devError('Ornabird vitrine listings listen error:', error));
     return () => unsub();
+  }, []);
+
+  // Ordens de pagamento e o registro da ultima rodada da rotina.
+  useEffect(() => {
+    if (PORTAL_MODE) return;
+    const unsubOrdens = onSnapshot(PAYMENT_ORDERS_COLLECTION, (snap) => {
+      setPaymentOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => devError('Payment orders listen error:', error));
+    const unsubRotina = onSnapshot(ROTINA_DOC, (snap) => {
+      setRotinaDiaria(snap.exists() ? snap.data() : null);
+    }, (error) => devError('Rotina diaria listen error:', error));
+    return () => { unsubOrdens(); unsubRotina(); };
   }, []);
 
   // One-shot migration: promote legacy appData.sales into /sales/{id}.
@@ -1195,6 +1206,84 @@ export function AppProvider({ children }) {
     }
   };
 
+  // -----------------------------------------------------------------
+  // Ordens de pagamento
+  //
+  // Tudo que MEXE em ordem passa pelo servidor (/api/ordens), nunca pelo
+  // navegador direto. Nao e cerimonia: marcar uma ordem como paga aqui e
+  // gravar que um dinheiro saiu, e o envio do comprovante depende de uma
+  // credencial (Resend) que nao pode chegar ao navegador. As regras do
+  // Firestore proibem a escrita em /paymentOrders pelo cliente justamente
+  // para que nao exista um segundo caminho.
+  // -----------------------------------------------------------------
+  const ORDENS_ERRORS = {
+    unauthorized: 'Sessao expirada. Entre novamente.',
+    forbidden: 'So o administrador mexe nas ordens de pagamento.',
+    sem_ordens: 'Nenhuma ordem selecionada.',
+    missing_firebase: 'Falta a variavel FIREBASE_SERVICE_ACCOUNT no projeto "invest" da Vercel.',
+    missing_cron_secret: 'Falta a variavel CRON_SECRET no projeto "invest" da Vercel.',
+    proxy_error: 'A funcao /api/ordens do Invest nao respondeu. Veja os logs do projeto invest na Vercel.',
+  };
+
+  const ordensRequest = async (body) => {
+    const user = auth.currentUser;
+    if (!user) {
+      const err = new Error('not signed in');
+      err.code = 'unauthorized';
+      throw err;
+    }
+    const idToken = await user.getIdToken();
+    const res = await fetch('/api/ordens', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+      body: JSON.stringify(body),
+    });
+    const payload = await res.json().catch(() => null);
+    if (!res.ok) {
+      const code = payload?.error || (payload === null ? 'proxy_error' : 'server_error');
+      const err = new Error(code);
+      err.code = code;
+      throw err;
+    }
+    return payload ?? {};
+  };
+
+  const explicarErroOrdens = (err) => {
+    const code = err?.code || err?.message;
+    return (
+      ORDENS_ERRORS[code] ||
+      // Erros do Ornabird ja tem texto proprio, montado para a sincronizacao.
+      ORNABIRD_ERRORS[code] ||
+      `Nao foi possivel concluir: ${code || 'erro desconhecido'}`
+    );
+  };
+
+  // Roda a rotina do dia agora, sem esperar as 6h.
+  const rodarRotinaAgora = async () => {
+    try {
+      const r = await ordensRequest({ action: 'rodar' });
+      setSaveError(null);
+      return r;
+    } catch (err) {
+      devError('rodarRotinaAgora error:', err);
+      setSaveError(explicarErroOrdens(err));
+      throw err;
+    }
+  };
+
+  // Marca as ordens como pagas e manda o comprovante — nesta ordem, sempre.
+  const pagarEEnviarOrdens = async (ids) => {
+    try {
+      const r = await ordensRequest({ action: 'enviar', ids });
+      setSaveError(null);
+      return r;
+    } catch (err) {
+      devError('pagarEEnviarOrdens error:', err);
+      setSaveError(explicarErroOrdens(err));
+      throw err;
+    }
+  };
+
   // Custom Species
   const addCustomSpecies = (speciesData) => {
     setData(prev => {
@@ -1569,9 +1658,13 @@ export function AppProvider({ children }) {
     ornabirdEggCollections,
     ornabirdIncubatorBatches,
     ornabirdVitrineListings,
+    paymentOrders,
+    rotinaDiaria,
     replaceOrnabirdMirror,
     fetchOrnabirdGroups,
     syncFromOrnabird,
+    rodarRotinaAgora,
+    pagarEEnviarOrdens,
     loading: loading || salesLoading,
     firestoreError,
     saveError,

@@ -95,6 +95,21 @@ export function hasRateOverride(bird) {
   return (typeof e === 'number' && isFinite(e)) || (typeof b === 'number' && isFinite(b));
 }
 
+// JSON com as chaves em ordem, para comparar dois objetos sem depender da
+// ordem em que cada um foi montado. Sem isso, o mesmo conteudo vindo do
+// Firestore e da API compararia como diferente e gravaria a toa — foi o que
+// estourou a cota diaria do Firestore duas vezes.
+//
+// Mora aqui porque duas sincronizacoes usam a mesma comparacao: a do navegador
+// (AppContext) e a rotina das 6h (api/_rotina-diaria.js). Duas copias disto
+// divergiriam, e a que divergisse voltaria a gravar tudo de novo em silencio.
+export function jsonEstavel(valor) {
+  if (valor === null || typeof valor !== 'object') return JSON.stringify(valor) ?? 'null';
+  if (Array.isArray(valor)) return `[${valor.map(jsonEstavel).join(',')}]`;
+  const chaves = Object.keys(valor).sort();
+  return `{${chaves.map(k => `${JSON.stringify(k)}:${jsonEstavel(valor[k])}`).join(',')}}`;
+}
+
 export function calculateCompoundInterest(principal, monthlyRate, months) {
   return principal * Math.pow(1 + monthlyRate, months);
 }

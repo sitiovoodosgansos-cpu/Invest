@@ -53,6 +53,7 @@ import Reports from './pages/Reports';
 import Expenses from './pages/Expenses';
 import EggCollection from './pages/EggCollection';
 import Incubators from './pages/Incubators';
+import OrdensPagamento from './pages/OrdensPagamento';
 import Sanidade from './pages/Sanidade';
 import Pintinhos from './pages/Pintinhos';
 import Login from './pages/Login';
@@ -62,7 +63,7 @@ import EmployeePortal from './pages/EmployeePortal';
 import InvestorPagesPortal from './pages/InvestorPagesPortal';
 import {
   LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut, Receipt, Egg, Thermometer, Heart, Baby, AlertTriangle
-, Layers , Store } from 'lucide-react';
+, Layers , Store, Banknote } from 'lucide-react';
 
 function AdminLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -83,6 +84,7 @@ function AdminLayout() {
     { to: '/sanidade', icon: <Heart />, label: 'Sanidade' },
     { to: '/vitrine', icon: <Store />, label: 'Vitrine' },
     { to: '/vendas', icon: <ShoppingCart />, label: 'Vendas' },
+    { to: '/ordens', icon: <Banknote />, label: 'Ordens de Pagamento' },
     { to: '/financeiro', icon: <Wallet />, label: 'Financeiro' },
     { to: '/despesas', icon: <Receipt />, label: 'Despesas' },
     { to: '/relatorios', icon: <FileBarChart />, label: 'Relatórios' },
@@ -170,6 +172,7 @@ function AdminLayout() {
           <Route path="/sanidade" element={<Sanidade />} />
           <Route path="/vitrine" element={<Vitrine />} />
           <Route path="/vendas" element={<Sales />} />
+          <Route path="/ordens" element={<OrdensPagamento />} />
           <Route path="/financeiro" element={<Financial />} />
           <Route path="/despesas" element={<Expenses />} />
           <Route path="/relatorios" element={<Reports />} />

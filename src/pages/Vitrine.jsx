@@ -4,6 +4,7 @@ import {
   formatCurrency, formatDate, formatPercent, getInitials,
   buildOrnabirdGroupIndex, resolveMirrorBird, resolveRateFor,
   mapOrnabirdVitrineListings, formatAgeMonths, buildVitrineRows,
+  resolveBirdInvestorForDate,
 } from '../utils/helpers';
 import {
   Store, Search, Link2, AlertCircle, DollarSign, TrendingUp, User, ImageOff,
@@ -200,7 +201,12 @@ export default function Vitrine() {
 
   const rows = useMemo(() => sales.map(s => {
     const bird = resolveMirrorBird(s, groupIndex);
-    const investor = bird ? investors.find(i => i.id === bird.investorId) : null;
+    // Dono NA DATA DA VENDA, nao o dono de hoje. Esta tela mostrava o dono
+    // atual, e a ordem de pagamento usa a data — depois de uma transferencia
+    // de titularidade as duas apontariam para investidores diferentes na mesma
+    // venda, e a tela e onde a conferencia acontece.
+    const investorId = bird ? resolveBirdInvestorForDate(bird, s.date) : null;
+    const investor = investorId ? investors.find(i => i.id === investorId) : null;
     const amount = Number(s.amount) || 0;
     // The investor's cut uses the same rules as every other sale: the animal's
     // own rate when it has one, otherwise the global rate.
