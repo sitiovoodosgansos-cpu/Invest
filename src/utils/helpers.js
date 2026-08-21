@@ -560,6 +560,59 @@ const MIRROR_BATCH_STATUS = {
   CANCELED: 'canceled',
 };
 
+// Anuncios da Vitrine espelhados do Ornabird, com a linha do Plantel (e por
+// tabela o investidor) resolvida pelo vinculo do lote — mesma regra do resto
+// do espelho.
+export function mapOrnabirdVitrineListings(rows, birds) {
+  const groupIndex = buildOrnabirdGroupIndex(birds);
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
+    ...row,
+    bird: resolveMirrorBird(row, groupIndex),
+  }));
+}
+
+// Idade em texto, igual ao formatAge do Ornabird.
+export function formatAgeMonths(months) {
+  const m = Number(months) || 0;
+  if (m <= 0) return 'Recem-nascido';
+  if (m === 1) return '1 mes';
+  if (m < 12) return `${m} meses`;
+  const years = Math.floor(m / 12);
+  const rest = m % 12;
+  if (rest === 0) return years === 1 ? '1 ano' : `${years} anos`;
+  return `${years}a ${rest}m`;
+}
+
+// Agrupa anuncios em linhas, como o card do Ornabird faz (buildDisplayRows):
+//   - lote avulso (sem ave 1:1 e sem chocada): mescla por idade+preco+status
+//   - chocada: mescla por dia de nascimento + preco + status
+//   - ave 1:1 do plantel: NUNCA mescla, cada ave e uma identidade
+export function buildVitrineRows(listings) {
+  const mescladas = new Map();
+  const ordem = [];
+  const avulsas = [];
+
+  for (const l of listings) {
+    const ehAve = l.sourceBirdId !== null && l.sourceBirdId !== undefined;
+    const ehChocada = l.sourceIncubatorBatchId !== null && l.sourceIncubatorBatchId !== undefined;
+    if (ehAve) { avulsas.push(l); continue; }
+    const chave = ehChocada
+      ? `chocada|${String(l.birthDate).slice(0, 10)}|${l.currentPrice}|${l.status}`
+      : `avulso|${l.ageInMonths}|${l.currentPrice}|${l.status}`;
+    if (!mescladas.has(chave)) { mescladas.set(chave, []); ordem.push(chave); }
+    mescladas.get(chave).push(l);
+  }
+
+  const linhas = [];
+  for (const chave of ordem) {
+    const grupo = mescladas.get(chave);
+    if (grupo.length === 1) linhas.push({ tipo: 'unica', listing: grupo[0] });
+    else linhas.push({ tipo: 'mesclada', chave, listings: grupo });
+  }
+  for (const l of avulsas) linhas.push({ tipo: 'unica', listing: l });
+  return linhas;
+}
+
 export function mapOrnabirdIncubatorBatches(rows, birds) {
   const groupIndex = buildOrnabirdGroupIndex(birds);
   return (Array.isArray(rows) ? rows : []).map((row) => {

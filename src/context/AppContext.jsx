@@ -50,6 +50,7 @@ const ORNABIRD_TRAYS_COLLECTION = collection(db, 'ornabirdTrays');
 const ORNABIRD_VITRINE_COLLECTION = collection(db, 'ornabirdVitrine');
 const ORNABIRD_EGGS_COLLECTION = collection(db, 'ornabirdEggCollections');
 const ORNABIRD_BATCHES_COLLECTION = collection(db, 'ornabirdIncubatorBatches');
+const ORNABIRD_LISTINGS_COLLECTION = collection(db, 'ornabirdVitrineListings');
 // LocalStorage flag: once set, we know the /sales collection has been
 // hydrated from the legacy appData.sales array and the array has been
 // cleared. Prevents us from re-migrating on every session.
@@ -153,6 +154,7 @@ export function AppProvider({ children }) {
   const [ornabirdVitrine, setOrnabirdVitrine] = useState([]);
   const [ornabirdEggCollections, setOrnabirdEggCollections] = useState([]);
   const [ornabirdIncubatorBatches, setOrnabirdIncubatorBatches] = useState([]);
+  const [ornabirdVitrineListings, setOrnabirdVitrineListings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [salesLoading, setSalesLoading] = useState(true);
   const [firestoreError, setFirestoreError] = useState(null);
@@ -181,6 +183,8 @@ export function AppProvider({ children }) {
   ornabirdEggsRef.current = ornabirdEggCollections;
   const ornabirdBatchesRef = useRef(ornabirdIncubatorBatches);
   ornabirdBatchesRef.current = ornabirdIncubatorBatches;
+  const ornabirdListingsRef = useRef(ornabirdVitrineListings);
+  ornabirdListingsRef.current = ornabirdVitrineListings;
   const loadingRef = useRef(loading);
   loadingRef.current = loading;
 
@@ -362,6 +366,16 @@ export function AppProvider({ children }) {
     const unsub = onSnapshot(ORNABIRD_BATCHES_COLLECTION, (snap) => {
       setOrnabirdIncubatorBatches(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (error) => devError('Ornabird incubator batches listen error:', error));
+    return () => unsub();
+  }, []);
+
+  // Catalogo da Vitrine espelhado (os anuncios a venda). Separado de
+  // ornabirdVitrine, que guarda as VENDAS — sao duas coisas diferentes.
+  useEffect(() => {
+    if (PORTAL_MODE) return;
+    const unsub = onSnapshot(ORNABIRD_LISTINGS_COLLECTION, (snap) => {
+      setOrnabirdVitrineListings(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (error) => devError('Ornabird vitrine listings listen error:', error));
     return () => unsub();
   }, []);
 
@@ -970,6 +984,7 @@ export function AppProvider({ children }) {
     vitrine: { collection: 'ornabirdVitrine', ref: ornabirdVitrineRef },
     eggCollections: { collection: 'ornabirdEggCollections', ref: ornabirdEggsRef },
     incubatorBatches: { collection: 'ornabirdIncubatorBatches', ref: ornabirdBatchesRef },
+    vitrineListings: { collection: 'ornabirdVitrineListings', ref: ornabirdListingsRef },
   };
 
   const replaceOrnabirdMirror = async (kind, rows) => {
@@ -1096,6 +1111,7 @@ export function AppProvider({ children }) {
       await replaceOrnabirdMirror('trays', payload.trays || []);
       await replaceOrnabirdMirror('eggCollections', payload.eggCollections || []);
       await replaceOrnabirdMirror('incubatorBatches', payload.incubatorBatches || []);
+      await replaceOrnabirdMirror('vitrineListings', payload.vitrineListings || []);
       await replaceOrnabirdMirror('vitrine', payload.vitrine || []);
       setSaveError(null);
       return {
@@ -1103,6 +1119,7 @@ export function AppProvider({ children }) {
         trays: (payload.trays || []).length,
         eggCollections: (payload.eggCollections || []).length,
         incubatorBatches: (payload.incubatorBatches || []).length,
+        vitrineListings: (payload.vitrineListings || []).length,
         vitrine: (payload.vitrine || []).length,
         // Lote vinculado que o Ornabird não conhece — vínculo digitado errado
         // ou lote apagado lá. Silenciar isso faria o investidor sumir do rateio.
@@ -1123,8 +1140,8 @@ export function AppProvider({ children }) {
         setSaveError(
           `Erro ao gravar os dados sincronizados: ${err.code || err.message}. ` +
             'Se disser "permission-denied", as regras do Firestore precisam liberar ' +
-            'ornabirdTrays, ornabirdVitrine, ornabirdEggCollections e ' +
-            'ornabirdIncubatorBatches.'
+            'ornabirdTrays, ornabirdVitrine, ornabirdEggCollections, ' +
+            'ornabirdIncubatorBatches e ornabirdVitrineListings.'
         );
       } else {
         setSaveError('Erro ao sincronizar com o Ornabird.');
@@ -1479,6 +1496,7 @@ export function AppProvider({ children }) {
     ornabirdVitrine,
     ornabirdEggCollections,
     ornabirdIncubatorBatches,
+    ornabirdVitrineListings,
     replaceOrnabirdMirror,
     fetchOrnabirdGroups,
     syncFromOrnabird,
