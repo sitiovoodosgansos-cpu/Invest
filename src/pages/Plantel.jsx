@@ -42,6 +42,7 @@ export default function Plantel() {
     investors, birds, sales, addBird, updateBird, deleteBird, transferBird,
     customSpecies, addCustomSpecies, deleteCustomSpecies,
     eggProfitRate: globalEggRate, birdProfitRate: globalBirdRate,
+    somenteLeitura,
   } = useApp();
   // Global fallback rates, used as placeholders and to show each animal's
   // effective rate when it has no override of its own.
@@ -209,12 +210,16 @@ export default function Plantel() {
             <option key={i.id} value={i.id}>{i.name}</option>
           ))}
         </select>
-        <button className="btn btn-secondary" onClick={() => setShowNewAnimalModal(true)} title="Cadastrar novo tipo de animal">
-          <PlusCircle size={16} /> Novo Animal
-        </button>
-        <button className="btn btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
-          <Plus size={16} /> Cadastrar no Plantel
-        </button>
+        {!somenteLeitura && (
+          <>
+            <button className="btn btn-secondary" onClick={() => setShowNewAnimalModal(true)} title="Cadastrar novo tipo de animal">
+              <PlusCircle size={16} /> Novo Animal
+            </button>
+            <button className="btn btn-primary" onClick={() => { resetForm(); setShowModal(true); }}>
+              <Plus size={16} /> Cadastrar no Plantel
+            </button>
+          </>
+        )}
       </div>
 
       <div className="grid-3">
@@ -232,22 +237,24 @@ export default function Plantel() {
                     <p>{bird.species}</p>
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <button
-                    className="btn-icon"
-                    onClick={() => openTransfer(bird)}
-                    title="Transferir para outro investidor"
-                    style={{ color: 'var(--info, #3B82F6)' }}
-                  >
-                    <ArrowLeftRight size={14} />
-                  </button>
-                  <button className="btn-icon edit" onClick={() => handleEdit(bird)} title="Editar">
-                    <Edit size={14} />
-                  </button>
-                  <button className="btn-icon" onClick={() => handleDelete(bird.id)} title="Remover">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+                {!somenteLeitura && (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button
+                      className="btn-icon"
+                      onClick={() => openTransfer(bird)}
+                      title="Transferir para outro investidor"
+                      style={{ color: 'var(--info, #3B82F6)' }}
+                    >
+                      <ArrowLeftRight size={14} />
+                    </button>
+                    <button className="btn-icon edit" onClick={() => handleEdit(bird)} title="Editar">
+                      <Edit size={14} />
+                    </button>
+                    <button className="btn-icon" onClick={() => handleDelete(bird.id)} title="Remover">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>

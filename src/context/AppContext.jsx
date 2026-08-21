@@ -33,7 +33,10 @@ const newId = () => {
 // URL — is unaffected. Inert until VITE_PORTAL_API=1.
 const PORTAL_MODE = PORTAL_API_ENABLED && isPortalRoute();
 
-const AppContext = createContext();
+// Exportado para o portal do investidor montar o MESMO contexto com uma fatia
+// ja filtrada no servidor. Assim as telas nao precisam saber se estao no app
+// completo ou no portal — mudam so os dados que chegam.
+export const AppContext = createContext();
 
 const STORAGE_KEY = 'sitio_voo_dos_gansos_data';
 const BACKUP_KEY = 'sitio_voo_dos_gansos_backup';
@@ -1523,6 +1526,33 @@ export function AppProvider({ children }) {
     }
     return token;
   };
+  // Link das TELAS do investidor (Plantel, Coleta, Prateleira, Chocadeiras,
+  // Vitrine). Guardado num campo proprio e com tipo proprio de token, para
+  // conviver com o link de relatorio sem que revogar um derrube o outro.
+  const generateInvestorPagesToken = async (investorId) => {
+    const investor = (dataRef.current.investors || []).find(i => i.id === investorId);
+    if (!investor) return null;
+    const token = newId();
+    const oldToken = investor.pagesTokenId;
+    await writeShareToken(token, {
+      type: 'investor_pages',
+      investorId,
+      createdAt: new Date().toISOString(),
+    });
+    updateInvestor(investorId, { pagesTokenId: token });
+    if (oldToken && oldToken !== token) {
+      await deleteShareToken(oldToken);
+    }
+    return token;
+  };
+  const revokeInvestorPagesToken = async (investorId) => {
+    const investor = (dataRef.current.investors || []).find(i => i.id === investorId);
+    if (!investor || !investor.pagesTokenId) return;
+    const oldToken = investor.pagesTokenId;
+    updateInvestor(investorId, { pagesTokenId: null });
+    await deleteShareToken(oldToken);
+  };
+
   const revokeInvestorPortalToken = async (investorId) => {
     const investor = (dataRef.current.investors || []).find(i => i.id === investorId);
     if (!investor || !investor.portalTokenId) return;
@@ -1562,6 +1592,7 @@ export function AppProvider({ children }) {
     addNurseryEvent, updateNurseryEvent, deleteNurseryEvent,
     generateEmployeeToken, revokeEmployeeToken,
     generateInvestorPortalToken, revokeInvestorPortalToken,
+    generateInvestorPagesToken, revokeInvestorPagesToken,
     addCustomSpecies, deleteCustomSpecies,
     forceSync,
   };

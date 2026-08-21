@@ -119,14 +119,17 @@ service cloud.firestore {
       allow get: if true;
       allow list: if isAdmin();
 
+      // 'investor'       = link do relatorio (o antigo)
+      // 'investor_pages' = link das telas operacionais (Plantel, Coleta,
+      //                    Prateleira, Chocadeiras, Vitrine)
+      // Sao tipos separados de proposito: revogar um nao derruba o outro.
       allow create: if isAdmin()
-        && request.resource.data.type in ['investor', 'employee']
+        && request.resource.data.type in ['investor', 'employee', 'investor_pages']
         && request.resource.data.createdAt is string
         && (
           request.resource.data.type == 'employee'
           || (
-            request.resource.data.type == 'investor'
-            && request.resource.data.investorId is string
+            request.resource.data.investorId is string
             && request.resource.data.investorId.size() > 0
           )
         );

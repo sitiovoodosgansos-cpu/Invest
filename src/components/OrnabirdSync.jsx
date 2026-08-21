@@ -13,13 +13,16 @@ import { useAuth } from '../context/AuthContext';
 // um lote vinculado que o Ornabird não conhece significa que aquele investidor
 // não vai receber nada no rateio, e isso não pode passar despercebido.
 export default function OrnabirdSync({ label = 'Sincronizar com o Ornabird' }) {
-  const { syncFromOrnabird } = useApp();
+  const { syncFromOrnabird, somenteLeitura } = useApp();
   const { isAdmin } = useAuth();
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
-  if (!isAdmin) return null;
+  // Fora para quem nao e administrador — e tambem dentro de um portal
+  // somente-leitura, mesmo que quem esteja olhando seja o administrador. Ali a
+  // sincronizacao e bloqueada pelo contexto, entao o botao so daria erro.
+  if (!isAdmin || somenteLeitura) return null;
 
   const run = async () => {
     setRunning(true);
