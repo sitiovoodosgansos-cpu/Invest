@@ -40,6 +40,29 @@ export default function Investors() {
     });
   };
 
+  // O erro real do Firestore, traduzido. Antes isto era um "verifique sua
+  // conexao" para qualquer falha — e as duas causas provaveis aqui nao tem
+  // nada a ver com conexao: a regra do /shareTokens pode nao aceitar o tipo
+  // novo, ou a cota diaria do Firebase pode ter acabado. Dizer qual e a
+  // diferenca entre consertar em um minuto e ficar adivinhando.
+  const explicarErro = (err) => {
+    const codigo = String(err?.code || err?.message || 'erro desconhecido');
+    if (codigo.includes('permission-denied')) {
+      return 'O Firestore recusou a gravacao (permission-denied). A regra de '
+        + '/shareTokens precisa aceitar o tipo "investor_pages" — publique a '
+        + 'regra atualizada no console do Firebase e tente de novo.';
+    }
+    if (codigo.toLowerCase().includes('resource-exhausted')) {
+      return 'A cota diaria do Firebase acabou (resource-exhausted). Ela zera '
+        + 'a meia-noite no horario do Pacifico, por volta das 4h da manha aqui. '
+        + 'Tente depois disso, ou mude o projeto para o plano Blaze.';
+    }
+    if (codigo.includes('unauthenticated')) {
+      return 'Sua sessao expirou. Saia, entre de novo e tente outra vez.';
+    }
+    return `Nao foi possivel gerar o link: ${codigo}`;
+  };
+
   // Link das TELAS (Plantel, Coleta, Prateleira, Chocadeiras, Vitrine).
   // Vive ao lado do link do relatorio, com token proprio: revogar um nao
   // derruba o outro.
@@ -64,8 +87,8 @@ export default function Investors() {
     setPendingPagesId(investorId);
     try {
       await generateInvestorPagesToken(investorId);
-    } catch {
-      window.alert('Nao foi possivel gerar o link. Verifique sua conexao e tente novamente.');
+    } catch (err) {
+      window.alert(explicarErro(err));
     } finally {
       setPendingPagesId(null);
     }
@@ -79,8 +102,8 @@ export default function Investors() {
     setPendingPagesId(investorId);
     try {
       await revokeInvestorPagesToken(investorId);
-    } catch {
-      window.alert('Nao foi possivel revogar o link. Tente novamente.');
+    } catch (err) {
+      window.alert(explicarErro(err));
     } finally {
       setPendingPagesId(null);
     }
@@ -91,8 +114,8 @@ export default function Investors() {
     setPendingTokenId(investorId);
     try {
       await generateInvestorPortalToken(investorId);
-    } catch {
-      window.alert('Nao foi possivel gerar o link. Verifique sua conexao e tente novamente.');
+    } catch (err) {
+      window.alert(explicarErro(err));
     } finally {
       setPendingTokenId(null);
     }
@@ -106,8 +129,8 @@ export default function Investors() {
     setPendingTokenId(investorId);
     try {
       await revokeInvestorPortalToken(investorId);
-    } catch {
-      window.alert('Nao foi possivel revogar o link. Tente novamente.');
+    } catch (err) {
+      window.alert(explicarErro(err));
     } finally {
       setPendingTokenId(null);
     }
