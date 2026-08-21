@@ -300,10 +300,47 @@ export function normaliseIncubatorBatches(rootId, rows) {
   }));
 }
 
+export function normaliseVitrineListings(rootId, rows) {
+  return (rows || []).map(l => ({
+    id: l.id,
+    flockGroupTitle: l.flockGroupTitle ?? null,
+    speciesName: l.speciesName ?? null,
+    breedName: l.breedName ?? null,
+    varietyName: l.varietyName ?? null,
+    title: l.title ?? null,
+    birthDate: (l.birthDate || '').slice(0, 10),
+    // Idade e preco ja vem resolvidos de la, juntos. Recalcular a idade aqui
+    // arriscaria mostrar uma idade que nao corresponde ao preco exibido.
+    ageInMonths: l.ageInMonths ?? 0,
+    currentPrice: l.currentPrice ?? null,
+    isOverride: !!l.isOverride,
+    missingTier: !!l.missingTier,
+    initialQuantity: l.initialQuantity ?? 0,
+    availableQuantity: l.availableQuantity ?? 0,
+    males: l.males ?? 0,
+    females: l.females ?? 0,
+    unknownSex: l.unknownSex ?? 0,
+    photos: Array.isArray(l.photos) ? l.photos : [],
+    status: l.status ?? null,
+    isResale: !!l.isResale,
+    lastVaccination: l.lastVaccination ?? null,
+    purchaseDate: l.purchaseDate ?? null,
+    vendorName: l.vendorName ?? null,
+    // Discriminadores do agrupamento em card: ave 1:1 nunca mescla, chocada
+    // mescla por dia de nascimento, lote avulso por idade+preco.
+    sourceBirdId: l.sourceBirdId ?? null,
+    sourceIncubatorBatchId: l.sourceIncubatorBatchId ?? null,
+    createdAt: l.createdAt ?? null,
+    ornabirdGroupId: rootId,
+    originGroupId: l.flockGroupId ?? null,
+  }));
+}
+
 export async function syncGroups({ groupIds, from, to }) {
   const trays = [];
   const eggCollections = [];
   const incubatorBatches = [];
+  const vitrineListings = [];
   const vitrine = [];
   const warnings = [];
   let unknownGroupIds = [];
@@ -323,6 +360,7 @@ export async function syncGroups({ groupIds, from, to }) {
         trays.push(...normaliseTrays(rootId, group.trays));
         eggCollections.push(...normaliseEggCollections(rootId, group.eggCollections));
         incubatorBatches.push(...normaliseIncubatorBatches(rootId, group.incubatorBatches));
+        vitrineListings.push(...normaliseVitrineListings(rootId, group.vitrineListings));
       }
       vitrine.push(...normaliseSales(rootId, group.sales));
     }
@@ -336,7 +374,10 @@ export async function syncGroups({ groupIds, from, to }) {
     cursor = payload.nextSalesCursor;
   }
 
-  return { trays, eggCollections, incubatorBatches, vitrine, warnings, unknownGroupIds };
+  return {
+    trays, eggCollections, incubatorBatches, vitrineListings, vitrine,
+    warnings, unknownGroupIds,
+  };
 }
 
 export default async function handler(req, res) {
@@ -365,8 +406,8 @@ export default async function handler(req, res) {
         // Nothing linked yet — an empty mirror is the correct answer, and
         // calling upstream with an empty list would just 400.
         return res.status(200).json({
-          trays: [], eggCollections: [], incubatorBatches: [], vitrine: [],
-          warnings: [], unknownGroupIds: [],
+          trays: [], eggCollections: [], incubatorBatches: [],
+          vitrineListings: [], vitrine: [], warnings: [], unknownGroupIds: [],
         });
       }
       const result = await syncGroups({
