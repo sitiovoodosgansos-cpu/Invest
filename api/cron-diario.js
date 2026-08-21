@@ -4,6 +4,13 @@
 // A Vercel dispara dentro de uma janela, nao no segundo exato — pra esta
 // rotina tanto faz, mas nao vale prometer "6h em ponto" pra ninguem.
 //
+// O mesmo vercel.json da 60 segundos de maxDuration a esta funcao. O padrao e
+// curto demais: aqui dentro cabem a busca no Ornabird (paginada), a leitura
+// das cinco colecoes espelhadas (mais de mil linhas), a comparacao, as
+// gravacoes, a leitura das ordens e o e-mail. O botao de sincronizar do
+// navegador nunca precisou disso porque as gravacoes aconteciam LA, no
+// navegador; aqui tudo acontece dentro da funcao.
+//
 // SEGURANCA
 // ---------
 // A rota e publica na internet: qualquer um pode chamar a URL. A unica coisa

@@ -46,6 +46,13 @@ Consequência prática: **cancelar uma ordem devolve as vendas dela para a fila.
 `vercel.json` dispara `GET /api/cron-diario` às **09:00 UTC = 06:00 de
 Brasília**. A Vercel dispara dentro de uma janela, não no segundo exato.
 
+O mesmo `vercel.json` dá **60 segundos de `maxDuration`** a `/api/cron-diario` e
+`/api/ordens`. O padrão é curto demais: numa chamada só cabem a busca paginada
+no Ornabird, a leitura das cinco coleções espelhadas (mais de mil linhas), a
+comparação, as gravações, a leitura das ordens e o e-mail. O botão de
+sincronizar do navegador nunca precisou disso porque as gravações aconteciam no
+navegador; aqui tudo acontece dentro da função.
+
 1. **Autenticação.** O `CRON_SECRET` no cabeçalho. Sem a variável configurada,
    a rota recusa todo mundo — inclusive a Vercel. Uma configuração esquecida
    não pode virar uma porta aberta na internet.
