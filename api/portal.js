@@ -29,6 +29,39 @@
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { calculateProfitDistribution, resolveRateFor } from '../src/utils/helpers.js';
+import { codigoDoErro } from './_firebase.js';
+
+// Os UNICOS codigos de erro que este endpoint devolve alem de `server_error`.
+//
+// A lista e fechada de proposito. Esta rota e PUBLICA — quem tem o link entra,
+// sem login — entao devolver o erro cru abriria caminho de sonda: mensagem de
+// Firestore carrega caminho de documento, e caminho de documento e mapa do
+// banco. Estes cinco nomes sao categorias, nao conteudo: dizem "o banco
+// recusou" sem dizer o que tem dentro dele.
+//
+// O QUE MOTIVOU: o portal caiu inteiro com "O servidor nao conseguiu montar os
+// dados" quando a cota diaria do Firebase estourou. A causa (code 8) estava
+// dentro do erro, mas o catch engolia tudo em `server_error` — a mesma cegueira
+// que fazia a tela de ordens mostrar "falhou: 8". Um link revogado ja tinha
+// mensagem propria (token_not_found), entao quem via este texto estava sempre
+// diante de uma falha de infraestrutura, sem nenhuma forma de saber disso.
+const CODIGOS_SEGUROS = new Set([
+  'firestore_quota',
+  'firestore_permission',
+  'firestore_indisponivel',
+  'firestore_timeout',
+  'firestore_unauthenticated',
+]);
+
+// Traduz o erro num par (status, codigo) seguro de expor.
+function respostaDeErro(err) {
+  const codigo = codigoDoErro(err);
+  // No log fica so o codigo, nunca a mensagem: da pra diagnosticar sem
+  // carregar caminho de documento nenhum pro registro da Vercel.
+  console.error('[portal]', JSON.stringify({ code: codigo, raw: err?.code ?? null }));
+  if (CODIGOS_SEGUROS.has(codigo)) return { status: 503, error: codigo };
+  return { status: 500, error: 'server_error' };
+}
 
 // Reuse the Admin app across warm invocations; initializing twice throws.
 let cachedDb = null;
@@ -445,15 +478,19 @@ export default async function handler(req, res) {
       // Lets the client fall back to its previous behaviour during rollout.
       return res.status(503).json({ error: 'not_configured' });
     }
-    return res.status(500).json({ error: 'server_error' });
+    const r = respostaDeErro(err);
+    return res.status(r.status).json({ error: r.error });
   }
 
   try {
     const { status, body: payload } = await buildPortalPayload(db, body.token);
     return res.status(status).json(payload);
-  } catch {
-    // Never echo the internal error: it can disclose document paths.
-    return res.status(500).json({ error: 'server_error' });
+  } catch (err) {
+    // Never echo the internal error: it can disclose document paths. O que sai
+    // daqui e so a CATEGORIA da falha (ver CODIGOS_SEGUROS), que e o suficiente
+    // pra tela dizer se vale tentar de novo ou se e problema do administrador.
+    const r = respostaDeErro(err);
+    return res.status(r.status).json({ error: r.error });
   }
 }
 

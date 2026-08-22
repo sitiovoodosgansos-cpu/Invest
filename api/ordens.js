@@ -19,7 +19,9 @@
 // paga e um reenvio; perder o registro do pagamento e um pagamento duplicado.
 
 import { requireAdmin, getFirebase, codigoDoErro } from './_firebase.js';
-import { rodarERegistrar, emitirEscolhidas, acertarEscolhidas, liberarAutomatico } from './_rotina-diaria.js';
+import {
+  rodarERegistrar, emitirEscolhidas, acertarEscolhidas, liberarAutomatico, cancelarOrdens,
+} from './_rotina-diaria.js';
 import { enviarEmail, htmlOrdemInvestidor, emailConfigurado } from './_email.js';
 
 async function marcarEEnviar(db, ids, uid) {
@@ -152,6 +154,16 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         ...(await acertarEscolhidas({ saleIds, uid, motivo: body.motivo })),
+      });
+    }
+
+    // Desfaz ordens emitidas por engano. As vendas delas voltam pra fila.
+    if (body.action === 'cancelar') {
+      const ids = Array.isArray(body.ids) ? body.ids.filter(Boolean).slice(0, 100) : [];
+      if (ids.length === 0) return res.status(400).json({ error: 'sem_ordens' });
+      return res.status(200).json({
+        ok: true,
+        ...(await cancelarOrdens({ ids, uid, motivo: body.motivo })),
       });
     }
 

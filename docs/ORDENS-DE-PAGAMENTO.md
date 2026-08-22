@@ -219,6 +219,36 @@ duas vezes depende justamente do ID repetir, e sairia de cena em silêncio.
 
 ---
 
+## 3e. Desfazer: cancelar, não apagar
+
+Toda ordem tem um botão de cancelar, e todo acerto de histórico tem um
+**Desfazer**. O efeito prático é o que se espera de "deletar": a ordem sai das
+listas e as vendas dela voltam para a fila de pendentes — `vendasJaEmOrdem` e
+`saldoOrnabird` pulam canceladas, então o dinheiro volta a contar como a pagar.
+
+O documento, porém, **não é apagado**. Três razões:
+
+- Se o comprovante já saiu (PDF, WhatsApp, e-mail), o investidor tem em mãos um
+  papel com um número de ordem. Apagar o registro faria esse número não existir
+  em lugar nenhum.
+- O documento cancelado guarda **quem** cancelou, **quando**, e qual era o
+  **status antes** — cancelar uma ordem paga é bem diferente de cancelar uma
+  que nunca saiu. Um sumiço não guarda nada, e "por que essa venda voltou para
+  a fila?" ficaria sem resposta.
+- O id continua ocupado. Como ele deriva de dia + investidor, apagar liberaria
+  o id para ser reusado — dois documentos diferentes com o mesmo número
+  impresso.
+
+As canceladas do dia aparecem numa seção própria, riscadas. Cancelar uma ordem
+**já paga** avisa, na confirmação, que as vendas voltam para a fila e podem
+entrar numa ordem nova: se o dinheiro realmente saiu, isso é pagamento em dobro.
+
+O desfazer do acerto fechou o único caminho sem volta do sistema: "Já acertadas"
+pode tirar mais de mil vendas da fila de uma vez, e até então o documento não
+aparecia em tela nenhuma.
+
+---
+
 ## 4. Paga primeiro, avisa depois
 
 O investidor só recebe o comprovante depois que o dinheiro saiu. Por isso
