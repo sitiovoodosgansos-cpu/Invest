@@ -270,13 +270,18 @@ async function carregarFila(db) {
 }
 
 // Emite ordens SO das vendas escolhidas.
-export async function emitirEscolhidas({ saleIds, uid, agora = new Date() }) {
+//
+// `referenceDate` deixa o dono carimbar a ordem com outro dia. O caso real e
+// simples: ele pagou no sabado e so foi lancar na segunda — a ordem tem que
+// dizer sabado, senao o comprovante do investidor briga com o extrato do banco.
+export async function emitirEscolhidas({ saleIds, uid, referenceDate = null, agora = new Date() }) {
   const { db } = getFirebase();
   const fila = await carregarFila(db);
 
-  const { ordens, semDono, referenceDate } = construirOrdens({
+  const { ordens, semDono, referenceDate: dia } = construirOrdens({
     ...fila,
     saleIds,
+    referenceDate,
     agora,
     // Sem avisos de "nao vendeu nada": quem ficou de fora ficou porque o dono
     // nao escolheu as vendas dele, e nao porque nao vendeu.
@@ -295,7 +300,7 @@ export async function emitirEscolhidas({ saleIds, uid, agora = new Date() }) {
   );
 
   return {
-    referenceDate,
+    referenceDate: dia,
     ordens: ordens.length,
     aPagar: ordens.reduce((s, o) => s + o.totalProfit, 0),
     vendas: ordens.reduce((s, o) => s + o.items.length, 0),

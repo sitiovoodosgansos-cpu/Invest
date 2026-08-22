@@ -3,7 +3,7 @@ import { useApp, BIRD_SPECIES } from '../context/AppContext';
 import {
   formatCurrency, getInitials, formatDate, formatPercent, getOwnershipPeriods,
   getEggProfitRate, getBirdProfitRate, resolveRateFor, hasRateOverride,
-  calculateBirdReturns,
+  calculateBirdReturns, investidorEncerrado,
 } from '../utils/helpers';
 import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X, ArrowLeftRight, History, Link2 } from 'lucide-react';
 import Portal from '../components/Portal';
@@ -406,11 +406,21 @@ export default function Plantel() {
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label className="form-label">Investidor *</label>
+                {/* So os ativos: ave nova nao entra pra quem ja encerrou a
+                    participacao. O filtro la em cima continua mostrando todos,
+                    porque as aves antigas deles seguem no plantel.
+                    O dono ATUAL entra na lista mesmo encerrado — sem isso,
+                    editar a ave de um encerrado apagaria o vinculo dela, porque
+                    o valor selecionado nao existiria entre as opcoes. */}
                 <select className="form-input" required value={form.investorId} onChange={e => setForm({ ...form, investorId: e.target.value })}>
                   <option value="">Selecione o investidor</option>
-                  {investors.map(i => (
-                    <option key={i.id} value={i.id}>{i.name}</option>
-                  ))}
+                  {investors
+                    .filter(i => !investidorEncerrado(i) || i.id === form.investorId)
+                    .map(i => (
+                      <option key={i.id} value={i.id}>
+                        {i.name}{investidorEncerrado(i) ? ' (encerrado)' : ''}
+                      </option>
+                    ))}
                 </select>
               </div>
 

@@ -2,8 +2,10 @@ import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import {
   formatCurrency, formatDate, getInitials,
-  getMonthsDifference, calculateCompoundInterest, calculateProfitDistribution
+  getMonthsDifference, calculateCompoundInterest, calculateProfitDistribution,
+  investidorEncerrado, investidoresAtivos,
 } from '../utils/helpers';
+import { saldoOrnabird } from '../utils/ordens';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
@@ -13,7 +15,12 @@ import Portal from '../components/Portal';
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
 export default function Financial() {
-  const { investors, birds, sales, financialInvestments, payments, addFinancialInvestment, deleteFinancialInvestment, addPayment, deletePayment, eggProfitRate, birdProfitRate } = useApp();
+  const {
+    investors, birds, sales, financialInvestments, payments,
+    addFinancialInvestment, deleteFinancialInvestment, addPayment, deletePayment,
+    eggProfitRate, birdProfitRate,
+    ornabirdVitrine, paymentOrders,
+  } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [form, setForm] = useState({ investorId: '', amount: '', date: new Date().toISOString().slice(0, 10) });
@@ -41,47 +48,91 @@ export default function Financial() {
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [payments, investors]);
 
+  // O LADO ORNABIRD DO SALDO.
+  //
+  // Antes desta linha, uma ordem de pagamento paga nao mexia no saldo de
+  // ninguem: o lucro das vendas do Ornabird nao entrava nesta conta em canto
+  // nenhum, entao pagar o investidor deixava o saldo dele exatamente onde
+  // estava. Entra o credito das vendas dele e sai o que ja virou ordem paga ou
+  // acerto — sobra o que ainda e devido.
+  const ornabird = useMemo(() => {
+    const mapa = new Map();
+    for (const s of saldoOrnabird({
+      vendas: Array.isArray(ornabirdVitrine) ? ornabirdVitrine : [],
+      birds,
+      investors,
+      rates: { eggProfitRate, birdProfitRate },
+      ordens: Array.isArray(paymentOrders) ? paymentOrders : [],
+    })) mapa.set(s.investorId, s);
+    return mapa;
+  }, [ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate, paymentOrders]);
+
   // Calculate balances per investor
   const investorBalances = useMemo(() => {
     const balances = {};
+    const garantir = (investorId) => {
+      if (!balances[investorId]) {
+        const investor = investors.find(i => i.id === investorId);
+        balances[investorId] = {
+          name: investor?.name || 'Desconhecido', invested: 0, currentValue: 0,
+          financialProfit: 0, salesProfit: 0, totalPaid: 0,
+          ornabirdCredito: 0, ornabirdQuitado: 0,
+        };
+      }
+      return balances[investorId];
+    };
     // Sum financial investments (current value with interest)
     investmentDetails.forEach(inv => {
-      if (!balances[inv.investorId]) {
-        balances[inv.investorId] = { name: inv.investorName, invested: 0, currentValue: 0, financialProfit: 0, salesProfit: 0, totalPaid: 0 };
-      }
-      balances[inv.investorId].invested += parseFloat(inv.amount);
-      balances[inv.investorId].currentValue += inv.currentValue;
-      balances[inv.investorId].financialProfit += inv.profit;
+      const b = garantir(inv.investorId);
+      b.name = inv.investorName;
+      b.invested += parseFloat(inv.amount);
+      b.currentValue += inv.currentValue;
+      b.financialProfit += inv.profit;
     });
     // Sum sales profit
     Object.entries(distribution.distribution).forEach(([investorId, dist]) => {
-      if (!balances[investorId]) {
-        const investor = investors.find(i => i.id === investorId);
-        balances[investorId] = { name: investor?.name || 'Desconhecido', invested: 0, currentValue: 0, financialProfit: 0, salesProfit: 0, totalPaid: 0 };
-      }
-      balances[investorId].salesProfit += dist.totalProfit;
+      garantir(investorId).salesProfit += dist.totalProfit;
     });
     // Subtract payments
     (payments || []).forEach(p => {
-      if (!balances[p.investorId]) {
-        const investor = investors.find(i => i.id === p.investorId);
-        balances[p.investorId] = { name: investor?.name || 'Desconhecido', invested: 0, currentValue: 0, financialProfit: 0, salesProfit: 0, totalPaid: 0 };
-      }
-      balances[p.investorId].totalPaid += parseFloat(p.amount);
+      garantir(p.investorId).totalPaid += parseFloat(p.amount);
+    });
+    // Lucro das vendas do Ornabird, e o que ja saiu por ordem ou acerto.
+    ornabird.forEach((s, investorId) => {
+      const b = garantir(investorId);
+      b.ornabirdCredito += s.credito;
+      b.ornabirdQuitado += s.pago + s.acertado;
     });
     // Calculate net balance
     return Object.entries(balances).map(([id, b]) => ({
       investorId: id,
       ...b,
-      totalAccumulated: b.financialProfit + b.salesProfit,
-      netBalance: b.financialProfit + b.salesProfit - b.totalPaid,
+      encerrado: investidorEncerrado(investors.find(i => i.id === id)),
+      totalAccumulated: b.financialProfit + b.salesProfit + b.ornabirdCredito,
+      // O credito do Ornabird entra inteiro e o que ja foi pago/acertado sai —
+      // o resultado e exatamente o que ainda esta em aberto do lado das ordens.
+      netBalance: b.financialProfit + b.salesProfit + b.ornabirdCredito
+        - b.totalPaid - b.ornabirdQuitado,
     }));
-  }, [investmentDetails, distribution, payments, investors]);
+  }, [investmentDetails, distribution, payments, investors, ornabird]);
+
+  // Quem tem lucro nas DUAS fontes de venda ao mesmo tempo. Nao e prova de
+  // erro — pode ser um investidor com vendas importadas antigas e vendas novas
+  // do Ornabird —, mas e o unico sinal visivel de que a mesma venda pode estar
+  // sendo contada duas vezes, e vale mais na tela do que num comentario.
+  const duplicidadeProvavel = useMemo(
+    () => investorBalances.filter(b => b.salesProfit > 0 && b.ornabirdCredito > 0),
+    [investorBalances]
+  );
 
   const totalInvested = investmentDetails.reduce((s, i) => s + parseFloat(i.amount), 0);
   const totalCurrent = investmentDetails.reduce((s, i) => s + i.currentValue, 0);
   const totalProfit = totalCurrent - totalInvested;
-  const totalPaid = (payments || []).reduce((s, p) => s + parseFloat(p.amount), 0);
+  // Tudo que ja saiu: os pagamentos lancados a mao mais o que foi quitado pelas
+  // ordens do Ornabird. Somar so os primeiros faria o cartao do topo discordar
+  // da coluna "Total Pago" da tabela logo abaixo dele.
+  const totalPaid = (payments || []).reduce((s, p) => s + parseFloat(p.amount), 0)
+    + investorBalances.reduce((s, b) => s + b.ornabirdQuitado, 0);
 
   // Chart: by investor
   const chartData = useMemo(() => {
@@ -172,6 +223,25 @@ export default function Financial() {
           <div className="card-header">
             <span className="card-title">Saldo por Investidor</span>
           </div>
+          {/* AS DUAS FONTES DE VENDA.
+              "Lucro Vendas" vem das vendas importadas (a colecao /sales) e
+              "Vendas Ornabird" vem do espelho do Ornabird. Sao duas colecoes
+              independentes que nunca se falaram. Se a MESMA venda existir nas
+              duas, o lucro dela entra duas vezes no acumulado — e o unico jeito
+              de descobrir isso e ver os dois numeros lado a lado, que e por
+              isso que eles nao foram somados numa coluna so. */}
+          {duplicidadeProvavel.length > 0 && (
+            <div style={{
+              margin: '0 0 12px', padding: '10px 12px', borderRadius: 8,
+              background: '#fef3c7', color: '#92400e', fontSize: 12, lineHeight: 1.5,
+            }}>
+              <strong>Confira antes de pagar:</strong>{' '}
+              {duplicidadeProvavel.map(b => b.name).join(', ')}{' '}
+              {duplicidadeProvavel.length === 1 ? 'tem' : 'têm'} lucro nas duas colunas de
+              venda ao mesmo tempo. Se as vendas importadas forem as mesmas do Ornabird,
+              o total acumulado está contando cada uma duas vezes.
+            </div>
+          )}
           <div className="table-container">
             <table>
               <thead>
@@ -179,6 +249,7 @@ export default function Financial() {
                   <th>Investidor</th>
                   <th>Rendimento</th>
                   <th>Lucro Vendas</th>
+                  <th>Vendas Ornabird</th>
                   <th>Total Acumulado</th>
                   <th>Total Pago</th>
                   <th>Saldo Liquido</th>
@@ -187,11 +258,28 @@ export default function Financial() {
               <tbody>
                 {investorBalances.map(b => (
                   <tr key={b.investorId}>
-                    <td><strong>{b.name}</strong></td>
+                    <td>
+                      <strong>{b.name}</strong>
+                      {b.encerrado && (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>
+                          · encerrado
+                        </span>
+                      )}
+                    </td>
                     <td>{formatCurrency(b.financialProfit)}</td>
                     <td>{formatCurrency(b.salesProfit)}</td>
+                    <td title="Lucro das vendas espelhadas do Ornabird">
+                      {formatCurrency(b.ornabirdCredito)}
+                    </td>
                     <td style={{ fontWeight: 600 }}>{formatCurrency(b.totalAccumulated)}</td>
-                    <td style={{ color: 'var(--warning)', fontWeight: 600 }}>{formatCurrency(b.totalPaid)}</td>
+                    <td style={{ color: 'var(--warning)', fontWeight: 600 }}>
+                      {formatCurrency(b.totalPaid + b.ornabirdQuitado)}
+                      {b.ornabirdQuitado > 0 && (
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>
+                          {formatCurrency(b.ornabirdQuitado)} em ordens
+                        </div>
+                      )}
+                    </td>
                     <td style={{ color: b.netBalance >= 0 ? 'var(--success)' : 'var(--danger)', fontWeight: 700 }}>
                       {formatCurrency(b.netBalance)}
                     </td>
@@ -321,9 +409,10 @@ export default function Financial() {
             <form onSubmit={handleSubmit}>
               <div className="form-group">
                 <label className="form-label">Investidor *</label>
+                {/* Aporte novo so pra quem esta ativo. */}
                 <select className="form-input" required value={form.investorId} onChange={e => setForm({ ...form, investorId: e.target.value })}>
                   <option value="">Selecione</option>
-                  {investors.map(i => (
+                  {investidoresAtivos(investors).map(i => (
                     <option key={i.id} value={i.id}>{i.name}</option>
                   ))}
                 </select>
@@ -358,10 +447,14 @@ export default function Financial() {
             <form onSubmit={handlePaymentSubmit}>
               <div className="form-group">
                 <label className="form-label">Investidor *</label>
+                {/* Aqui os encerrados CONTINUAM na lista: o acerto final e
+                    justamente o pagamento que se faz depois da saida. */}
                 <select className="form-input" required value={paymentForm.investorId} onChange={e => setPaymentForm({ ...paymentForm, investorId: e.target.value })}>
                   <option value="">Selecione</option>
                   {investors.map(i => (
-                    <option key={i.id} value={i.id}>{i.name}</option>
+                    <option key={i.id} value={i.id}>
+                      {i.name}{investidorEncerrado(i) ? ' (encerrado)' : ''}
+                    </option>
                   ))}
                 </select>
               </div>
