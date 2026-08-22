@@ -200,6 +200,19 @@ export function normaliseSales(rootId, sales) {
     matchedBy: s.matchedBy ?? null,
     ornabirdGroupId: rootId,
     originGroupId: s.originGroupId ?? null,
+    // Especie, raca e variedade SEPARADAS.
+    //
+    // `description` vem concatenada ("Galinha Sedosa do Japao") e nao da pra
+    // desmontar aqui sem adivinhar qual palavra e a especie — "Gallopavo Peru"
+    // desmontaria errado. Separado na origem, cada tela escolhe o que mostrar.
+    speciesName: s.speciesName ?? null,
+    breedName: s.breedName ?? null,
+    varietyName: s.varietyName ?? null,
+    // A data de ORIGEM do que foi vendido, com o tipo junto porque o rotulo
+    // muda: 'birth' (nasceu aqui), 'purchase' (entrou comprada), 'collected'
+    // (ovo coletado). Nulo no lancamento manual, que nao tem lote nem origem.
+    originDate: s.originDate ?? null,
+    originKind: s.originKind ?? null,
   }));
 }
 

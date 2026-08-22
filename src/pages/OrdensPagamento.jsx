@@ -6,7 +6,10 @@ import {
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency, formatPercent, investidorEncerrado } from '../utils/helpers';
-import { ORDEM_STATUS, ORDEM_TIPO, diaBrasilia, listarPendentes, saldoOrnabird } from '../utils/ordens';
+import {
+  ORDEM_STATUS, ORDEM_TIPO, ROTULO_ORIGEM,
+  diaBrasilia, listarPendentes, saldoOrnabird,
+} from '../utils/ordens';
 import {
   pdfDaOrdem, pdfDoDia, textoDaOrdem, linkWhatsapp, linkEmail,
 } from '../utils/ordemEntrega';
@@ -164,13 +167,49 @@ function AcoesEntrega({ ordem, compacto = false }) {
   );
 }
 
+// Ave ou ovos. A taxa (10% vs 6,4%) ja dava a pista, mas so pra quem sabe de
+// cor qual e qual — e a diferenca muda o que a linha significa.
+function TipoDeVenda({ isEgg }) {
+  return (
+    <span
+      title={isEgg ? 'Venda de ovos' : 'Venda de ave'}
+      style={{
+        display: 'inline-block', whiteSpace: 'nowrap',
+        fontSize: 10, fontWeight: 700, letterSpacing: '.04em',
+        padding: '2px 7px', borderRadius: 999,
+        background: isEgg ? '#fef3c7' : '#e0f2fe',
+        color: isEgg ? '#92400e' : '#075985',
+      }}
+    >
+      {isEgg ? 'OVOS' : 'AVE'}
+    </span>
+  );
+}
+
+// Quando aquilo veio ao mundo — ou entrou no criatorio, ou foi coletado.
+// O verbo vem do originKind: dizer "nasceu" de um ovo seria falso.
+function Origem({ item, separador = ' · ' }) {
+  if (!item?.originDate) return null;
+  return (
+    <span style={{ fontSize: 11, color: '#6b7280' }}>
+      {separador}{ROTULO_ORIGEM[item.originKind] || 'de'} {dataBr(item.originDate)}
+    </span>
+  );
+}
+
 function LinhaItem({ item }) {
   return (
     <tr>
       <td style={{ fontSize: 13, padding: '6px 0' }}>
-        <div>{item.description}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <TipoDeVenda isEgg={item.isEgg} />
+          <span>{item.description}</span>
+        </div>
         <div style={{ fontSize: 11, color: '#6b7280' }}>
+          {/* Aqui a data da venda FICA: o cartao da ordem e o extrato do que
+              foi pago, e cada linha precisa dizer de que dia ela e. */}
           {dataBr(item.date)}
+          {item.originDate ? ` · ${ROTULO_ORIGEM[item.originKind] || 'de'} ${dataBr(item.originDate)}` : ''}
           {item.quantity ? ` · ${item.quantity} un` : ''}
           {item.birdName ? ` · ${item.birdName}` : ''}
           {item.customer ? ` · ${item.customer}` : ''}
@@ -661,10 +700,18 @@ function FilaPendentes({ pendentes, semDono, encerrados, onGerar, onAcertar, ocu
                             style={{ width: 15, height: 15, cursor: 'pointer' }}
                           />
                         </td>
-                        <td style={{ fontSize: 12, padding: '5px 0', whiteSpace: 'nowrap', color: '#6b7280' }}>
-                          {dataBr(linha.date)}
+                        {/* A data da VENDA saiu daqui: numa fila filtrada por
+                            periodo ela se repete linha a linha e nao ajuda a
+                            distinguir uma venda da outra. Continua no PDF, que
+                            e o documento que o investidor confere. O lugar dela
+                            e da data de ORIGEM, que diz a idade do que saiu. */}
+                        <td style={{ padding: '5px 8px 5px 0', width: 1 }}>
+                          <TipoDeVenda isEgg={linha.isEgg} />
                         </td>
-                        <td style={{ fontSize: 13, padding: '5px 8px' }}>{linha.description}</td>
+                        <td style={{ fontSize: 13, padding: '5px 8px' }}>
+                          {linha.description}
+                          <Origem item={linha} />
+                        </td>
                         <td style={{ fontSize: 12, color: '#6b7280', textAlign: 'right', whiteSpace: 'nowrap' }}>
                           {formatPercent(linha.rate)} de {formatCurrency(linha.amount)}
                         </td>
