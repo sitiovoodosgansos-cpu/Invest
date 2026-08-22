@@ -1318,6 +1318,21 @@ export function AppProvider({ children }) {
     }
   };
 
+  // Desfaz ordens emitidas por engano: elas saem das listas e as vendas voltam
+  // pra fila de pendentes. O documento nao e apagado — fica marcado como
+  // cancelado, com quem cancelou e quando (ver cancelarOrdens no servidor).
+  const cancelarOrdensDePagamento = async (ids, motivo) => {
+    try {
+      const r = await ordensRequest({ action: 'cancelar', ids, motivo });
+      setSaveError(null);
+      return r;
+    } catch (err) {
+      devError('cancelarOrdensDePagamento error:', err);
+      setSaveError(explicarErroOrdens(err));
+      throw err;
+    }
+  };
+
   // Libera a emissao automatica das 6h.
   const liberarRotinaAutomatica = async () => {
     try {
@@ -1727,6 +1742,7 @@ export function AppProvider({ children }) {
     pagarEEnviarOrdens,
     gerarOrdensDasVendas,
     acertarVendas,
+    cancelarOrdensDePagamento,
     liberarRotinaAutomatica,
     loading: loading || salesLoading,
     firestoreError,

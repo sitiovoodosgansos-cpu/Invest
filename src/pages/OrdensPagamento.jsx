@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
   Receipt, Play, Send, AlertCircle, CheckCircle2, Clock, MailWarning,
-  BellOff, Copy, Check, FileDown, MessageCircle, Mail,
+  BellOff, Copy, Check, FileDown, MessageCircle, Mail, Trash2, RotateCcw,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -193,7 +193,7 @@ function LinhaItem({ item }) {
   );
 }
 
-function CartaoOrdem({ ordem, selecionada, onToggle, selecionavel }) {
+function CartaoOrdem({ ordem, selecionada, onToggle, selecionavel, onCancelar, ocupado }) {
   const [aberta, setAberta] = useState(false);
   const ehAviso = ordem.kind === ORDEM_TIPO.ZERO;
   const paga = ordem.status === ORDEM_STATUS.PAGA;
@@ -264,6 +264,39 @@ function CartaoOrdem({ ordem, selecionada, onToggle, selecionavel }) {
             style={{ flexShrink: 0 }}
           >
             {aberta ? 'Fechar' : 'Ver itens'}
+          </button>
+        )}
+
+        {/* O desfazer. Fica no cartao, e nao numa acao em lote, porque cancelar
+            e sempre sobre UMA ordem especifica — a que saiu errada. */}
+        {onCancelar && (
+          <button
+            type="button"
+            className="btn-icon"
+            title="Cancelar esta ordem"
+            disabled={ocupado}
+            style={{ flexShrink: 0 }}
+            onClick={() => {
+              // O texto muda com a situacao porque a consequencia muda. Cancelar
+              // uma ordem que nunca saiu e so apagar um rascunho; cancelar uma
+              // PAGA devolve as vendas pra fila, e elas podem ser pagas de novo
+              // — se o dinheiro ja saiu de verdade, isso e pagamento em dobro.
+              const aviso = paga
+                ? `\n\nATENÇÃO: esta ordem está marcada como PAGA. Cancelar devolve as `
+                  + `${ordem.items.length} venda(s) dela para a fila, e elas poderão entrar `
+                  + `numa ordem nova. Se o dinheiro já saiu de verdade, você vai acabar `
+                  + `pagando duas vezes.`
+                : ehAviso
+                  ? '\n\nÉ só um aviso de "nenhuma venda hoje" — não há dinheiro envolvido.'
+                  : `\n\nAs ${ordem.items.length} venda(s) dela voltam para a fila de pendentes.`;
+              if (!window.confirm(
+                `Cancelar a ordem ${ordem.numero} de ${ordem.investorName}?${aviso}\n\n`
+                + 'O documento não é apagado: fica registrado como cancelado, com a data.'
+              )) return;
+              onCancelar(ordem);
+            }}
+          >
+            <Trash2 size={16} />
           </button>
         )}
       </div>
@@ -725,6 +758,67 @@ function FilaPendentes({ pendentes, semDono, encerrados, onGerar, onAcertar, ocu
 //
 // As quatro colunas somam o credito inteiro, e a soma e a prova de que nao ha
 // dinheiro escondido: tudo que foi vendido esta em exatamente uma delas.
+// OS ACERTOS DE HISTORICO, E O DESFAZER DELES.
+//
+// "Ja acertadas" pode tirar mil e poucas vendas da fila de uma vez — foi feito
+// exatamente pra isso. Ate aqui a acao nao tinha volta e o documento nao
+// aparecia em tela nenhuma: um clique errado sumia com o backlog inteiro sem
+// deixar nada visivel, e a unica saida seria mexer no banco a mao.
+function AcertosRegistrados({ acertos, onCancelar, ocupado }) {
+  const vivos = acertos.filter(a => a.status !== ORDEM_STATUS.CANCELADA);
+  if (vivos.length === 0) return null;
+
+  const vendas = vivos.reduce((s, a) => s + (a.items || []).length, 0);
+  const total = vivos.reduce((s, a) => s + (a.totalProfit || 0), 0);
+
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <h3 className="card-title">Acertos registrados</h3>
+        <span style={{ fontSize: 13, color: '#6b7280' }}>
+          {vendas} venda(s) · {formatCurrency(total)}
+        </span>
+      </div>
+      <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 10, lineHeight: 1.5 }}>
+        Vendas que você declarou como <strong>já pagas fora do sistema</strong>. Não são
+        pagamento — só saíram da fila. Desfazer devolve todas elas para as vendas pendentes.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {vivos.map(a => (
+          <div key={a.id} className="card" style={{
+            padding: '12px 16px', display: 'flex', alignItems: 'center',
+            gap: 12, flexWrap: 'wrap',
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{a.numero}</div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                {(a.items || []).length} venda(s) · registrado em {dataBr(a.referenceDate)}
+                {a.motivo ? ` · ${a.motivo}` : ''}
+              </div>
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>{formatCurrency(a.totalProfit || 0)}</div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={ocupado}
+              onClick={() => {
+                if (!window.confirm(
+                  `Desfazer este acerto?\n\n`
+                  + `As ${(a.items || []).length} venda(s) dele voltam para a fila de `
+                  + 'pendentes e passam a contar de novo como valor a pagar.'
+                )) return;
+                onCancelar(a);
+              }}
+            >
+              <RotateCcw size={15} /> Desfazer
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function SaldoPorInvestidor({ saldos }) {
   const comAlgo = saldos.filter(s => s.credito > 0);
   if (comAlgo.length === 0) return null;
@@ -785,6 +879,7 @@ export default function OrdensPagamento() {
     paymentOrders, rotinaDiaria, rodarRotinaAgora, pagarEEnviarOrdens,
     ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate,
     gerarOrdensDasVendas, acertarVendas, liberarRotinaAutomatica,
+    cancelarOrdensDePagamento,
   } = useApp();
   const { isAdmin } = useAuth();
   const [selecionadas, setSelecionadas] = useState(() => new Set());
@@ -876,6 +971,43 @@ export default function OrdensPagamento() {
   const totalAPagar = aPagar.reduce((s, o) => s + (o.totalProfit || 0), 0);
   const totalPago = resolvidas.reduce((s, o) => s + (o.totalProfit || 0), 0);
   const semDono = rotinaDiaria?.resumo?.semDono || [];
+
+  // Os acertos NAO sao do dia: quem registra um acerto de historico esta
+  // limpando meses de uma vez, e procurar por data qual dia ele fez isso seria
+  // adivinhacao. Entao vem todos, do mais recente pro mais antigo.
+  const acertos = useMemo(
+    () => ordens
+      .filter(o => o.kind === ORDEM_TIPO.ACERTADA)
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))),
+    [ordens]
+  );
+
+  // Canceladas do dia. Ficam visiveis de proposito: uma ordem que some sem
+  // deixar rastro e indistinguivel de uma ordem que nunca existiu, e a pergunta
+  // "cade a ordem do Alberto?" nao teria onde ser respondida.
+  const canceladas = useMemo(
+    () => doDia.filter(o => o.status === ORDEM_STATUS.CANCELADA && o.kind !== ORDEM_TIPO.ACERTADA),
+    [doDia]
+  );
+
+  const cancelar = async (ordem) => {
+    setProcessando(true);
+    setResultado(null);
+    try {
+      const r = await cancelarOrdensDePagamento([ordem.id]);
+      setSelecionadas(prev => {
+        const p = new Set(prev);
+        p.delete(ordem.id);
+        return p;
+      });
+      setResultado({
+        tom: 'ok',
+        texto: r.vendasDevolvidas > 0
+          ? `Ordem cancelada. ${r.vendasDevolvidas} venda(s) voltaram para a fila de pendentes.`
+          : 'Ordem cancelada.',
+      });
+    } catch { /* saveError ja mostra a mensagem */ } finally { setProcessando(false); }
+  };
 
   const alternar = (id) => {
     setSelecionadas(prev => {
@@ -1151,6 +1283,8 @@ export default function OrdensPagamento() {
 
       <SaldoPorInvestidor saldos={saldos} />
 
+      <AcertosRegistrados acertos={acertos} onCancelar={cancelar} ocupado={processando} />
+
       {/* --- A fila --- */}
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3 className="card-title">A pagar</h3>
@@ -1174,6 +1308,8 @@ export default function OrdensPagamento() {
               selecionada={selecionadas.has(o.id)}
               onToggle={alternar}
               selecionavel
+              onCancelar={cancelar}
+              ocupado={processando}
             />
           ))}
         </div>
@@ -1199,6 +1335,8 @@ export default function OrdensPagamento() {
                 selecionada={selecionadas.has(o.id)}
                 onToggle={alternar}
                 selecionavel
+              onCancelar={cancelar}
+              ocupado={processando}
               />
             ))}
           </div>
@@ -1221,7 +1359,47 @@ export default function OrdensPagamento() {
                 // selecionada de novo. Marcar de novo nao cobra nada duas vezes
                 // — o servidor so grava paidAt se ainda nao estiver paga.
                 selecionavel={Boolean(o.sentError) || !o.sentAt}
+                // Cancelar uma ordem JA PAGA e o caso de "marquei como paga sem
+                // querer". E o mais perigoso dos tres, entao o aviso do botao
+                // diz na cara que as vendas voltam pra fila e podem ser pagas
+                // de novo — ver a confirmacao em CartaoOrdem.
+                onCancelar={cancelar}
+                ocupado={processando}
               />
+            ))}
+          </div>
+        </>
+      )}
+
+      {canceladas.length > 0 && (
+        <>
+          <div className="card-header" style={{ marginTop: 24 }}>
+            <h3 className="card-title">Canceladas</h3>
+          </div>
+          <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>
+            As vendas destas ordens voltaram para a fila de pendentes. O documento
+            fica registrado — não foi apagado.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {canceladas.map(o => (
+              <div key={o.id} className="card" style={{
+                padding: '12px 16px', display: 'flex', alignItems: 'center',
+                gap: 12, flexWrap: 'wrap', opacity: 0.75,
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, textDecoration: 'line-through' }}>
+                    {o.investorName}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>
+                    Ordem {o.numero} · {(o.items || []).length} venda(s)
+                    {o.canceladaEm ? ` · cancelada ${horaBr(o.canceladaEm)}` : ''}
+                    {o.statusAntesDoCancelamento === ORDEM_STATUS.PAGA ? ' · estava paga' : ''}
+                  </div>
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#6b7280', textDecoration: 'line-through' }}>
+                  {formatCurrency(o.totalProfit || 0)}
+                </div>
+              </div>
             ))}
           </div>
         </>

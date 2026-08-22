@@ -14,7 +14,7 @@
 import { getFirebase, codigoDoErro } from './_firebase.js';
 import { syncGroups } from './ornabird.js';
 import {
-  construirOrdens, construirAcerto, listarPendentes, diaBrasilia,
+  construirOrdens, construirAcerto, listarPendentes, diaBrasilia, ORDEM_STATUS,
 } from '../src/utils/ordens.js';
 import { jsonEstavel } from '../src/utils/helpers.js';
 import { enviarEmail, htmlResumoAdmin } from './_email.js';
@@ -331,6 +331,71 @@ export async function acertarEscolhidas({ saleIds, uid, motivo, agora = new Date
   );
 
   return { acertadas: total, documentos: documentos.length };
+}
+
+// Desfaz uma ordem emitida por engano.
+//
+// CANCELA, NAO APAGA — e a diferenca importa em tres pontos:
+//
+//   * Se o comprovante ja saiu (PDF, WhatsApp, e-mail), o investidor tem em
+//     maos um documento com um numero de ordem. Apagar o registro faria esse
+//     numero nao existir em lugar nenhum, e a conversa seguinte seria sobre um
+//     documento que o sistema jura nunca ter emitido.
+//   * O documento cancelado guarda QUEM cancelou e QUANDO. Um sumico nao
+//     guarda nada, e a pergunta "por que essa venda voltou pra fila?" ficaria
+//     sem resposta.
+//   * O id continua ocupado. Como o id e derivado de dia + investidor, apagar
+//     liberaria o id pra ser reusado por uma ordem nova — dois documentos
+//     diferentes com o mesmo numero impresso, em dias diferentes.
+//
+// O efeito pratico e o que o dono espera de "deletar": a ordem sai das listas
+// (`vendasJaEmOrdem` e `saldoOrnabird` pulam canceladas) e as vendas dela
+// voltam pra fila de pendentes.
+export async function cancelarOrdens({ ids, uid, motivo, agora = new Date() }) {
+  const { db } = getFirebase();
+  const quando = (agora instanceof Date ? agora : new Date(agora)).toISOString();
+  const resultados = [];
+
+  for (const id of ids) {
+    const ref = db.collection('paymentOrders').doc(id);
+    const snap = await ref.get();
+    if (!snap.exists) {
+      resultados.push({ id, ok: false, motivo: 'ordem_nao_encontrada' });
+      continue;
+    }
+    const ordem = snap.data() || {};
+    if (ordem.status === ORDEM_STATUS.CANCELADA) {
+      // Ja cancelada: nao e erro, so nao ha o que fazer. Repetir a gravacao
+      // sobrescreveria quem cancelou primeiro.
+      resultados.push({ id, ok: true, jaEstava: true, investorName: ordem.investorName });
+      continue;
+    }
+
+    await ref.update({
+      status: ORDEM_STATUS.CANCELADA,
+      canceladaEm: quando,
+      canceladaPor: uid || null,
+      canceladaMotivo: (motivo || '').trim() || null,
+      // O estado anterior fica registrado: cancelar uma ordem que ja estava
+      // PAGA e uma coisa bem diferente de cancelar uma que nunca saiu, e quem
+      // for conferir isto depois precisa saber qual dos dois aconteceu.
+      statusAntesDoCancelamento: ordem.status || null,
+    });
+
+    resultados.push({
+      id,
+      ok: true,
+      investorName: ordem.investorName,
+      estavaPaga: ordem.status === ORDEM_STATUS.PAGA,
+      vendas: (ordem.items || []).length,
+    });
+  }
+
+  return {
+    canceladas: resultados.filter(r => r.ok && !r.jaEstava).length,
+    vendasDevolvidas: resultados.reduce((s, r) => s + (r.vendas || 0), 0),
+    resultados,
+  };
 }
 
 // Libera a emissao automatica das 6h. Ate isto acontecer, a rotina sincroniza

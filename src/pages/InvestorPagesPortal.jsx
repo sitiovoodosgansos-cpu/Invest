@@ -67,6 +67,19 @@ const MENSAGENS = {
   not_configured: 'O portal ainda não foi configurado no servidor. Avise o administrador.',
   server_error: 'O servidor não conseguiu montar os dados. Tente novamente em instantes.',
   network_error: 'Não foi possível falar com o servidor. Verifique a conexão.',
+  // Falhas do banco, com nome.
+  //
+  // Antes todas elas chegavam aqui como `server_error`, e a tela dava um
+  // conselho errado justamente para a mais provável: a cota diária não volta
+  // "em instantes", volta de madrugada. Quem lê esta tela é o investidor,
+  // então o texto fala de limite de acessos e não de planos do Firebase — o
+  // detalhe técnico fica no registro da função, para o administrador.
+  firestore_quota: 'O sistema atingiu o limite diário de acessos ao banco de dados. '
+    + 'Ele volta a funcionar de madrugada, por volta das 4h. Avise o administrador.',
+  firestore_permission: 'O banco de dados recusou o acesso. Avise o administrador.',
+  firestore_unauthenticated: 'A credencial do servidor foi recusada. Avise o administrador.',
+  firestore_indisponivel: 'O banco de dados está indisponível no momento. Tente de novo em instantes.',
+  firestore_timeout: 'A consulta demorou demais e foi cancelada. Tente de novo.',
 };
 
 function Conteudo() {
