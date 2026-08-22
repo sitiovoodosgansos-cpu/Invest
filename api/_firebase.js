@@ -33,6 +33,31 @@ export function getFirebase() {
   return { db: cachedDb, auth: getAuth() };
 }
 
+// O codigo de erro em forma de texto, sempre.
+//
+// O firebase-admin devolve erro de gRPC com `code` NUMERICO. Toda a nossa
+// tratativa de erro compara `code` com string, entao um numero atravessava tudo
+// e virava "server_error" generico — e a tela dizia "falha antes de chegar ao
+// Ornabird" para um problema que era do Firestore. O caso real foi o 8.
+//
+// 8 = RESOURCE_EXHAUSTED: a cota diaria do plano gratuito do Firestore acabou.
+// E o erro mais provavel desta base, e o que menos parece com o que e: some
+// tudo da tela sem nenhuma pista do motivo.
+const GRPC = {
+  8: 'firestore_quota',
+  7: 'firestore_permission',
+  16: 'firestore_unauthenticated',
+  14: 'firestore_indisponivel',
+  4: 'firestore_timeout',
+};
+
+export function codigoDoErro(err) {
+  if (typeof err?.code === 'number') return GRPC[err.code] || `firestore_${err.code}`;
+  if (err?.code === 'resource-exhausted') return 'firestore_quota';
+  if (typeof err?.code === 'string' && err.code) return err.code;
+  return null;
+}
+
 // Throws unless the caller is a signed-in admin.
 export async function requireAdmin(req) {
   const header = req.headers.authorization || '';

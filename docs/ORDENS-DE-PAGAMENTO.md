@@ -41,6 +41,36 @@ Consequência prática: **cancelar uma ordem devolve as vendas dela para a fila.
 
 ---
 
+## 1b. A trava do primeiro uso
+
+"Tudo que ainda não foi pago" é a regra certa **a partir do dia em que o sistema
+assume os pagamentos**. Antes disso ela significa o histórico inteiro do
+criatório — centenas de vendas já quitadas à mão ao longo dos meses. A rotina
+rodando sozinha nesse estado emitiria uma ordem gigante de dinheiro que já saiu,
+e não existe botão de desfazer.
+
+Por isso a emissão automática nasce **parada**. Até ser liberada, a rodada ainda
+sincroniza e ainda conta os pendentes — o que o dono precisa para revisar — mas
+não emite nada. O estado vive em `/config/ordensConfig.automaticoLiberado`.
+
+A tela mostra a fila de pendentes agrupada por investidor, com duas saídas para
+cada seleção:
+
+- **Gerar ordens das selecionadas** — vira pagamento.
+- **Já acertadas** — sai da fila **sem** virar pagamento. É como o histórico é
+  zerado.
+
+O acerto é gravado como uma ordem de `kind: 'settled'`, e não numa lista
+separada de "ignorar". A regra de "já foi pago" continua sendo uma só — a venda
+está dentro de alguma ordem — e o documento também registra quando e por quem o
+acerto foi declarado, que é o que uma conferência futura vai querer saber.
+
+Um acerto de mil e poucas vendas é quebrado em documentos de até 300 linhas: um
+documento só passaria do teto de 1 MiB do Firestore, que recusa a gravação **em
+silêncio**.
+
+---
+
 ## 2. A cadeia do dia
 
 `vercel.json` dispara `GET /api/cron-diario` às **09:00 UTC = 06:00 de

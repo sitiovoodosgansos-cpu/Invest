@@ -18,8 +18,8 @@
 // com o resultado registrado em sentAt/sentError. Perder o e-mail de uma ordem
 // paga e um reenvio; perder o registro do pagamento e um pagamento duplicado.
 
-import { requireAdmin, getFirebase } from './_firebase.js';
-import { rodarERegistrar } from './_rotina-diaria.js';
+import { requireAdmin, getFirebase, codigoDoErro } from './_firebase.js';
+import { rodarERegistrar, emitirEscolhidas, acertarEscolhidas, liberarAutomatico } from './_rotina-diaria.js';
 import { enviarEmail, htmlOrdemInvestidor, emailConfigurado } from './_email.js';
 
 async function marcarEEnviar(db, ids, uid) {
@@ -110,6 +110,31 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ...resumo });
     }
 
+    // Emite ordens SO das vendas escolhidas na tela. E o caminho do primeiro
+    // uso: "tudo que ainda nao foi pago" e o historico inteiro do criatorio, e
+    // emitir aquilo de uma vez seria pagar de novo o que ja foi pago a mao.
+    if (body.action === 'gerar') {
+      const saleIds = Array.isArray(body.saleIds) ? body.saleIds.filter(Boolean) : [];
+      if (saleIds.length === 0) return res.status(400).json({ error: 'sem_vendas' });
+      return res.status(200).json({ ok: true, ...(await emitirEscolhidas({ saleIds, uid })) });
+    }
+
+    // Declara as vendas escolhidas como ja acertadas fora do sistema. Elas
+    // saem da fila sem virar pagamento.
+    if (body.action === 'acertar') {
+      const saleIds = Array.isArray(body.saleIds) ? body.saleIds.filter(Boolean) : [];
+      if (saleIds.length === 0) return res.status(400).json({ error: 'sem_vendas' });
+      return res.status(200).json({
+        ok: true,
+        ...(await acertarEscolhidas({ saleIds, uid, motivo: body.motivo })),
+      });
+    }
+
+    if (body.action === 'liberar') {
+      await liberarAutomatico({ uid });
+      return res.status(200).json({ ok: true });
+    }
+
     if (body.action === 'enviar') {
       const ids = Array.isArray(body.ids) ? body.ids.filter(Boolean).slice(0, 100) : [];
       if (ids.length === 0) return res.status(400).json({ error: 'sem_ordens' });
@@ -124,19 +149,28 @@ export default async function handler(req, res) {
 
     return res.status(400).json({ error: 'unknown_action' });
   } catch (err) {
+    // codigoDoErro traduz o code NUMERICO do gRPC pra texto. Sem isso, um erro
+    // do Firestore (o 8 da cota, por exemplo) atravessava todos os testes
+    // abaixo — que comparam com string — e virava "server_error", fazendo a
+    // tela culpar o Ornabird por um problema que era do Firebase.
+    const codigo = codigoDoErro(err);
     console.error('[ordens]', JSON.stringify({
-      code: err?.code ?? null,
+      code: codigo,
+      raw: err?.code ?? null,
       name: err?.name ?? null,
       message: err?.message ?? null,
     }));
-    if (err?.code === 'unauthorized') return res.status(401).json({ error: 'unauthorized' });
-    if (err?.code === 'forbidden') return res.status(403).json({ error: 'forbidden' });
-    if (err?.code === 'missing_firebase') return res.status(503).json({ error: 'missing_firebase' });
-    if (typeof err?.code === 'string' && err.code.startsWith('ornabird')) {
-      return res.status(502).json({ error: err.code });
+    if (codigo === 'unauthorized') return res.status(401).json({ error: 'unauthorized' });
+    if (codigo === 'forbidden') return res.status(403).json({ error: 'forbidden' });
+    if (codigo === 'missing_firebase') return res.status(503).json({ error: 'missing_firebase' });
+    if (typeof codigo === 'string' && codigo.startsWith('firestore_')) {
+      return res.status(503).json({ error: codigo });
     }
-    if (typeof err?.code === 'string' && err.code.startsWith('missing_')) {
-      return res.status(503).json({ error: err.code });
+    if (typeof codigo === 'string' && codigo.startsWith('ornabird')) {
+      return res.status(502).json({ error: codigo });
+    }
+    if (typeof codigo === 'string' && codigo.startsWith('missing_')) {
+      return res.status(503).json({ error: codigo });
     }
     return res.status(500).json({ error: 'server_error' });
   }

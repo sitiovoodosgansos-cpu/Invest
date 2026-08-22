@@ -6,7 +6,7 @@ import {
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency, formatPercent } from '../utils/helpers';
-import { ORDEM_STATUS, ORDEM_TIPO, diaBrasilia } from '../utils/ordens';
+import { ORDEM_STATUS, ORDEM_TIPO, diaBrasilia, listarPendentes } from '../utils/ordens';
 import {
   pdfDaOrdem, pdfDoDia, textoDaOrdem, linkWhatsapp, linkEmail,
 } from '../utils/ordemEntrega';
@@ -311,16 +311,311 @@ function CartaoOrdem({ ordem, selecionada, onToggle, selecionavel }) {
   );
 }
 
+// A FILA DE PENDENTES.
+//
+// Existe por causa do primeiro uso. A regra do sistema e "paga tudo que ainda
+// nao foi pago" — certa a partir do dia em que ele assume os pagamentos, mas
+// na estreia ela significa o historico INTEIRO do criatorio: centenas de vendas
+// que o dono ja quitou a mao ao longo dos meses. Emitir aquilo de uma vez seria
+// pagar tudo de novo.
+//
+// Entao antes de emitir qualquer coisa o dono olha a fila e decide: estas aqui
+// viram ordem, aquelas ali ja estavam acertadas. Depois disso a fila so tem
+// venda nova e a rotina automatica passa a ser segura.
+function FilaPendentes({ pendentes, semDono, onGerar, onAcertar, ocupado }) {
+  const [selecionadas, setSelecionadas] = useState(() => new Set());
+  const [ate, setAte] = useState('');
+  const [filtroInvestidor, setFiltroInvestidor] = useState('');
+  const [expandidos, setExpandidos] = useState(() => new Set());
+
+  const visiveis = useMemo(
+    () => (filtroInvestidor
+      ? pendentes.filter(p => p.investorId === filtroInvestidor)
+      : pendentes),
+    [pendentes, filtroInvestidor]
+  );
+
+  const investidores = useMemo(() => {
+    const mapa = new Map();
+    for (const p of pendentes) {
+      if (!mapa.has(p.investorId)) {
+        mapa.set(p.investorId, { id: p.investorId, nome: p.investorName, linhas: [] });
+      }
+      mapa.get(p.investorId).linhas.push(p);
+    }
+    return [...mapa.values()]
+      .filter(g => !filtroInvestidor || g.id === filtroInvestidor)
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+  }, [pendentes, filtroInvestidor]);
+
+  const alternar = (saleId) => setSelecionadas(prev => {
+    const p = new Set(prev);
+    if (p.has(saleId)) p.delete(saleId); else p.add(saleId);
+    return p;
+  });
+
+  const definir = (ids, ligar) => setSelecionadas(prev => {
+    const p = new Set(prev);
+    for (const id of ids) { if (ligar) p.add(id); else p.delete(id); }
+    return p;
+  });
+
+  // O botao que torna a limpeza do historico praticavel: numa fila de mil e
+  // poucas vendas, marcar uma a uma nao e opcao.
+  const selecionarAteData = () => {
+    if (!ate) return;
+    definir(visiveis.filter(p => (p.date || '') <= ate).map(p => p.saleId), true);
+  };
+
+  const escolhidas = useMemo(
+    () => pendentes.filter(p => selecionadas.has(p.saleId)),
+    [pendentes, selecionadas]
+  );
+  const totalEscolhido = escolhidas.reduce((s, p) => s + p.profit, 0);
+
+  const executar = async (acao) => {
+    const ids = [...selecionadas];
+    if (ids.length === 0) return;
+    await acao(ids);
+    setSelecionadas(new Set());
+  };
+
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <h3 className="card-title">Vendas pendentes</h3>
+        <span style={{ fontSize: 13, color: '#6b7280' }}>
+          {pendentes.length} venda(s) ·{' '}
+          {formatCurrency(pendentes.reduce((s, p) => s + p.profit, 0))} a pagar
+        </span>
+      </div>
+
+      <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12, lineHeight: 1.5 }}>
+        Tudo que ainda não entrou em nenhuma ordem. Escolha o que vira ordem de
+        pagamento agora — e marque como <strong>já acertado</strong> o que você pagou
+        fora do sistema, para sair da fila sem gerar pagamento.
+      </p>
+
+      <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <select
+          className="form-input"
+          style={{ width: 'auto', minWidth: 180 }}
+          value={filtroInvestidor}
+          onChange={e => setFiltroInvestidor(e.target.value)}
+        >
+          <option value="">Todos os investidores</option>
+          {[...new Map(pendentes.map(p => [p.investorId, p.investorName])).entries()]
+            .sort((a, b) => a[1].localeCompare(b[1]))
+            .map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
+        </select>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>até</span>
+          <input
+            type="date"
+            className="form-input"
+            style={{ width: 'auto' }}
+            value={ate}
+            onChange={e => setAte(e.target.value)}
+            aria-label="Selecionar vendas ate esta data"
+          />
+          <button type="button" className="btn btn-secondary btn-sm" onClick={selecionarAteData} disabled={!ate}>
+            Selecionar até essa data
+          </button>
+        </div>
+
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => definir(visiveis.map(p => p.saleId), true)}
+        >
+          Selecionar todas ({visiveis.length})
+        </button>
+        {selecionadas.size > 0 && (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSelecionadas(new Set())}>
+            Limpar seleção
+          </button>
+        )}
+      </div>
+
+      {semDono.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <Aviso>
+            <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              <strong>{semDono.length} venda(s) sem investidor</strong> não aparecem nesta
+              fila porque o lote não está vinculado no Plantel — some{' '}
+              {formatCurrency(semDono.reduce((s, v) => s + (v.amount || 0), 0))} em valor bruto.
+              Faça o vínculo no Plantel e sincronize para elas entrarem.
+            </span>
+          </Aviso>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {investidores.map(grupo => {
+          const ids = grupo.linhas.map(l => l.saleId);
+          const todas = ids.every(id => selecionadas.has(id));
+          const aberto = expandidos.has(grupo.id);
+          // Com mais de mil linhas na estreia, abrir tudo de uma vez trava a
+          // pagina. O grupo mostra o resumo; o detalhe e sob demanda.
+          const amostra = aberto ? grupo.linhas : grupo.linhas.slice(0, 5);
+          return (
+            <div key={grupo.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px' }}>
+                <input
+                  type="checkbox"
+                  checked={todas}
+                  onChange={() => definir(ids, !todas)}
+                  aria-label={`Selecionar as vendas de ${grupo.nome}`}
+                  style={{ width: 18, height: 18, cursor: 'pointer', flexShrink: 0 }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 15 }}>{grupo.nome}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280' }}>
+                    {grupo.linhas.length} venda(s) ·{' '}
+                    {dataBr(grupo.linhas[0]?.date)} a {dataBr(grupo.linhas[grupo.linhas.length - 1]?.date)}
+                  </div>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, flexShrink: 0 }}>
+                  {formatCurrency(grupo.linhas.reduce((s, l) => s + l.profit, 0))}
+                </div>
+                {grupo.linhas.length > 5 && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ flexShrink: 0 }}
+                    onClick={() => setExpandidos(prev => {
+                      const p = new Set(prev);
+                      if (p.has(grupo.id)) p.delete(grupo.id); else p.add(grupo.id);
+                      return p;
+                    })}
+                  >
+                    {aberto ? 'Fechar' : `Ver as ${grupo.linhas.length}`}
+                  </button>
+                )}
+              </div>
+
+              <div style={{ padding: '0 16px 12px 46px', background: '#fafafa' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <tbody>
+                    {amostra.map(linha => (
+                      <tr key={linha.saleId}>
+                        <td style={{ width: 26, padding: '5px 0' }}>
+                          <input
+                            type="checkbox"
+                            checked={selecionadas.has(linha.saleId)}
+                            onChange={() => alternar(linha.saleId)}
+                            aria-label={`Selecionar ${linha.description}`}
+                            style={{ width: 15, height: 15, cursor: 'pointer' }}
+                          />
+                        </td>
+                        <td style={{ fontSize: 12, padding: '5px 0', whiteSpace: 'nowrap', color: '#6b7280' }}>
+                          {dataBr(linha.date)}
+                        </td>
+                        <td style={{ fontSize: 13, padding: '5px 8px' }}>{linha.description}</td>
+                        <td style={{ fontSize: 12, color: '#6b7280', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          {formatPercent(linha.rate)} de {formatCurrency(linha.amount)}
+                        </td>
+                        <td style={{ fontSize: 13, fontWeight: 600, textAlign: 'right', paddingLeft: 12, whiteSpace: 'nowrap' }}>
+                          {formatCurrency(linha.profit)}
+                        </td>
+                      </tr>
+                    ))}
+                    {!aberto && grupo.linhas.length > 5 && (
+                      <tr>
+                        <td colSpan={5} style={{ fontSize: 12, color: '#6b7280', paddingTop: 6 }}>
+                          e mais {grupo.linhas.length - 5}…
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {selecionadas.size > 0 && (
+        <div style={{
+          position: 'sticky', bottom: 0, marginTop: 16,
+          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
+          padding: '14px 16px', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', gap: 12, flexWrap: 'wrap',
+          boxShadow: '0 -4px 12px rgba(0,0,0,.06)',
+        }}>
+          <div style={{ fontSize: 13 }}>
+            <strong>{selecionadas.size}</strong> venda(s) selecionada(s) ·{' '}
+            {formatCurrency(totalEscolhido)} a pagar
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={ocupado}
+              onClick={() => {
+                if (!window.confirm(
+                  `Marcar ${selecionadas.size} venda(s) como já acertadas fora do sistema?\n\n`
+                  + 'Elas saem da fila e NÃO viram pagamento. Use para o histórico que '
+                  + 'você já pagou à mão.'
+                )) return;
+                executar(onAcertar);
+              }}
+            >
+              <CheckCircle2 size={16} /> Já acertadas
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={ocupado}
+              onClick={() => executar(onGerar)}
+            >
+              <Receipt size={16} />
+              {ocupado ? 'Processando…' : 'Gerar ordens das selecionadas'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function OrdensPagamento() {
-  const { paymentOrders, rotinaDiaria, rodarRotinaAgora, pagarEEnviarOrdens } = useApp();
+  const {
+    paymentOrders, rotinaDiaria, rodarRotinaAgora, pagarEEnviarOrdens,
+    ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate,
+    gerarOrdensDasVendas, acertarVendas, liberarRotinaAutomatica,
+  } = useApp();
   const { isAdmin } = useAuth();
   const [selecionadas, setSelecionadas] = useState(() => new Set());
   const [rodando, setRodando] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState(null);
+  const [processando, setProcessando] = useState(false);
   const [dia, setDia] = useState(() => diaBrasilia());
 
   const ordens = Array.isArray(paymentOrders) ? paymentOrders : [];
+
+  // A fila de pendentes, calculada aqui no navegador com a MESMA funcao que o
+  // servidor usa pra emitir. Se a tela calculasse de outro jeito, o numero
+  // conferido e o numero pago seriam dois numeros diferentes.
+  const { pendentes, semDono: pendentesSemDono } = useMemo(
+    () => listarPendentes({
+      vendas: Array.isArray(ornabirdVitrine) ? ornabirdVitrine : [],
+      birds,
+      investors,
+      rates: { eggProfitRate, birdProfitRate },
+      ordensExistentes: ordens,
+    }),
+    [ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate, ordens]
+  );
+
+  // A emissao automatica das 6h so e liberada depois que o dono revisa a fila.
+  // Enquanto houver acerto ou ordem emitida, consideramos revisado.
+  const jaLiberado = rotinaDiaria?.resumo?.aguardandoLiberacao === false
+    || ordens.some(o => o.kind === ORDEM_TIPO.ACERTADA || o.origem === 'manual')
+    || (rotinaDiaria?.ok && !rotinaDiaria?.resumo?.aguardandoLiberacao);
 
   // Dias que tem ordem, do mais novo pro mais antigo. Serve de navegacao: o
   // dono quase sempre quer hoje, mas precisa poder voltar num dia que deixou
@@ -345,6 +640,10 @@ export default function OrdensPagamento() {
     const aPagar = [], avisos = [], resolvidas = [];
     for (const o of doDia) {
       if (o.status === ORDEM_STATUS.CANCELADA) continue;
+      // Acerto nao e ordem: e o registro de que um lote de vendas antigas ja
+      // estava quitado. Misturado com as pagas do dia, viraria uma linha de
+      // milhares de reais que ninguem pagou hoje.
+      if (o.kind === ORDEM_TIPO.ACERTADA) continue;
       if (o.status === ORDEM_STATUS.PAGA) resolvidas.push(o);
       else if (o.kind === ORDEM_TIPO.ZERO) avisos.push(o);
       else aPagar.push(o);
@@ -501,6 +800,52 @@ export default function OrdensPagamento() {
         )}
       </div>
 
+      {/* A trava do primeiro uso, explicada onde ela age. Sem este aviso, a
+          pessoa clicaria "Rodar agora", veria zero ordens e concluiria que o
+          sistema esta quebrado — quando ele esta justamente evitando emitir
+          uma ordem gigante de dinheiro que ja saiu. */}
+      {!jaLiberado && pendentes.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <Aviso>
+            <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              <strong>A emissão automática das 6h está parada.</strong> Há{' '}
+              {pendentes.length} venda(s) na fila —{' '}
+              {formatCurrency(pendentes.reduce((s, p) => s + p.profit, 0))} — e boa parte
+              disso pode ser histórico que você já pagou à mão. Revise a fila abaixo:
+              gere ordens do que falta pagar e marque o resto como já acertado. Depois
+              disso a rotina passa a emitir sozinha.
+            </span>
+          </Aviso>
+        </div>
+      )}
+
+      {!jaLiberado && pendentes.length === 0 && ordens.length === 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <Aviso tom="ok">
+            <CheckCircle2 size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              Fila vazia. Assim que houver venda nova no Ornabird ela aparece aqui.{' '}
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ marginLeft: 6 }}
+                disabled={processando}
+                onClick={async () => {
+                  setProcessando(true);
+                  try {
+                    await liberarRotinaAutomatica();
+                    setResultado({ tom: 'ok', texto: 'Rotina automática liberada. A partir de agora ela emite sozinha às 6h.' });
+                  } catch { /* saveError ja mostra */ } finally { setProcessando(false); }
+                }}
+              >
+                Liberar a rotina automática
+              </button>
+            </span>
+          </Aviso>
+        </div>
+      )}
+
       <div className="stats-grid" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-label">A pagar em {dataBr(dia)}</div>
@@ -548,6 +893,37 @@ export default function OrdensPagamento() {
             </span>
           </Aviso>
         </div>
+      )}
+
+      {pendentes.length > 0 && (
+        <FilaPendentes
+          pendentes={pendentes}
+          semDono={pendentesSemDono}
+          ocupado={processando}
+          onGerar={async (saleIds) => {
+            setProcessando(true);
+            setResultado(null);
+            try {
+              const r = await gerarOrdensDasVendas(saleIds);
+              setDia(r.referenceDate || diaBrasilia());
+              setResultado({
+                tom: 'ok',
+                texto: `${r.ordens} ordem(ns) emitida(s) com ${r.vendas} venda(s) — ${formatCurrency(r.aPagar)} a pagar.`,
+              });
+            } catch { /* saveError ja mostra a mensagem */ } finally { setProcessando(false); }
+          }}
+          onAcertar={async (saleIds) => {
+            setProcessando(true);
+            setResultado(null);
+            try {
+              const r = await acertarVendas(saleIds);
+              setResultado({
+                tom: 'ok',
+                texto: `${r.acertadas} venda(s) marcada(s) como já acertadas. Saíram da fila e não viraram pagamento.`,
+              });
+            } catch { /* saveError ja mostra a mensagem */ } finally { setProcessando(false); }
+          }}
+        />
       )}
 
       {/* --- A fila --- */}

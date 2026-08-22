@@ -1220,9 +1220,25 @@ export function AppProvider({ children }) {
     unauthorized: 'Sessao expirada. Entre novamente.',
     forbidden: 'So o administrador mexe nas ordens de pagamento.',
     sem_ordens: 'Nenhuma ordem selecionada.',
+    sem_vendas: 'Nenhuma venda selecionada.',
     missing_firebase: 'Falta a variavel FIREBASE_SERVICE_ACCOUNT no projeto "invest" da Vercel.',
     missing_cron_secret: 'Falta a variavel CRON_SECRET no projeto "invest" da Vercel.',
     proxy_error: 'A funcao /api/ordens do Invest nao respondeu. Veja os logs do projeto invest na Vercel.',
+    // Os erros do Firestore chegavam aqui como o codigo NUMERICO do gRPC — a
+    // tela mostrava "falhou: 8", que nao diz nada a quem le. O servidor agora
+    // traduz para estes nomes.
+    firestore_quota:
+      'A cota diaria gratuita do Firebase acabou (RESOURCE_EXHAUSTED). Ela zera '
+      + 'a meia-noite no horario do Pacifico, por volta das 4h da manha aqui. '
+      + 'Tente depois disso — ou mude o projeto para o plano Blaze, que resolve de vez.',
+    firestore_permission:
+      'O Firestore recusou o acesso (permission-denied). Publique as regras '
+      + 'atualizadas no console do Firebase: faltam os blocos de /paymentOrders '
+      + 'e /config/rotinaDiaria.',
+    firestore_indisponivel:
+      'O Firestore esta indisponivel no momento. Tente de novo em instantes.',
+    firestore_timeout: 'A operacao demorou demais e foi cancelada. Tente de novo.',
+    firestore_unauthenticated: 'A credencial do servidor foi recusada pelo Firebase.',
   };
 
   const ordensRequest = async (body) => {
@@ -1266,6 +1282,46 @@ export function AppProvider({ children }) {
       return r;
     } catch (err) {
       devError('rodarRotinaAgora error:', err);
+      setSaveError(explicarErroOrdens(err));
+      throw err;
+    }
+  };
+
+  // Emite ordens SO das vendas escolhidas na tela.
+  const gerarOrdensDasVendas = async (saleIds) => {
+    try {
+      const r = await ordensRequest({ action: 'gerar', saleIds });
+      setSaveError(null);
+      return r;
+    } catch (err) {
+      devError('gerarOrdensDasVendas error:', err);
+      setSaveError(explicarErroOrdens(err));
+      throw err;
+    }
+  };
+
+  // Declara vendas como ja acertadas fora do sistema: elas saem da fila sem
+  // virar pagamento. E o que zera o historico no primeiro uso.
+  const acertarVendas = async (saleIds, motivo) => {
+    try {
+      const r = await ordensRequest({ action: 'acertar', saleIds, motivo });
+      setSaveError(null);
+      return r;
+    } catch (err) {
+      devError('acertarVendas error:', err);
+      setSaveError(explicarErroOrdens(err));
+      throw err;
+    }
+  };
+
+  // Libera a emissao automatica das 6h.
+  const liberarRotinaAutomatica = async () => {
+    try {
+      const r = await ordensRequest({ action: 'liberar' });
+      setSaveError(null);
+      return r;
+    } catch (err) {
+      devError('liberarRotinaAutomatica error:', err);
       setSaveError(explicarErroOrdens(err));
       throw err;
     }
@@ -1665,6 +1721,9 @@ export function AppProvider({ children }) {
     syncFromOrnabird,
     rodarRotinaAgora,
     pagarEEnviarOrdens,
+    gerarOrdensDasVendas,
+    acertarVendas,
+    liberarRotinaAutomatica,
     loading: loading || salesLoading,
     firestoreError,
     saveError,
