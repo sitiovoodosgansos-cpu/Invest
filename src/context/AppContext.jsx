@@ -8,6 +8,7 @@ import {
   DEFAULT_EGG_PROFIT_RATE, DEFAULT_BIRD_PROFIT_RATE, jsonEstavel,
 } from '../utils/helpers';
 import { PORTAL_API_ENABLED, isPortalRoute } from '../hooks/usePortalData';
+import { decidirSnapshot, ACAO } from '../utils/protecaoSnapshot';
 
 // Generate a collision-free, non-enumerable ID for any locally-created entity.
 // Prefers the Web Crypto API (128 bits of entropy) and falls back to a
@@ -207,44 +208,53 @@ export function AppProvider({ children }) {
     const unsubscribe = onSnapshot(FIRESTORE_DOC, (snapshot) => {
       setFirestoreError(null);
       if (snapshot.exists()) {
-        // Ignore Firestore snapshots while we have pending writes or shortly after a write
-        // to prevent onSnapshot from overwriting local state with stale data
-        const timeSinceWrite = Date.now() - lastLocalWriteTime.current;
-        if (pendingWriteCount.current > 0 || timeSinceWrite < 10000) {
-          setLoading(false);
-          return;
-        }
+        // Com o cache local ligado, o PRIMEIRO snapshot vem da copia local — e
+        // ele nunca pode acionar a protecao abaixo. Ver protecaoSnapshot.js.
+        const doCache = snapshot.metadata?.fromCache === true;
         const firestoreData = { ...defaultData, ...semCamposLegados(snapshot.data()) };
         const incomingCount = countItems(firestoreData);
         const currentCount = countItems(dataRef.current);
 
-        // PROTECTION: Never accept Firestore data with fewer items than local state
-        // unless we recently did local deletes (tracked via localDeleteCount)
-        if (dataLoadedFromFirestore.current && incomingCount < currentCount) {
-          const allowedDrop = localDeleteCount.current;
-          localDeleteCount.current = 0; // reset after checking
-          if (currentCount - incomingCount > allowedDrop) {
-            devWarn(
-              `Blocked: onSnapshot tried to overwrite ${currentCount} items with ${incomingCount} items (allowed drop: ${allowedDrop}). Pushing local data to Firestore instead.`
-            );
-            // Push our local data back to Firestore to fix the discrepancy
-            const sanitized = JSON.parse(JSON.stringify(dataRef.current));
-            lastLocalWriteTime.current = Date.now();
-            pendingWriteCount.current += 1;
-            setDoc(FIRESTORE_DOC, sanitized)
-              .catch(err => devError('Re-push error:', err))
-              .finally(() => {
-                pendingWriteCount.current = Math.max(0, pendingWriteCount.current - 1);
-                lastLocalWriteTime.current = Date.now();
-              });
-            setLoading(false);
-            return;
-          }
-        }
-        localDeleteCount.current = 0;
+        const acao = decidirSnapshot({
+          doCache,
+          escritasPendentes: pendingWriteCount.current,
+          msDesdeEscrita: Date.now() - lastLocalWriteTime.current,
+          jaVeioDoServidor: dataLoadedFromFirestore.current,
+          itensLocais: currentCount,
+          itensRecebidos: incomingCount,
+          apagadosLocais: localDeleteCount.current,
+        });
 
+        if (acao === ACAO.IGNORAR) {
+          setLoading(false);
+          return;
+        }
+
+        if (acao === ACAO.REPUBLICAR) {
+          const quedaPermitida = localDeleteCount.current;
+          localDeleteCount.current = 0;
+          devWarn(
+            `Blocked: onSnapshot tried to overwrite ${currentCount} items with ${incomingCount} items (allowed drop: ${quedaPermitida}). Pushing local data to Firestore instead.`
+          );
+          // Push our local data back to Firestore to fix the discrepancy
+          const sanitized = JSON.parse(JSON.stringify(dataRef.current));
+          lastLocalWriteTime.current = Date.now();
+          pendingWriteCount.current += 1;
+          setDoc(FIRESTORE_DOC, sanitized)
+            .catch(err => devError('Re-push error:', err))
+            .finally(() => {
+              pendingWriteCount.current = Math.max(0, pendingWriteCount.current - 1);
+              lastLocalWriteTime.current = Date.now();
+            });
+          setLoading(false);
+          return;
+        }
+
+        localDeleteCount.current = 0;
         firestoreItemCount.current = incomingCount;
-        dataLoadedFromFirestore.current = true;
+        // So o servidor arma a protecao. Se o cache armasse, uma exclusao feita
+        // no celular seria desfeita pelo computador na manha seguinte.
+        if (!doCache) dataLoadedFromFirestore.current = true;
         setData(firestoreData);
       } else {
         // First time: try to migrate from localStorage

@@ -249,6 +249,42 @@ aparecia em tela nenhuma.
 
 ---
 
+## 3f. O custo de leitura do Firestore
+
+A cota diária gratuita (50 mil leituras) estourou no primeiro dia de uso real, e
+a causa **não era a rotina das 6h**:
+
+| O quê | Leituras | Frequência |
+|---|---|---|
+| Rotina das 6h | ~1 espelho inteiro | 1× por dia |
+| Abrir/recarregar o app | ~1 espelho inteiro | **toda vez** |
+
+O `AppContext` mantém nove listeners de coleção inteira, e o Firestore cobra uma
+leitura por documento cada vez que um listener se conecta. Só `ornabirdVitrine`
+já passa de mil e quinhentos documentos. A documentação é explícita: *"If offline
+persistence is disabled, you will be charged for documents and index entries read
+as if you had issued a brand-new query whenever the listener disconnects and
+reconnects."* Na web a persistência vem desligada por padrão.
+
+Por isso `src/firebase.js` usa `initializeFirestore` com `persistentLocalCache` e
+`persistentMultipleTabManager` — o segundo porque, sem ele, só a primeira aba
+ganha cache e as outras voltam a pagar tudo, em silêncio.
+
+**A armadilha que isso trouxe.** Com cache, o primeiro snapshot passa a vir da
+cópia local. A proteção do `AppContext` (que republica os dados locais quando um
+snapshot chega com menos itens) leria isso como "o servidor está errado" — e uma
+exclusão feita no celular seria desfeita pelo computador na manhã seguinte, sem
+nada na tela. A decisão virou uma função pura em `src/utils/protecaoSnapshot.js`,
+com duas regras novas: só snapshot **do servidor** arma a proteção, e snapshot de
+cache **nunca** republica. O cache não é uma segunda opinião — é a nossa própria
+cópia voltando.
+
+Ainda pendente: as ~1.600 vendas são carregadas em toda tela, inclusive nas que
+não usam (Dashboard, Plantel, Coleta). Carregar por rota cortaria a primeira
+leitura do dia também.
+
+---
+
 ## 4. Paga primeiro, avisa depois
 
 O investidor só recebe o comprovante depois que o dinheiro saiu. Por isso
