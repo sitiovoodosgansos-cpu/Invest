@@ -100,6 +100,28 @@ export function vendasJaEmOrdem(ordens) {
   return ids;
 }
 
+// O nome do que foi vendido, SEM a especie.
+//
+// "Galinha Sedosa do Japao" vira "Sedosa do Japao". A especie sai porque quem
+// le a lista ja sabe que e galinha, e a palavra repetida em toda linha ocupa
+// justamente o espaco de quem diferencia as linhas — a raca e a variedade.
+//
+// Cai na descricao concatenada quando nao ha raca separada: e o caso do
+// lancamento manual, que e texto livre e nao tem lote por tras.
+export function nomeDaVenda(venda) {
+  const curto = [venda?.breedName, venda?.varietyName].filter(Boolean).join(' ').trim();
+  return curto || venda?.description || '(sem descricao)';
+}
+
+// Como chamar a data de origem, por tipo. Sao verbos diferentes porque sao
+// eventos diferentes: dizer "nasceu" de um ovo, ou de uma ave comprada pronta,
+// seria simplesmente falso.
+export const ROTULO_ORIGEM = {
+  birth: 'nasceu',
+  purchase: 'entrou',
+  collected: 'coletado',
+};
+
 // Uma linha da ordem, a partir de uma venda espelhada do Ornabird.
 function montarItem(venda, bird, rate) {
   const amount = Number(venda.amount) || 0;
@@ -108,7 +130,19 @@ function montarItem(venda, bird, rate) {
     // Data de NEGOCIO da venda, nao a data da rodada. Uma venda retroativa sai
     // numa ordem de hoje mostrando o dia em que de fato aconteceu.
     date: normalizeDay(venda.date) || null,
-    description: venda.description || '(sem descricao)',
+    // O nome curto (raca + variedade) e o que vai pra tela e pro PDF. A
+    // descricao concatenada segue junto porque a ordem e um documento
+    // historico: se o cadastro do lote mudar depois, o texto original ainda
+    // esta la pra uma conferencia entender do que se tratava.
+    description: nomeDaVenda(venda),
+    descriptionOriginal: venda.description || null,
+    speciesName: venda.speciesName ?? null,
+    breedName: venda.breedName ?? null,
+    varietyName: venda.varietyName ?? null,
+    // Data de origem: quando a ave nasceu, quando entrou comprada, ou quando o
+    // ovo foi coletado. `originKind` diz qual dos tres, pro rotulo nao mentir.
+    originDate: normalizeDay(venda.originDate) || null,
+    originKind: venda.originKind ?? null,
     quantity: Number(venda.quantity) || null,
     unitPrice: venda.unitPrice ?? null,
     customer: venda.customer ?? null,

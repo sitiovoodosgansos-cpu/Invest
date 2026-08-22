@@ -13,6 +13,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatCurrency, formatPercent } from './helpers.js';
+import { ROTULO_ORIGEM } from './ordens.js';
 
 const ROXO = [108, 43, 217];
 const TINTA = [30, 27, 75];
@@ -23,6 +24,16 @@ function dataBr(iso) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return '—';
   const [a, m, d] = dia.split('-');
   return `${d}/${m}/${a}`;
+}
+
+// A origem em uma coluna estreita de PDF: "nasceu 10/05/2026".
+//
+// Linha antiga (emitida antes de a origem existir) nao tem o campo — devolve
+// travessao em vez de "undefined", que e o que uma ordem historica reaberta
+// mostraria.
+function origemCurta(item) {
+  if (!item?.originDate) return '—';
+  return `${ROTULO_ORIGEM[item.originKind] || 'de'} ${dataBr(item.originDate)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,9 +60,12 @@ export function textoDaOrdem(ordem) {
     ].join('\n');
   }
 
-  const linhas = (ordem.items || []).map(i =>
-    `- ${i.description} (${dataBr(i.date)}): ${formatPercent(i.rate)} de ${formatCurrency(i.amount)} = ${formatCurrency(i.profit)}`
-  );
+  const linhas = (ordem.items || []).map(i => {
+    const origem = i.originDate ? `, ${origemCurta(i)}` : '';
+    return `- ${i.description} (${i.isEgg ? 'ovos' : 'ave'}${origem}) `
+      + `vendida em ${dataBr(i.date)}: ${formatPercent(i.rate)} de `
+      + `${formatCurrency(i.amount)} = ${formatCurrency(i.profit)}`;
+  });
 
   return [
     `Ola, ${ordem.investorName}.`,
@@ -229,9 +243,13 @@ export function pdfDaOrdem(ordem) {
 
   autoTable(doc, {
     startY: y,
-    head: [['Venda', 'Data', 'Valor bruto', 'Taxa', 'Seu lucro']],
+    // A data da VENDA fica no PDF, ainda que tenha saido da fila na tela: este
+    // e o documento que o investidor confere contra o extrato dele.
+    head: [['Venda', 'Tipo', 'Origem', 'Data', 'Valor bruto', 'Taxa', 'Seu lucro']],
     body: (ordem.items || []).map(i => [
       i.description,
+      i.isEgg ? 'Ovos' : 'Ave',
+      origemCurta(i),
       dataBr(i.date),
       formatCurrency(i.amount),
       formatPercent(i.rate),
@@ -241,7 +259,7 @@ export function pdfDaOrdem(ordem) {
     headStyles: { fillColor: ROXO, fontSize: 9 },
     bodyStyles: { fontSize: 9 },
     columnStyles: {
-      2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' },
+      4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' },
     },
     margin: { left: 14, right: 14 },
   });
@@ -312,15 +330,16 @@ export function pdfDoDia(ordens, referenceDate) {
     cabecalho(doc, `Ordem ${ordem.numero}`, ordem.investorName);
     autoTable(doc, {
       startY: 54,
-      head: [['Venda', 'Data', 'Valor bruto', 'Taxa', 'Lucro']],
+      head: [['Venda', 'Tipo', 'Origem', 'Data', 'Valor bruto', 'Taxa', 'Lucro']],
       body: (ordem.items || []).map(i => [
-        i.description, dataBr(i.date), formatCurrency(i.amount),
+        i.description, i.isEgg ? 'Ovos' : 'Ave', origemCurta(i),
+        dataBr(i.date), formatCurrency(i.amount),
         formatPercent(i.rate), formatCurrency(i.profit),
       ]),
       theme: 'striped',
       headStyles: { fillColor: ROXO, fontSize: 9 },
       bodyStyles: { fontSize: 9 },
-      columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+      columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } },
       margin: { left: 14, right: 14 },
     });
     y = doc.lastAutoTable.finalY + 10;
