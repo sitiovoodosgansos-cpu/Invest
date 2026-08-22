@@ -45,6 +45,15 @@ export const ORDEM_TIPO = {
   // Investidor que nao vendeu nada. Nao ha dinheiro, entao nao ha o que pagar:
   // vira so um aviso, que pode ser enviado sem passar pelo pagamento.
   ZERO: 'zero',
+  // Venda acertada FORA do sistema — o caso classico e o historico de antes de
+  // o sistema existir, ja pago a mao ao longo dos meses.
+  //
+  // Guardado como uma ordem, e nao numa lista separada de "ignorar", porque a
+  // regra de "ja foi pago" e uma so: a venda esta dentro de alguma ordem. Um
+  // segundo lugar dizendo a mesma coisa sairia de sincronia. E o documento
+  // tambem registra QUANDO e por quem o acerto foi declarado, que e o que uma
+  // conferencia futura vai querer saber.
+  ACERTADA: 'settled',
 };
 
 // Centavos. Cada linha e arredondada ANTES de somar, e o total e a soma das
@@ -118,36 +127,37 @@ function montarItem(venda, bird, rate) {
   };
 }
 
-// Monta as ordens de uma rodada.
+// Tudo que ainda nao foi pago, ja atribuido ao dono e com o lucro calculado.
 //
-// Entra: as vendas espelhadas do Ornabird, o Plantel, os investidores, as
-// taxas globais e as ordens que ja existem. Sai: uma ordem por investidor com
-// venda nova, um aviso por investidor sem venda, e a lista das vendas que nao
-// caem em investidor nenhum.
+// E a MESMA conta que a ordem faz — de proposito. A tela de pendentes existe
+// pra o dono conferir antes de emitir; se ela calculasse por conta propria, o
+// numero conferido e o numero pago seriam dois numeros diferentes, e a
+// conferencia nao valeria nada.
 //
 // `semDono` NAO e descartado: venda sem lote vinculado e dinheiro que alguem
 // pode estar esperando, e sumir com ela em silencio e exatamente o modo de
 // falha que este sistema nao pode ter. Volta pro chamador mostrar na tela.
-export function construirOrdens({
+export function listarPendentes({
   vendas,
   birds,
   investors,
   rates,
   ordensExistentes = [],
-  referenceDate = null,
-  agora = new Date(),
+  // Quando vem preenchido, so estas vendas sao consideradas — e o que permite
+  // ao dono escolher a dedo o que entra numa ordem.
+  saleIds = null,
 }) {
-  const dia = referenceDate || diaBrasilia(agora);
-  const criadoEm = (agora instanceof Date ? agora : new Date(agora)).toISOString();
   const jaPagas = vendasJaEmOrdem(ordensExistentes);
   const groupIndex = buildOrnabirdGroupIndex(birds);
   const investidores = Array.isArray(investors) ? investors : [];
+  const escolhidas = saleIds ? new Set(saleIds) : null;
 
-  const porInvestidor = new Map();
+  const pendentes = [];
   const semDono = [];
 
   for (const venda of Array.isArray(vendas) ? vendas : []) {
     if (!venda?.id || jaPagas.has(venda.id)) continue;
+    if (escolhidas && !escolhidas.has(venda.id)) continue;
     const amount = Number(venda.amount) || 0;
     // Venda de valor zero (ou negativa, num estorno) nao gera pagamento. Nao e
     // erro — so nao ha o que ratear.
@@ -173,8 +183,137 @@ export function construirOrdens({
     }
 
     const rate = resolveRateFor(bird, Boolean(venda.isEgg), rates);
-    if (!porInvestidor.has(investor.id)) porInvestidor.set(investor.id, []);
-    porInvestidor.get(investor.id).push(montarItem(venda, bird, rate));
+    pendentes.push({
+      ...montarItem(venda, bird, rate),
+      investorId: investor.id,
+      investorName: investor.name || '(sem nome)',
+    });
+  }
+
+  pendentes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  return { pendentes, semDono };
+}
+
+// Quantas vendas cabem num documento de acerto.
+//
+// Um acerto de historico pode carregar mais de mil vendas de uma vez. Enfiadas
+// num documento so, passariam do teto de 1 MiB do Firestore — o mesmo teto que
+// ja engoliu gravacoes nesta base duas vezes, e que engole em SILENCIO: a
+// gravacao e recusada e o backlog continua la, aparentemente sem motivo.
+const VENDAS_POR_ACERTO = 300;
+
+// Declara que um conjunto de vendas ja foi acertado fora do sistema.
+//
+// O caso que motivou isto: no primeiro uso, "tudo que ainda nao foi pago" e o
+// historico inteiro do criatorio — centenas de vendas que o dono ja pagou a
+// mao ao longo dos meses. Sem uma forma de dizer "isso ja esta quitado", ou
+// elas viram uma ordem gigante de dinheiro que ja saiu, ou ficam pendentes
+// para sempre atrapalhando a leitura da tela.
+//
+// Nao ha pagamento, nem e-mail, nem investidor destinatario: e um registro de
+// que aquelas vendas nao devem mais entrar em ordem nenhuma.
+export function construirAcerto({
+  vendas,
+  birds,
+  investors,
+  rates,
+  ordensExistentes = [],
+  saleIds,
+  agora = new Date(),
+  motivo = 'Acertado fora do sistema',
+}) {
+  const dia = diaBrasilia(agora);
+  const criadoEm = (agora instanceof Date ? agora : new Date(agora)).toISOString();
+
+  // Passa pela MESMA atribuicao das ordens: o registro do acerto guarda de
+  // quem era cada venda, que e o que uma conferencia futura vai querer saber.
+  const { pendentes, semDono } = listarPendentes({
+    vendas, birds, investors, rates, ordensExistentes, saleIds,
+  });
+
+  // Venda sem dono tambem pode ser acertada — ela esta na fila do mesmo jeito,
+  // e deixa-la de fora faria o backlog nunca zerar.
+  const linhas = [
+    ...pendentes.map(p => ({
+      saleId: p.saleId, date: p.date, description: p.description,
+      amount: p.amount, profit: p.profit,
+      investorId: p.investorId, investorName: p.investorName,
+    })),
+    ...semDono.map(v => ({
+      saleId: v.saleId, date: v.date, description: v.description,
+      amount: v.amount, profit: 0,
+      investorId: null, investorName: null,
+    })),
+  ];
+
+  const documentos = [];
+  for (let i = 0; i < linhas.length; i += VENDAS_POR_ACERTO) {
+    const fatia = linhas.slice(i, i + VENDAS_POR_ACERTO);
+    const parte = Math.floor(i / VENDAS_POR_ACERTO) + 1;
+    documentos.push({
+      id: `acerto-${dia.replace(/-/g, '')}-${parte}-${criadoEm.slice(11, 19).replace(/:/g, '')}`,
+      numero: `ACERTO-${dia.replace(/-/g, '')}-${String(parte).padStart(3, '0')}`,
+      referenceDate: dia,
+      createdAt: criadoEm,
+      investorId: null,
+      investorName: motivo,
+      investorEmail: null,
+      investorPix: null,
+      investorPhone: null,
+      kind: ORDEM_TIPO.ACERTADA,
+      // Nunca entra na fila de pagar nem no envio: nao ha o que pagar.
+      status: ORDEM_STATUS.PAGA,
+      items: fatia,
+      totalAmount: arredondar(fatia.reduce((s, l) => s + l.amount, 0)),
+      totalProfit: arredondar(fatia.reduce((s, l) => s + l.profit, 0)),
+      paidAt: criadoEm,
+      sentAt: null,
+      sentError: null,
+      motivo,
+    });
+  }
+
+  return { documentos, total: linhas.length };
+}
+
+// Monta as ordens de uma rodada.
+//
+// Entra: as vendas espelhadas do Ornabird, o Plantel, os investidores, as
+// taxas globais e as ordens que ja existem. Sai: uma ordem por investidor com
+// venda nova, um aviso por investidor sem venda, e a lista das vendas que nao
+// caem em investidor nenhum.
+//
+// `saleIds` restringe a quais vendas entram. Sem ele, entra tudo que esta
+// pendente (o comportamento da rotina das 6h); com ele, so as escolhidas na
+// tela.
+//
+// `comAvisoZero` desliga os avisos de "nao vendeu nada hoje". Numa emissao
+// manual eles nao fazem sentido: o dono escolheu vendas especificas, e quem
+// ficou de fora nao ficou porque nao vendeu.
+export function construirOrdens({
+  vendas,
+  birds,
+  investors,
+  rates,
+  ordensExistentes = [],
+  referenceDate = null,
+  agora = new Date(),
+  saleIds = null,
+  comAvisoZero = true,
+}) {
+  const dia = referenceDate || diaBrasilia(agora);
+  const criadoEm = (agora instanceof Date ? agora : new Date(agora)).toISOString();
+  const investidores = Array.isArray(investors) ? investors : [];
+
+  const { pendentes, semDono } = listarPendentes({
+    vendas, birds, investors, rates, ordensExistentes, saleIds,
+  });
+
+  const porInvestidor = new Map();
+  for (const item of pendentes) {
+    const { investorId, investorName: _nome, ...linha } = item;
+    if (!porInvestidor.has(investorId)) porInvestidor.set(investorId, []);
+    porInvestidor.get(investorId).push(linha);
   }
 
   // Quantas ordens JA existem hoje — no total e por investidor.
@@ -206,6 +345,10 @@ export function construirOrdens({
     itens.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
     const temVenda = itens.length > 0;
+
+    // Numa emissao manual nao ha aviso de zero vendas: quem ficou de fora
+    // ficou porque o dono nao escolheu as vendas dele, e nao porque nao vendeu.
+    if (!temVenda && !comAvisoZero) continue;
 
     // Aviso de zero vendas so pra quem quer receber. O padrao e receber — foi
     // o pedido —, mas um investidor que so vende de vez em quando levaria um

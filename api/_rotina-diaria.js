@@ -11,9 +11,11 @@
 // investidor que vendeu hoje receberia um "voce nao vendeu nada hoje", e o
 // dono nao teria motivo pra desconfiar.
 
-import { getFirebase } from './_firebase.js';
+import { getFirebase, codigoDoErro } from './_firebase.js';
 import { syncGroups } from './ornabird.js';
-import { construirOrdens, diaBrasilia } from '../src/utils/ordens.js';
+import {
+  construirOrdens, construirAcerto, listarPendentes, diaBrasilia,
+} from '../src/utils/ordens.js';
 import { jsonEstavel } from '../src/utils/helpers.js';
 import { enviarEmail, htmlResumoAdmin } from './_email.js';
 
@@ -112,6 +114,42 @@ export async function rodarRotinaDiaria({ agora = new Date() } = {}) {
   const ordensSnap = await db.collection('paymentOrders').get();
   const ordensExistentes = ordensSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
+  // A TRAVA DO PRIMEIRO USO.
+  //
+  // "Tudo que ainda nao foi pago" e a regra certa a partir do momento em que o
+  // sistema assume os pagamentos. Antes disso, ela significa o historico
+  // INTEIRO do criatorio — centenas de vendas que o dono ja pagou a mao ao
+  // longo dos meses. A rotina rodando sozinha nesse estado emitiria uma ordem
+  // gigante de dinheiro que ja saiu, e nao ha botao de desfazer.
+  //
+  // Entao a emissao automatica fica parada ate o dono revisar a fila na tela e
+  // liberar. Ate la a rodada ainda sincroniza e ainda conta os pendentes — o
+  // que ele precisa pra revisar —, so nao emite nada.
+  const configSnap = await db.collection('config').doc('ordensConfig').get();
+  const liberado = configSnap.exists && configSnap.data()?.automaticoLiberado === true;
+
+  if (!liberado) {
+    const { pendentes, semDono: orfas } = listarPendentes({
+      vendas: payload.vitrine || [], birds, investors, rates, ordensExistentes,
+    });
+    return {
+      referenceDate: diaBrasilia(agora),
+      groupIds: groupIds.length,
+      espelhos,
+      ordens: 0,
+      aPagar: 0,
+      avisosZero: 0,
+      semDono: orfas,
+      // O que a tela precisa pra explicar por que nada foi emitido.
+      aguardandoLiberacao: true,
+      pendentes: pendentes.length,
+      pendentesValor: pendentes.reduce((s, p) => s + p.profit, 0),
+      email: { enviado: false, motivo: 'aguardando_liberacao' },
+      warnings: payload.warnings || [],
+      unknownGroupIds: payload.unknownGroupIds || [],
+    };
+  }
+
   const { ordens, semDono, referenceDate } = construirOrdens({
     vendas: payload.vitrine || [],
     birds,
@@ -193,12 +231,110 @@ export async function rodarERegistrar({ agora = new Date(), origem = 'cron' } = 
         lastRunAt: new Date().toISOString(),
         origem,
         ok: false,
-        // Codigo e mensagem, nunca o valor de uma credencial: os erros daqui
-        // vem de ornabird.js, que ja usa codigos secos ('ornabird_unauthorized'
-        // e afins) exatamente para nao carregarem segredo.
-        error: String(err?.code || err?.message || 'erro desconhecido'),
+        // Codigo em TEXTO, nunca o valor de uma credencial. Antes isto gravava
+        // `err.code` cru, e o erro de cota do Firestore chegava na tela como
+        // "falhou: 8" — um numero que nao diz nada a quem le.
+        error: codigoDoErro(err) || String(err?.message || 'erro desconhecido'),
       })
       .catch(() => {});
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Acoes manuais sobre a fila de pendentes
+//
+// Existem por causa do primeiro uso: "tudo que ainda nao foi pago" e, na
+// estreia, o historico inteiro do criatorio. O dono precisa poder olhar a fila
+// e decidir linha a linha o que vira pagamento e o que ja estava quitado.
+// ---------------------------------------------------------------------------
+
+// O que as tres acoes precisam ler. Sempre do ESPELHO ja gravado, nunca
+// sincronizando de novo: a tela mostrou uma fila, e a acao tem que agir sobre
+// exatamente aquela fila. Sincronizar no meio faria o dono selecionar dez
+// vendas e o servidor trabalhar sobre onze.
+async function carregarFila(db) {
+  const [appSnap, vitrineSnap, ordensSnap] = await Promise.all([
+    db.collection('config').doc('appData').get(),
+    db.collection('ornabirdVitrine').get(),
+    db.collection('paymentOrders').get(),
+  ]);
+  const app = appSnap.exists ? appSnap.data() : {};
+  return {
+    birds: Array.isArray(app.birds) ? app.birds : [],
+    investors: Array.isArray(app.investors) ? app.investors : [],
+    rates: { eggProfitRate: app.eggProfitRate, birdProfitRate: app.birdProfitRate },
+    vendas: vitrineSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+    ordensExistentes: ordensSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+  };
+}
+
+// Emite ordens SO das vendas escolhidas.
+export async function emitirEscolhidas({ saleIds, uid, agora = new Date() }) {
+  const { db } = getFirebase();
+  const fila = await carregarFila(db);
+
+  const { ordens, semDono, referenceDate } = construirOrdens({
+    ...fila,
+    saleIds,
+    agora,
+    // Sem avisos de "nao vendeu nada": quem ficou de fora ficou porque o dono
+    // nao escolheu as vendas dele, e nao porque nao vendeu.
+    comAvisoZero: false,
+  });
+
+  await commitEmLotes(
+    db,
+    ordens.map(({ id, ...resto }) => (b) =>
+      b.set(db.collection('paymentOrders').doc(id), {
+        ...JSON.parse(JSON.stringify(resto)),
+        emitidaPor: uid || null,
+        origem: 'manual',
+      })
+    )
+  );
+
+  return {
+    referenceDate,
+    ordens: ordens.length,
+    aPagar: ordens.reduce((s, o) => s + o.totalProfit, 0),
+    vendas: ordens.reduce((s, o) => s + o.items.length, 0),
+    semDono,
+  };
+}
+
+// Declara as vendas escolhidas como ja acertadas fora do sistema.
+export async function acertarEscolhidas({ saleIds, uid, motivo, agora = new Date() }) {
+  const { db } = getFirebase();
+  const fila = await carregarFila(db);
+
+  const { documentos, total } = construirAcerto({
+    ...fila,
+    saleIds,
+    agora,
+    motivo: (motivo || '').trim() || 'Acertado fora do sistema',
+  });
+
+  await commitEmLotes(
+    db,
+    documentos.map(({ id, ...resto }) => (b) =>
+      b.set(db.collection('paymentOrders').doc(id), {
+        ...JSON.parse(JSON.stringify(resto)),
+        emitidaPor: uid || null,
+      })
+    )
+  );
+
+  return { acertadas: total, documentos: documentos.length };
+}
+
+// Libera a emissao automatica das 6h. Ate isto acontecer, a rotina sincroniza
+// mas nao emite ordem nenhuma (ver a trava em rodarRotinaDiaria).
+export async function liberarAutomatico({ uid, agora = new Date() }) {
+  const { db } = getFirebase();
+  await db.collection('config').doc('ordensConfig').set({
+    automaticoLiberado: true,
+    liberadoEm: (agora instanceof Date ? agora : new Date(agora)).toISOString(),
+    liberadoPor: uid || null,
+  });
 }

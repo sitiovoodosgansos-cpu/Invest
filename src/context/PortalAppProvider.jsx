@@ -47,6 +47,7 @@ const ESCRITAS = [
   'addCustomSpecies', 'deleteCustomSpecies',
   'replaceOrnabirdMirror', 'fetchOrnabirdGroups', 'syncFromOrnabird',
   'rodarRotinaAgora', 'pagarEEnviarOrdens',
+  'gerarOrdensDasVendas', 'acertarVendas', 'liberarRotinaAutomatica',
   'forceSync',
 ];
 
