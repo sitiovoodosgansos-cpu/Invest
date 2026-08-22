@@ -1221,6 +1221,7 @@ export function AppProvider({ children }) {
     forbidden: 'So o administrador mexe nas ordens de pagamento.',
     sem_ordens: 'Nenhuma ordem selecionada.',
     sem_vendas: 'Nenhuma venda selecionada.',
+    data_invalida: 'A data da ordem nao e uma data valida. Use o seletor de data.',
     missing_firebase: 'Falta a variavel FIREBASE_SERVICE_ACCOUNT no projeto "invest" da Vercel.',
     missing_cron_secret: 'Falta a variavel CRON_SECRET no projeto "invest" da Vercel.',
     proxy_error: 'A funcao /api/ordens do Invest nao respondeu. Veja os logs do projeto invest na Vercel.',
@@ -1288,9 +1289,12 @@ export function AppProvider({ children }) {
   };
 
   // Emite ordens SO das vendas escolhidas na tela.
-  const gerarOrdensDasVendas = async (saleIds) => {
+  //
+  // `referenceDate` (YYYY-MM-DD) carimba a ordem com outro dia — pra quando o
+  // pagamento aconteceu num dia e o lancamento no outro. Sem ele, vale hoje.
+  const gerarOrdensDasVendas = async (saleIds, referenceDate = null) => {
     try {
-      const r = await ordensRequest({ action: 'gerar', saleIds });
+      const r = await ordensRequest({ action: 'gerar', saleIds, referenceDate });
       setSaveError(null);
       return r;
     } catch (err) {

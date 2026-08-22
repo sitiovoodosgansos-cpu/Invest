@@ -93,6 +93,30 @@ async function marcarEEnviar(db, ids, uid) {
   return resultados;
 }
 
+// A data escolhida pro carimbo da ordem, ou null pra usar o dia de hoje.
+//
+// Valida de verdade, e nao so o formato: o dia vira parte do ID do documento no
+// Firestore (`20260822-<investidor>-1`). Um "2026-13-45" vindo de um cliente
+// adulterado geraria um id que nunca colide com nada — e a protecao contra
+// emitir a mesma ordem duas vezes, que depende justamente do id repetir, sairia
+// de cena em silencio.
+function dataDaOrdem(valor) {
+  if (valor === undefined || valor === null || valor === '') return null;
+  if (typeof valor !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) {
+    const err = new Error('data invalida');
+    err.code = 'data_invalida';
+    throw err;
+  }
+  // Round-trip pelo Date: pega 2026-02-31, que passa no formato mas nao existe.
+  const d = new Date(`${valor}T12:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== valor) {
+    const err = new Error('data invalida');
+    err.code = 'data_invalida';
+    throw err;
+  }
+  return valor;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
 
@@ -116,7 +140,8 @@ export default async function handler(req, res) {
     if (body.action === 'gerar') {
       const saleIds = Array.isArray(body.saleIds) ? body.saleIds.filter(Boolean) : [];
       if (saleIds.length === 0) return res.status(400).json({ error: 'sem_vendas' });
-      return res.status(200).json({ ok: true, ...(await emitirEscolhidas({ saleIds, uid })) });
+      const referenceDate = dataDaOrdem(body.referenceDate);
+      return res.status(200).json({ ok: true, ...(await emitirEscolhidas({ saleIds, uid, referenceDate })) });
     }
 
     // Declara as vendas escolhidas como ja acertadas fora do sistema. Elas
@@ -160,6 +185,7 @@ export default async function handler(req, res) {
       name: err?.name ?? null,
       message: err?.message ?? null,
     }));
+    if (codigo === 'data_invalida') return res.status(400).json({ error: 'data_invalida' });
     if (codigo === 'unauthorized') return res.status(401).json({ error: 'unauthorized' });
     if (codigo === 'forbidden') return res.status(403).json({ error: 'forbidden' });
     if (codigo === 'missing_firebase') return res.status(503).json({ error: 'missing_firebase' });

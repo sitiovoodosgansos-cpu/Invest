@@ -123,6 +123,90 @@ Não há valor mínimo: qualquer valor é pago.
 
 ---
 
+## 3b. O pagamento abate o saldo do investidor
+
+Até a versão anterior, pagar uma ordem não mexia no saldo de ninguém. O lucro
+das vendas do Ornabird não entrava na conta do saldo em canto nenhum — ele só
+existia na fila de pendentes —, então o investidor era pago e a tela de Aportes
+continuava mostrando o mesmo número de antes.
+
+`saldoOrnabird()` (em `src/utils/ordens.js`) separa o lucro de cada investidor
+em quatro estados mutuamente exclusivos:
+
+| Estado | O quê |
+|---|---|
+| `pendente` | Ainda não entrou em ordem nenhuma — é a fila |
+| `emAberto` | Já virou ordem, mas a ordem ainda não foi paga |
+| `pago` | Ordem paga |
+| `acertado` | Declarado como acertado fora do sistema |
+
+E garante a identidade:
+
+```
+credito = pago + acertado + emAberto + pendente
+```
+
+Ela vale **por construção**, porque cada parcela vem de um lugar diferente: uma
+venda ou está dentro de uma ordem — e aí o valor usado é o **congelado na linha
+da ordem**, que foi o que de fato se pagou — ou ainda não está, e aí vale a taxa
+de hoje. Usar a taxa de hoje para as duas daria um número diferente do
+comprovante que o investidor tem na mão assim que a taxa global mudasse.
+
+O que entra no saldo devido é `emAberto + pendente`. Pagar a ordem move o valor
+para `pago` e o saldo cai — que é o efeito inteiro.
+
+**As duas fontes de venda.** A coleção `/sales` (importações de CSV/PDF) e o
+espelho `ornabirdVitrine` são independentes e nunca se falaram. Na tela de
+Aportes elas aparecem em **colunas separadas**, e não somadas numa só, de
+propósito: se a mesma venda existir nas duas, o lucro dela entra duas vezes no
+acumulado, e ver os dois números lado a lado é o único jeito de descobrir isso.
+A tela avisa quando um investidor tem valor nas duas ao mesmo tempo.
+
+A tela de **Relatórios** e o portal do investidor continuam com a definição
+antiga de saldo, sem a parte do Ornabird. Foi decisão de escopo — mexer neles
+mudaria o relatório do link já compartilhado.
+
+---
+
+## 3c. Encerrar a participação de um investidor
+
+Encerrar **não é apagar**. Apagar leva junto as aves e o histórico de rateio, e
+os relatórios de meses passados passam a mostrar números diferentes dos que o
+investidor recebeu na época.
+
+Encerrar grava `encerradoEm` no cadastro e só isso. O efeito:
+
+- não recebe mais o aviso de "nenhuma venda hoje" — seria um convite diário para
+  quem acabou de sair;
+- some do seletor de investidor ao cadastrar ave nova e ao lançar aporte novo;
+- **continua** no seletor de "Registrar Pagamento", porque o acerto final é
+  justamente o pagamento que se faz depois da saída;
+- **continua recebendo ordem de pagamento** se ainda houver venda dele em
+  aberto. Dinheiro devido não deixa de ser devido porque a sociedade acabou.
+
+A tela de Investidores mostra os encerrados numa seção própria, com a data da
+saída e quanto ainda falta pagar; a fila de pendentes marca o grupo deles com o
+selo "participação encerrada", que é o lembrete de fazer o acerto final.
+
+---
+
+## 3d. A data da ordem
+
+A emissão manual aceita uma data (`referenceDate`), que começa em hoje. Existe
+para quando o dinheiro saiu num dia e o lançamento só foi feito no outro: a
+ordem tem que dizer o dia do dinheiro, senão o comprovante do investidor briga
+com o extrato do banco.
+
+O `createdAt` continua sendo o instante real — é o que uma conferência usa para
+saber **quando** o registro foi feito, que não é a data que ele declara.
+
+A data é validada no servidor antes de qualquer coisa, e não só no formato: ela
+vira parte do ID do documento (`20260822-<investidor>-1`), e um valor inválido
+geraria um ID que nunca colide com nada. A proteção contra emitir a mesma ordem
+duas vezes depende justamente do ID repetir, e sairia de cena em silêncio.
+
+---
+
 ## 4. Paga primeiro, avisa depois
 
 O investidor só recebe o comprovante depois que o dinheiro saiu. Por isso
@@ -210,13 +294,15 @@ na caixa de spam do investidor, o que é pior do que não chegar.
 
 | Arquivo | O quê |
 |---|---|
-| `src/utils/ordens.js` | A conta. Sem Firestore, sem rede — dá para testar sozinha |
+| `src/utils/ordens.js` | A conta, incluindo `saldoOrnabird()`. Sem Firestore, sem rede — dá para testar sozinha |
 | `api/_rotina-diaria.js` | A cadeia do dia, usada pelo cron e pelo botão "Rodar agora" |
 | `api/cron-diario.js` | A porta que a Vercel bate, e o `CRON_SECRET` |
 | `api/ordens.js` | Ações do dono: rodar agora, marcar como paga e enviar |
 | `api/_email.js` | Resend e os dois modelos de mensagem |
 | `src/utils/ordemEntrega.js` | Entrega manual: texto, PDF, WhatsApp e `mailto:` |
-| `src/pages/OrdensPagamento.jsx` | A tela |
+| `src/pages/OrdensPagamento.jsx` | A tela: fila de pendentes, saldo por investidor e as ordens do dia |
+| `src/pages/Financial.jsx` | O saldo do investidor, já com a parte do Ornabird |
+| `src/pages/Investors.jsx` | Encerrar participação e a seção de arquivados |
 
 `/paymentOrders` é a única coleção destas regras com **leitura fechada** — cada
 documento diz quanto um investidor recebeu. E a **escrita é negada para todo

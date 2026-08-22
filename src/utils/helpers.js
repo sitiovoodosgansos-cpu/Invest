@@ -280,6 +280,23 @@ export function resolveBirdInvestorForDate(bird, dateStr) {
   return resolveBirdOwnerAt(bird, dateStr);
 }
 
+// Investidor cuja participacao foi encerrada.
+//
+// Encerrar NAO e apagar, e a diferenca importa: apagar leva junto as aves e o
+// historico de rateio, e o relatorio de meses passados passa a mentir. Um
+// investidor encerrado sai das listas de trabalho — nao recebe aviso de zero
+// vendas, nao aparece pra receber ave nova — mas tudo que ele ja recebeu
+// continua no lugar, e o que ainda esta em aberto continua sendo devido.
+//
+// So a data explicita encerra. Cadastro antigo, sem o campo, e ativo.
+export function investidorEncerrado(investor) {
+  return Boolean(investor?.encerradoEm);
+}
+
+export function investidoresAtivos(investors) {
+  return (Array.isArray(investors) ? investors : []).filter(i => !investidorEncerrado(i));
+}
+
 export function filterValidTransactions(sales) {
   return sales.filter(sale => {
     const status = (sale.transactionStatus || sale.statusTransacao || '').toUpperCase();

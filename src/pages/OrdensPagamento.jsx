@@ -5,8 +5,8 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import { formatCurrency, formatPercent } from '../utils/helpers';
-import { ORDEM_STATUS, ORDEM_TIPO, diaBrasilia, listarPendentes } from '../utils/ordens';
+import { formatCurrency, formatPercent, investidorEncerrado } from '../utils/helpers';
+import { ORDEM_STATUS, ORDEM_TIPO, diaBrasilia, listarPendentes, saldoOrnabird } from '../utils/ordens';
 import {
   pdfDaOrdem, pdfDoDia, textoDaOrdem, linkWhatsapp, linkEmail,
 } from '../utils/ordemEntrega';
@@ -322,20 +322,28 @@ function CartaoOrdem({ ordem, selecionada, onToggle, selecionavel }) {
 // Entao antes de emitir qualquer coisa o dono olha a fila e decide: estas aqui
 // viram ordem, aquelas ali ja estavam acertadas. Depois disso a fila so tem
 // venda nova e a rotina automatica passa a ser segura.
-function FilaPendentes({ pendentes, semDono, onGerar, onAcertar, ocupado }) {
+function FilaPendentes({ pendentes, semDono, encerrados, onGerar, onAcertar, ocupado }) {
   const [selecionadas, setSelecionadas] = useState(() => new Set());
   const [ate, setAte] = useState('');
-  const [filtroInvestidor, setFiltroInvestidor] = useState('');
+  // Varios investidores de uma vez, nao um so: o pedido foi poder gerar "qual
+  // ou quais". Conjunto vazio = todos, que e o estado util na maioria dos dias.
+  const [filtroInvestidores, setFiltroInvestidores] = useState(() => new Set());
   const [expandidos, setExpandidos] = useState(() => new Set());
+  // A data que vai ser carimbada na ordem. Comeca em hoje — o caso comum — mas
+  // existe pra quando o dinheiro saiu num dia e o lancamento so foi feito no
+  // outro: a ordem tem que dizer o dia do dinheiro.
+  const [dataOrdem, setDataOrdem] = useState(() => diaBrasilia());
+
+  const noFiltro = (investorId) => filtroInvestidores.size === 0 || filtroInvestidores.has(investorId);
 
   const visiveis = useMemo(
-    () => (filtroInvestidor
-      ? pendentes.filter(p => p.investorId === filtroInvestidor)
-      : pendentes),
-    [pendentes, filtroInvestidor]
+    () => pendentes.filter(p => noFiltro(p.investorId)),
+    [pendentes, filtroInvestidores]
   );
 
-  const investidores = useMemo(() => {
+  // Todos os investidores da fila, com o resumo de cada um — a lista das
+  // "caixinhas" de filtro e a dos grupos sao a mesma coisa vista duas vezes.
+  const todosOsGrupos = useMemo(() => {
     const mapa = new Map();
     for (const p of pendentes) {
       if (!mapa.has(p.investorId)) {
@@ -343,10 +351,24 @@ function FilaPendentes({ pendentes, semDono, onGerar, onAcertar, ocupado }) {
       }
       mapa.get(p.investorId).linhas.push(p);
     }
-    return [...mapa.values()]
-      .filter(g => !filtroInvestidor || g.id === filtroInvestidor)
-      .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [pendentes, filtroInvestidor]);
+    return [...mapa.values()].map(g => ({
+      ...g,
+      total: g.linhas.reduce((s, l) => s + l.profit, 0),
+      // As linhas ja vem da mais recente pra mais antiga, entao a primeira e a
+      // ultima venda sao as pontas. Calculadas explicitamente pro rotulo do
+      // periodo continuar lendo "de X a Y" mesmo se a ordenacao mudar de novo.
+      maisRecente: g.linhas.reduce((m, l) => (!m || (l.date || '') > m ? (l.date || m) : m), ''),
+      maisAntiga: g.linhas.reduce((m, l) => (!m || (l.date || '') < m ? (l.date || m) : m), ''),
+    }))
+      // Do investidor que vendeu mais recentemente pro que vendeu ha mais
+      // tempo: mesma logica das linhas, pelo mesmo motivo.
+      .sort((a, b) => (b.maisRecente || '').localeCompare(a.maisRecente || ''));
+  }, [pendentes]);
+
+  const investidores = useMemo(
+    () => todosOsGrupos.filter(g => noFiltro(g.id)),
+    [todosOsGrupos, filtroInvestidores]
+  );
 
   const alternar = (saleId) => setSelecionadas(prev => {
     const p = new Set(prev);
@@ -373,12 +395,18 @@ function FilaPendentes({ pendentes, semDono, onGerar, onAcertar, ocupado }) {
   );
   const totalEscolhido = escolhidas.reduce((s, p) => s + p.profit, 0);
 
-  const executar = async (acao) => {
+  const executar = async (acao, extra) => {
     const ids = [...selecionadas];
     if (ids.length === 0) return;
-    await acao(ids);
+    await acao(ids, extra);
     setSelecionadas(new Set());
   };
+
+  const alternarInvestidor = (id) => setFiltroInvestidores(prev => {
+    const p = new Set(prev);
+    if (p.has(id)) p.delete(id); else p.add(id);
+    return p;
+  });
 
   return (
     <div style={{ marginBottom: 28 }}>
@@ -396,19 +424,33 @@ function FilaPendentes({ pendentes, semDono, onGerar, onAcertar, ocupado }) {
         fora do sistema, para sair da fila sem gerar pagamento.
       </p>
 
-      <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <select
-          className="form-input"
-          style={{ width: 'auto', minWidth: 180 }}
-          value={filtroInvestidor}
-          onChange={e => setFiltroInvestidor(e.target.value)}
+      {/* Uma caixinha por investidor, e nao uma lista suspensa de escolha unica:
+          o pedido foi poder gerar as ordens de "qual ou quais" investidores. */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', marginBottom: 10,
+      }}>
+        <span style={{ fontSize: 12, color: '#6b7280', marginRight: 2 }}>Investidores:</span>
+        <button
+          type="button"
+          className={`btn btn-sm ${filtroInvestidores.size === 0 ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setFiltroInvestidores(new Set())}
         >
-          <option value="">Todos os investidores</option>
-          {[...new Map(pendentes.map(p => [p.investorId, p.investorName])).entries()]
-            .sort((a, b) => a[1].localeCompare(b[1]))
-            .map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
-        </select>
+          Todos ({todosOsGrupos.length})
+        </button>
+        {todosOsGrupos.map(g => (
+          <button
+            key={g.id}
+            type="button"
+            className={`btn btn-sm ${filtroInvestidores.has(g.id) ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => alternarInvestidor(g.id)}
+            title={`${g.linhas.length} venda(s) · ${formatCurrency(g.total)}`}
+          >
+            {g.nome} ({g.linhas.length})
+          </button>
+        ))}
+      </div>
 
+      <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 12, color: '#6b7280' }}>até</span>
           <input
@@ -471,14 +513,26 @@ function FilaPendentes({ pendentes, semDono, onGerar, onAcertar, ocupado }) {
                   style={{ width: 18, height: 18, cursor: 'pointer', flexShrink: 0 }}
                 />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: 15 }}>{grupo.nome}</div>
+                  <div style={{ fontWeight: 600, fontSize: 15, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    {grupo.nome}
+                    {/* Quem saiu mas ainda tem dinheiro na fila. E o acerto final
+                        que ninguem lembra de fazer — entao a fila lembra. */}
+                    {encerrados.has(grupo.id) && (
+                      <span style={{
+                        fontSize: 11, fontWeight: 600, padding: '1px 7px', borderRadius: 999,
+                        background: '#fef3c7', color: '#92400e',
+                      }}>
+                        participação encerrada
+                      </span>
+                    )}
+                  </div>
                   <div style={{ fontSize: 12, color: '#6b7280' }}>
                     {grupo.linhas.length} venda(s) ·{' '}
-                    {dataBr(grupo.linhas[0]?.date)} a {dataBr(grupo.linhas[grupo.linhas.length - 1]?.date)}
+                    {dataBr(grupo.maisAntiga)} a {dataBr(grupo.maisRecente)}
                   </div>
                 </div>
                 <div style={{ fontSize: 16, fontWeight: 700, flexShrink: 0 }}>
-                  {formatCurrency(grupo.linhas.reduce((s, l) => s + l.profit, 0))}
+                  {formatCurrency(grupo.total)}
                 </div>
                 {grupo.linhas.length > 5 && (
                   <button
@@ -548,8 +602,21 @@ function FilaPendentes({ pendentes, semDono, onGerar, onAcertar, ocupado }) {
           <div style={{ fontSize: 13 }}>
             <strong>{selecionadas.size}</strong> venda(s) selecionada(s) ·{' '}
             {formatCurrency(totalEscolhido)} a pagar
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+              {[...new Set(escolhidas.map(p => p.investorName))].join(', ') || '—'}
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b7280' }}>
+              Data da ordem
+              <input
+                type="date"
+                className="form-input"
+                style={{ width: 'auto' }}
+                value={dataOrdem}
+                onChange={e => setDataOrdem(e.target.value)}
+              />
+            </label>
             <button
               type="button"
               className="btn btn-secondary"
@@ -568,8 +635,8 @@ function FilaPendentes({ pendentes, semDono, onGerar, onAcertar, ocupado }) {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={ocupado}
-              onClick={() => executar(onGerar)}
+              disabled={ocupado || !dataOrdem}
+              onClick={() => executar(onGerar, dataOrdem)}
             >
               <Receipt size={16} />
               {ocupado ? 'Processando…' : 'Gerar ordens das selecionadas'}
@@ -577,6 +644,69 @@ function FilaPendentes({ pendentes, semDono, onGerar, onAcertar, ocupado }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// O SALDO, VISTO DO LADO DAS ORDENS.
+//
+// Sem isto, "paguei" e um evento que nao deixa marca: a ordem sai da fila do
+// dia e pronto. O dono nao tem onde olhar pra saber quanto ainda deve a cada
+// um — e "quanto eu ainda devo" e a pergunta que ele faz todo dia.
+//
+// As quatro colunas somam o credito inteiro, e a soma e a prova de que nao ha
+// dinheiro escondido: tudo que foi vendido esta em exatamente uma delas.
+function SaldoPorInvestidor({ saldos }) {
+  const comAlgo = saldos.filter(s => s.credito > 0);
+  if (comAlgo.length === 0) return null;
+
+  const totalAPagar = comAlgo.reduce((s, x) => s + x.aPagar, 0);
+  const totalPago = comAlgo.reduce((s, x) => s + x.pago, 0);
+
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <h3 className="card-title">Saldo das vendas do Ornabird</h3>
+        <span style={{ fontSize: 13, color: '#6b7280' }}>
+          {formatCurrency(totalAPagar)} em aberto · {formatCurrency(totalPago)} já pago
+        </span>
+      </div>
+      <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 10, lineHeight: 1.5 }}>
+        Cada ordem paga sai do <strong>em aberto</strong> e entra no <strong>pago</strong> —
+        é assim que o pagamento abate o saldo. As quatro colunas somam o lucro
+        inteiro das vendas do investidor, então nada fica fora da conta.
+      </p>
+      <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 620 }}>
+          <thead>
+            <tr style={{ background: '#fafafa' }}>
+              <th style={{ textAlign: 'left', padding: '10px 14px', fontSize: 12, color: '#6b7280' }}>Investidor</th>
+              <th style={{ textAlign: 'right', padding: '10px 14px', fontSize: 12, color: '#6b7280' }}>Na fila</th>
+              <th style={{ textAlign: 'right', padding: '10px 14px', fontSize: 12, color: '#6b7280' }}>Ordem emitida</th>
+              <th style={{ textAlign: 'right', padding: '10px 14px', fontSize: 12, color: '#6b7280' }}>Pago</th>
+              <th style={{ textAlign: 'right', padding: '10px 14px', fontSize: 12, color: '#6b7280' }}>Acertado fora</th>
+              <th style={{ textAlign: 'right', padding: '10px 14px', fontSize: 12, color: '#6b7280' }}>A pagar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {comAlgo.map(s => (
+              <tr key={s.investorId} style={{ borderTop: '1px solid #f0f0f0' }}>
+                <td style={{ padding: '10px 14px', fontSize: 13 }}>
+                  {s.nome}
+                  {s.encerrado && (
+                    <span style={{ fontSize: 11, color: '#92400e', marginLeft: 6 }}>· encerrado</span>
+                  )}
+                </td>
+                <td style={{ padding: '10px 14px', fontSize: 13, textAlign: 'right', color: '#6b7280' }}>{formatCurrency(s.pendente)}</td>
+                <td style={{ padding: '10px 14px', fontSize: 13, textAlign: 'right', color: '#6b7280' }}>{formatCurrency(s.emAberto)}</td>
+                <td style={{ padding: '10px 14px', fontSize: 13, textAlign: 'right', color: 'var(--success, #059669)' }}>{formatCurrency(s.pago)}</td>
+                <td style={{ padding: '10px 14px', fontSize: 13, textAlign: 'right', color: '#6b7280' }}>{formatCurrency(s.acertado)}</td>
+                <td style={{ padding: '10px 14px', fontSize: 14, textAlign: 'right', fontWeight: 700 }}>{formatCurrency(s.aPagar)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -609,6 +739,29 @@ export default function OrdensPagamento() {
       ordensExistentes: ordens,
     }),
     [ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate, ordens]
+  );
+
+  const encerrados = useMemo(
+    () => new Set((investors || []).filter(investidorEncerrado).map(i => i.id)),
+    [investors]
+  );
+
+  // O saldo de cada investidor no lado Ornabird: quanto ele ja recebeu e quanto
+  // ainda falta. E a mesma conta que a tela de Aportes usa — vive em ordens.js
+  // justamente pra as duas telas nunca darem numeros diferentes.
+  const saldos = useMemo(
+    () => saldoOrnabird({
+      vendas: Array.isArray(ornabirdVitrine) ? ornabirdVitrine : [],
+      birds,
+      investors,
+      rates: { eggProfitRate, birdProfitRate },
+      ordens,
+    }).map(s => ({
+      ...s,
+      nome: (investors || []).find(i => i.id === s.investorId)?.name || '(investidor removido)',
+      encerrado: encerrados.has(s.investorId),
+    })).sort((a, b) => b.aPagar - a.aPagar || a.nome.localeCompare(b.nome)),
+    [ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate, ordens, encerrados]
   );
 
   // A emissao automatica das 6h so e liberada depois que o dono revisa a fila.
@@ -899,12 +1052,13 @@ export default function OrdensPagamento() {
         <FilaPendentes
           pendentes={pendentes}
           semDono={pendentesSemDono}
+          encerrados={encerrados}
           ocupado={processando}
-          onGerar={async (saleIds) => {
+          onGerar={async (saleIds, referenceDate) => {
             setProcessando(true);
             setResultado(null);
             try {
-              const r = await gerarOrdensDasVendas(saleIds);
+              const r = await gerarOrdensDasVendas(saleIds, referenceDate);
               setDia(r.referenceDate || diaBrasilia());
               setResultado({
                 tom: 'ok',
@@ -925,6 +1079,8 @@ export default function OrdensPagamento() {
           }}
         />
       )}
+
+      <SaldoPorInvestidor saldos={saldos} />
 
       {/* --- A fila --- */}
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

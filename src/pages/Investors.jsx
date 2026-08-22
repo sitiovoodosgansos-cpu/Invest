@@ -1,14 +1,22 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { formatCurrency, getInitials, calculateProfitDistribution } from '../utils/helpers';
+import { formatCurrency, getInitials, calculateProfitDistribution, investidorEncerrado } from '../utils/helpers';
+import { saldoOrnabird, diaBrasilia } from '../utils/ordens';
 import { hashPassword } from '../utils/crypto';
-import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff, Link, Check, XCircle } from 'lucide-react';
+import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff, Link, Check, XCircle, Archive, RotateCcw } from 'lucide-react';
 import Portal from '../components/Portal';
 
 // Um so lugar com os campos do formulario. Antes esta lista aparecia escrita
 // por extenso em quatro pontos (estado inicial, "novo investidor", pos-salvar,
 // e a edicao); acrescentar um campo exigia lembrar dos quatro, e o que ficasse
 // de fora viraria um campo que some sozinho ao salvar.
+function formatDataBr(iso) {
+  const dia = String(iso || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return '—';
+  const [a, m, d] = dia.split('-');
+  return `${d}/${m}/${a}`;
+}
+
 const FORMULARIO_VAZIO = {
   name: '', email: '', phone: '', document: '',
   pixKey: '',
@@ -24,6 +32,7 @@ export default function Investors() {
     generateInvestorPortalToken, revokeInvestorPortalToken,
     generateInvestorPagesToken, revokeInvestorPagesToken,
     eggProfitRate, birdProfitRate,
+    ornabirdVitrine, paymentOrders,
   } = useApp();
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -207,9 +216,54 @@ export default function Investors() {
     }
   };
 
+  // Quanto ainda esta em aberto de cada um nas vendas do Ornabird. E o numero
+  // que decide se encerrar agora deixa alguem sem receber.
+  const emAberto = useMemo(() => {
+    const mapa = new Map();
+    for (const s of saldoOrnabird({
+      vendas: Array.isArray(ornabirdVitrine) ? ornabirdVitrine : [],
+      birds,
+      investors,
+      rates: { eggProfitRate, birdProfitRate },
+      ordens: Array.isArray(paymentOrders) ? paymentOrders : [],
+    })) mapa.set(s.investorId, s.aPagar);
+    return mapa;
+  }, [ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate, paymentOrders]);
+
+  // ENCERRAR NAO E APAGAR.
+  //
+  // Apagar leva junto as aves e o historico de rateio: os relatorios de meses
+  // passados passariam a mostrar numeros diferentes dos que o investidor
+  // recebeu na epoca. Encerrar so tira ele das listas de trabalho — o passado
+  // fica exatamente como estava, e o que ainda esta em aberto continua devido.
+  const handleEncerrar = (investor) => {
+    const aberto = emAberto.get(investor.id) || 0;
+    const alerta = aberto > 0
+      ? `\n\nATENCAO: ainda ha ${formatCurrency(aberto)} em aberto para ${investor.name}. `
+        + 'Encerrar nao apaga essa divida — as vendas continuam na fila para voce '
+        + 'gerar a ordem final.'
+      : '';
+    if (!window.confirm(
+      `Encerrar a participação de ${investor.name}?${alerta}\n\n`
+      + 'Ele sai da lista de ativos e vai para os arquivados. As aves, as vendas e '
+      + 'os relatórios continuam como estão, e você pode reativar quando quiser.'
+    )) return;
+    updateInvestor(investor.id, {
+      encerradoEm: diaBrasilia(),
+      encerradoPor: 'admin',
+    });
+  };
+
+  const handleReativar = (investor) => {
+    if (!window.confirm(`Reativar a participação de ${investor.name}?`)) return;
+    updateInvestor(investor.id, { encerradoEm: null, encerradoPor: null });
+  };
+
   const filtered = investors.filter(i =>
     i.name.toLowerCase().includes(search.toLowerCase())
   );
+  const ativos = filtered.filter(i => !investidorEncerrado(i));
+  const arquivados = filtered.filter(investidorEncerrado);
 
   return (
     <div className="animate-in">
@@ -235,7 +289,7 @@ export default function Investors() {
       </div>
 
       <div className="grid-3">
-        {filtered.map(investor => {
+        {ativos.map(investor => {
           const investorBirds = birds.filter(b => b.investorId === investor.id);
           const totalMatrices = investorBirds.reduce((s, b) => s + (parseInt(b.matrixCount) || 0), 0);
           const totalBreeders = investorBirds.reduce((s, b) => s + (parseInt(b.breederCount) || 0), 0);
@@ -254,6 +308,13 @@ export default function Investors() {
                 <div style={{ display: 'flex', gap: 4 }}>
                   <button className="btn-icon edit" onClick={() => handleEdit(investor)} title="Editar">
                     <Edit size={16} />
+                  </button>
+                  <button
+                    className="btn-icon"
+                    onClick={() => handleEncerrar(investor)}
+                    title="Encerrar participacao (vai para os arquivados)"
+                  >
+                    <Archive size={16} />
                   </button>
                   <button className="btn-icon" onClick={() => handleDelete(investor.id)} title="Remover">
                     <Trash2 size={16} />
@@ -460,6 +521,90 @@ export default function Investors() {
           <Users size={48} />
           <h3>Nenhum investidor cadastrado</h3>
           <p>Adicione o primeiro investidor para comecar</p>
+        </div>
+      )}
+
+      {ativos.length === 0 && arquivados.length > 0 && (
+        <div className="empty-state">
+          <Users size={48} />
+          <h3>Nenhum investidor ativo</h3>
+          <p>Os encerrados continuam abaixo, com o histórico intacto</p>
+        </div>
+      )}
+
+      {/* OS ARQUIVADOS.
+          Cartao enxuto de proposito: quem esta aqui nao esta em operacao, entao
+          links de portal e estatisticas de plantel so ocupariam espaco. O que
+          importa e a data da saida e se sobrou alguma coisa pra pagar. */}
+      {arquivados.length > 0 && (
+        <div style={{ marginTop: 32 }}>
+          {/* Icone e titulo num invólucro so: `card-header` distribui os filhos
+              com space-between, e soltos eles iriam parar em pontas opostas. */}
+          <div className="card-header">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <Archive size={18} />
+              <span className="card-title">Investidores arquivados ({arquivados.length})</span>
+            </span>
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.5 }}>
+            Participação encerrada. Não recebem aviso de vendas e não aparecem para
+            receber ave nova — mas as aves, as vendas e os relatórios do período
+            deles continuam exatamente como estavam.
+          </p>
+          <div className="grid-3">
+            {arquivados.map(investor => {
+              const investorBirds = birds.filter(b => b.investorId === investor.id);
+              const aberto = emAberto.get(investor.id) || 0;
+              return (
+                <div className="investor-card" key={investor.id} style={{ opacity: 0.85 }}>
+                  <div className="investor-card-header">
+                    <div className="investor-avatar" style={{ filter: 'grayscale(1)' }}>
+                      {getInitials(investor.name)}
+                    </div>
+                    <div className="investor-info" style={{ flex: 1 }}>
+                      <h3>{investor.name}</h3>
+                      <p>Encerrado em {formatDataBr(investor.encerradoEm)}</p>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button className="btn-icon edit" onClick={() => handleReativar(investor)} title="Reativar participacao">
+                        <RotateCcw size={16} />
+                      </button>
+                      <button className="btn-icon" onClick={() => handleDelete(investor.id)} title="Remover">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="investor-stats">
+                    <div>
+                      <div className="investor-stat-label">Espécies</div>
+                      <div className="investor-stat-value">{investorBirds.length}</div>
+                    </div>
+                    <div>
+                      <div className="investor-stat-label">Em aberto</div>
+                      <div
+                        className="investor-stat-value"
+                        style={{ color: aberto > 0 ? 'var(--danger)' : 'var(--text-secondary)' }}
+                      >
+                        {formatCurrency(aberto)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {aberto > 0 && (
+                    <div style={{
+                      marginTop: 10, fontSize: 12, lineHeight: 1.5,
+                      background: '#fef3c7', color: '#92400e',
+                      padding: '8px 10px', borderRadius: 8,
+                    }}>
+                      Ainda há {formatCurrency(aberto)} a pagar. As vendas continuam na
+                      fila em Ordens de Pagamento para o acerto final.
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

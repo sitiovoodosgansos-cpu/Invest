@@ -30,6 +30,7 @@ import {
   resolveBirdInvestorForDate,
   resolveRateFor,
   normalizeDay,
+  investidorEncerrado,
 // Com a extensao .js de proposito: este arquivo tambem e carregado pelo Node
 // nas funcoes da /api, e o Node ESM nao adivinha extensao como o Vite faz.
 } from './helpers.js';
@@ -190,8 +191,91 @@ export function listarPendentes({
     });
   }
 
-  pendentes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  // Da venda MAIS RECENTE pra mais antiga.
+  //
+  // A fila e uma tela de conferencia, nao um extrato: o que o dono precisa ver
+  // primeiro e o que acabou de vender, porque e o que ele ainda nao conferiu.
+  // Do jeito contrario, uma fila com mil vendas de historico abria em maio e o
+  // dinheiro de ontem ficava a mil linhas de distancia.
+  //
+  // A ordem EMITIDA continua do mais antigo pro mais novo (ver construirOrdens):
+  // la o documento se le como extrato, e extrato comeca no comeco.
+  pendentes.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   return { pendentes, semDono };
+}
+
+// Quanto cada investidor tem a receber pelas vendas do Ornabird, e quanto disso
+// ja saiu.
+//
+// POR QUE ISTO EXISTE
+// -------------------
+// A tela de Aportes calcula o saldo do investidor como
+// "rendimento + lucro de vendas - pagamentos". As vendas do Ornabird nao
+// entravam nessa conta em canto nenhum: o lucro delas so aparecia na fila de
+// pendentes, e uma ordem paga nao abatia nada. Pagar um investidor deixava o
+// saldo dele exatamente onde estava.
+//
+// A IDENTIDADE QUE ISTO GARANTE
+// -----------------------------
+//   credito = pago + acertado + emAberto + pendente
+//
+// Ela vale por construcao porque cada parcela vem de um lugar diferente e
+// mutuamente exclusivo: uma venda ou esta dentro de uma ordem (e ai o valor
+// usado e o CONGELADO na linha da ordem, que foi o que de fato se pagou), ou
+// ainda nao esta (e ai vale a taxa de hoje). Somar as duas fontes com a mesma
+// taxa daria um numero que nao bate com o comprovante que o investidor tem na
+// mao quando a taxa global mudar.
+//
+// O que entra no saldo em aberto e `emAberto + pendente`: o que ja foi pago ou
+// acertado sai da conta, que e exatamente o pedido — o pagamento abate.
+export function saldoOrnabird({ vendas, birds, investors, rates, ordens = [] }) {
+  const porInvestidor = new Map();
+  const pegar = (id) => {
+    if (!porInvestidor.has(id)) {
+      porInvestidor.set(id, { investorId: id, credito: 0, pago: 0, acertado: 0, emAberto: 0, pendente: 0 });
+    }
+    return porInvestidor.get(id);
+  };
+
+  for (const ordem of Array.isArray(ordens) ? ordens : []) {
+    // Ordem cancelada nao conta em lugar nenhum: as vendas dela voltaram pra
+    // fila e vao ser contadas como pendentes, pela mesma regra de vendasJaEmOrdem.
+    if (ordem?.status === ORDEM_STATUS.CANCELADA) continue;
+    const acerto = ordem?.kind === ORDEM_TIPO.ACERTADA;
+    const paga = ordem?.status === ORDEM_STATUS.PAGA;
+
+    for (const item of ordem?.items || []) {
+      // No acerto o dono de cada venda esta na LINHA (um documento de acerto
+      // carrega vendas de varios investidores). Na ordem de pagamento o dono e
+      // do documento inteiro.
+      const investorId = acerto ? item?.investorId : ordem?.investorId;
+      if (!investorId) continue;
+      const valor = Number(item?.profit) || 0;
+      const alvo = pegar(investorId);
+      if (acerto) alvo.acertado += valor;
+      else if (paga) alvo.pago += valor;
+      else alvo.emAberto += valor;
+    }
+  }
+
+  const { pendentes } = listarPendentes({ vendas, birds, investors, rates, ordensExistentes: ordens });
+  for (const p of pendentes) pegar(p.investorId).pendente += p.profit;
+
+  const lista = [];
+  for (const linha of porInvestidor.values()) {
+    const pago = arredondar(linha.pago);
+    const acertado = arredondar(linha.acertado);
+    const emAberto = arredondar(linha.emAberto);
+    const pendente = arredondar(linha.pendente);
+    lista.push({
+      ...linha,
+      pago, acertado, emAberto, pendente,
+      credito: arredondar(pago + acertado + emAberto + pendente),
+      // O que ainda deve entrar no saldo do investidor.
+      aPagar: arredondar(emAberto + pendente),
+    });
+  }
+  return lista;
 }
 
 // Quantas vendas cabem num documento de acerto.
@@ -349,6 +433,13 @@ export function construirOrdens({
     // Numa emissao manual nao ha aviso de zero vendas: quem ficou de fora
     // ficou porque o dono nao escolheu as vendas dele, e nao porque nao vendeu.
     if (!temVenda && !comAvisoZero) continue;
+
+    // Quem encerrou a participacao nao recebe "que tal comprar mais aves?" —
+    // seria um convite diario pra quem acabou de sair. Mas repare que isto so
+    // desliga o AVISO: se ainda houver venda dele em aberto, a ordem de
+    // pagamento sai normalmente. Dinheiro devido nao deixa de ser devido
+    // porque a sociedade acabou.
+    if (!temVenda && investidorEncerrado(investor)) continue;
 
     // Aviso de zero vendas so pra quem quer receber. O padrao e receber — foi
     // o pedido —, mas um investidor que so vende de vez em quando levaria um
