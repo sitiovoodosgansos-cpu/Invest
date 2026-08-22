@@ -1,7 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import {
-  formatCurrency, formatAgeMonths, buildVitrineRows,
+  // `formatDate` e usada duas vezes em LinhaAnuncio — data de insercao e data
+  // da vacina. Ela saiu desta lista junto com a tabela de vendas, quando a
+  // pagina foi dividida, mas as duas linhas do card ficaram. O resultado foi
+  // uma pagina que so caia quando um anuncio trazia `createdAt`: nenhum erro
+  // de build, nenhum aviso, e a tela inteira em branco no primeiro anuncio
+  // desses que chegou do Ornabird.
+  formatCurrency, formatDate, formatAgeMonths, buildVitrineRows,
   mapOrnabirdVitrineListings,
 } from '../utils/helpers';
 import { Store, Search, User, ImageOff } from 'lucide-react';
