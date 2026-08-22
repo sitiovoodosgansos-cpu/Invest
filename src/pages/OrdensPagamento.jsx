@@ -324,6 +324,11 @@ function CartaoOrdem({ ordem, selecionada, onToggle, selecionavel }) {
 // venda nova e a rotina automatica passa a ser segura.
 function FilaPendentes({ pendentes, semDono, encerrados, onGerar, onAcertar, ocupado }) {
   const [selecionadas, setSelecionadas] = useState(() => new Set());
+  // O periodo das VENDAS que entram na fila — "de ... ate ...", nao so "ate".
+  // Com um limite so, escolher a primeira quinzena de julho exigia marcar a
+  // mao: dava pra dizer "ate 15/07", mas nao "a partir de 01/07". Cada ponta e
+  // opcional, entao "so ate" e "so a partir de" continuam valendo.
+  const [de, setDe] = useState('');
   const [ate, setAte] = useState('');
   // Varios investidores de uma vez, nao um so: o pedido foi poder gerar "qual
   // ou quais". Conjunto vazio = todos, que e o estado util na maioria dos dias.
@@ -335,17 +340,36 @@ function FilaPendentes({ pendentes, semDono, encerrados, onGerar, onAcertar, ocu
   const [dataOrdem, setDataOrdem] = useState(() => diaBrasilia());
 
   const noFiltro = (investorId) => filtroInvestidores.size === 0 || filtroInvestidores.has(investorId);
+  // Datas sao YYYY-MM-DD, entao comparar como texto ja ordena certo — e evita
+  // criar um Date por linha numa fila de mil e poucas vendas.
+  const noPeriodo = (data) => {
+    const d = data || '';
+    if (de && d < de) return false;
+    if (ate && d > ate) return false;
+    return true;
+  };
 
-  const visiveis = useMemo(
-    () => pendentes.filter(p => noFiltro(p.investorId)),
-    [pendentes, filtroInvestidores]
+  // O periodo primeiro, o investidor depois. A ordem importa: as caixinhas de
+  // investidor contam DENTRO do periodo escolhido, entao "Eduardo (138)" vira
+  // "Eduardo (12)" quando o dono limita os dias — e o numero da caixinha e
+  // exatamente o que ele vai gerar se clicar nela.
+  const doPeriodo = useMemo(
+    () => pendentes.filter(p => noPeriodo(p.date)),
+    [pendentes, de, ate]
   );
 
-  // Todos os investidores da fila, com o resumo de cada um — a lista das
+  const visiveis = useMemo(
+    () => doPeriodo.filter(p => noFiltro(p.investorId)),
+    [doPeriodo, filtroInvestidores]
+  );
+
+  const comFiltro = filtroInvestidores.size > 0 || Boolean(de) || Boolean(ate);
+
+  // Os investidores do periodo, com o resumo de cada um — a lista das
   // "caixinhas" de filtro e a dos grupos sao a mesma coisa vista duas vezes.
   const todosOsGrupos = useMemo(() => {
     const mapa = new Map();
-    for (const p of pendentes) {
+    for (const p of doPeriodo) {
       if (!mapa.has(p.investorId)) {
         mapa.set(p.investorId, { id: p.investorId, nome: p.investorName, linhas: [] });
       }
@@ -363,7 +387,7 @@ function FilaPendentes({ pendentes, semDono, encerrados, onGerar, onAcertar, ocu
       // Do investidor que vendeu mais recentemente pro que vendeu ha mais
       // tempo: mesma logica das linhas, pelo mesmo motivo.
       .sort((a, b) => (b.maisRecente || '').localeCompare(a.maisRecente || ''));
-  }, [pendentes]);
+  }, [doPeriodo]);
 
   const investidores = useMemo(
     () => todosOsGrupos.filter(g => noFiltro(g.id)),
@@ -382,12 +406,15 @@ function FilaPendentes({ pendentes, semDono, encerrados, onGerar, onAcertar, ocu
     return p;
   });
 
-  // O botao que torna a limpeza do historico praticavel: numa fila de mil e
-  // poucas vendas, marcar uma a uma nao e opcao.
-  const selecionarAteData = () => {
-    if (!ate) return;
-    definir(visiveis.filter(p => (p.date || '') <= ate).map(p => p.saleId), true);
-  };
+  // Quantas das selecionadas estao ESCONDIDAS pelo filtro atual.
+  //
+  // A acao manda o que esta selecionado, nao o que esta na tela — entao sem
+  // este aviso o dono poderia escolher trinta vendas, mudar o periodo, e gerar
+  // uma ordem com vendas que ele nao esta vendo no momento do clique.
+  const escondidas = useMemo(() => {
+    const naTela = new Set(visiveis.map(p => p.saleId));
+    return [...selecionadas].filter(id => !naTela.has(id)).length;
+  }, [selecionadas, visiveis]);
 
   const escolhidas = useMemo(
     () => pendentes.filter(p => selecionadas.has(p.saleId)),
@@ -450,35 +477,72 @@ function FilaPendentes({ pendentes, semDono, encerrados, onGerar, onAcertar, ocu
         ))}
       </div>
 
+      {/* O periodo das VENDAS. Cada ponta e opcional: so "de" le como "a partir
+          de", so "ate" le como "ate", e as duas juntas fecham o intervalo. */}
       <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: '#6b7280' }}>Vendas de</span>
+          <input
+            type="date"
+            className="form-input"
+            style={{ width: 'auto' }}
+            value={de}
+            max={ate || undefined}
+            onChange={e => setDe(e.target.value)}
+            aria-label="Vendas a partir desta data"
+          />
           <span style={{ fontSize: 12, color: '#6b7280' }}>até</span>
           <input
             type="date"
             className="form-input"
             style={{ width: 'auto' }}
             value={ate}
+            min={de || undefined}
             onChange={e => setAte(e.target.value)}
-            aria-label="Selecionar vendas ate esta data"
+            aria-label="Vendas ate esta data"
           />
-          <button type="button" className="btn btn-secondary btn-sm" onClick={selecionarAteData} disabled={!ate}>
-            Selecionar até essa data
-          </button>
         </div>
 
         <button
           type="button"
           className="btn btn-secondary btn-sm"
           onClick={() => definir(visiveis.map(p => p.saleId), true)}
+          disabled={visiveis.length === 0}
         >
-          Selecionar todas ({visiveis.length})
+          Selecionar as {visiveis.length} da lista
         </button>
+        {comFiltro && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => { setDe(''); setAte(''); setFiltroInvestidores(new Set()); }}
+          >
+            Limpar filtros
+          </button>
+        )}
         {selecionadas.size > 0 && (
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSelecionadas(new Set())}>
             Limpar seleção
           </button>
         )}
       </div>
+
+      {/* Um intervalo que nao pega nada e facil de montar por engano (mês
+          errado, ano errado) e, sem isto, a tela ficaria simplesmente vazia —
+          que e o mesmo que ela mostra quando nao ha nada pendente. */}
+      {doPeriodo.length === 0 && (de || ate) && (
+        <div style={{ marginBottom: 12 }}>
+          <Aviso>
+            <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              Nenhuma venda pendente {de && ate ? `entre ${dataBr(de)} e ${dataBr(ate)}`
+                : de ? `a partir de ${dataBr(de)}` : `até ${dataBr(ate)}`}.
+              A fila inteira vai de {dataBr(pendentes.reduce((m, p) => (!m || (p.date || '') < m ? (p.date || m) : m), ''))}
+              {' '}a {dataBr(pendentes.reduce((m, p) => (p.date || '') > m ? p.date : m, ''))}.
+            </span>
+          </Aviso>
+        </div>
+      )}
 
       {semDono.length > 0 && (
         <div style={{ marginBottom: 12 }}>
@@ -605,6 +669,11 @@ function FilaPendentes({ pendentes, semDono, encerrados, onGerar, onAcertar, ocu
             <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
               {[...new Set(escolhidas.map(p => p.investorName))].join(', ') || '—'}
             </div>
+            {escondidas > 0 && (
+              <div style={{ fontSize: 12, color: '#92400e', marginTop: 2 }}>
+                {escondidas} delas não estão na lista com o filtro atual — mas vão junto.
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6b7280' }}>

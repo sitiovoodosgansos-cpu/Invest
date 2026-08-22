@@ -200,6 +200,18 @@ com o extrato do banco.
 O `createdAt` continua sendo o instante real — é o que uma conferência usa para
 saber **quando** o registro foi feito, que não é a data que ele declara.
 
+Não confundir com o **período das vendas** (`de ... até ...`), logo acima da
+fila: aquele escolhe *quais vendas entram*; este carimba *a ordem*. Cada ponta
+do período é opcional — só "de" lê como "a partir de", só "até" lê como "tudo
+até aqui", que é o caminho de limpar o histórico na estreia. As caixinhas de
+investidor contam **dentro** do período, então o número na caixinha é
+exatamente o que sai se ela for clicada.
+
+A ação manda o que está **selecionado**, não o que está na tela. Mudar o filtro
+depois de selecionar não desmarca nada — e a barra de ação diz quantas das
+selecionadas ficaram fora da lista, para o clique nunca gerar uma ordem com
+vendas que não estão à vista.
+
 A data é validada no servidor antes de qualquer coisa, e não só no formato: ela
 vira parte do ID do documento (`20260822-<investidor>-1`), e um valor inválido
 geraria um ID que nunca colide com nada. A proteção contra emitir a mesma ordem
