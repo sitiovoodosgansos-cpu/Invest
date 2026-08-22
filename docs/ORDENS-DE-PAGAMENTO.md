@@ -168,3 +168,16 @@ poderia marcar uma ordem como paga sem nunca enviar nada.
 - **Índice de vendas pagas.** A rotina lê a coleção `/paymentOrders` inteira a
   cada rodada para saber o que já foi pago. São poucos documentos por dia;
   quando passar da casa dos milhares, vale um índice separado.
+
+---
+
+## 9. Onde conferir o que vai ser pago
+
+A tela **Vendas Ornabird** lista as vendas espelhadas com o investidor de cada
+uma já resolvido — é a mesma conta que a ordem de pagamento faz, inclusive a
+regra do dono na data da venda. Se um número na ordem parecer estranho, é lá
+que se confere linha a linha.
+
+Ela também é a única tela que mostra as vendas **sem lote vinculado**: dinheiro
+que não entra em ordem nenhuma e que ninguém vai receber enquanto o vínculo não
+for feito no Plantel.
