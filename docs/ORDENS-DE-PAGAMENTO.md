@@ -111,6 +111,42 @@ ordem ainda não estiver paga.
 
 ---
 
+## 4b. Quando o Resend não funcionar
+
+Envio automático depende de serviço de terceiro, e serviço de terceiro cai.
+Quando cair, o dinheiro já saiu e o investidor está sem o comprovante — então
+cada ordem tem quatro botões que **não passam por servidor nenhum**:
+
+| Botão | O que faz |
+|---|---|
+| **PDF** | Baixa a ordem como documento. Serve de anexo em qualquer canal. |
+| **WhatsApp** | Abre o WhatsApp no número do cadastro, com a mensagem pronta. |
+| **E-mail** | Abre o programa de e-mail **do dono**, com a mensagem pronta. |
+| **Copiar** | Copia o texto, para colar onde for. |
+
+O e-mail daqui sai da conta do dono, não do Resend. É isso que faz disto uma
+alternativa de verdade, e não outro caminho para o mesmo ponto de falha.
+
+Ficam **sempre visíveis**, não escondidos atrás de "Ver itens": o dia em que
+forem necessários é um dia em que algo já falhou, e aí o caminho manual não
+pode estar a um clique de descoberta.
+
+Sem telefone ou e-mail no cadastro, o botão correspondente aparece apagado
+dizendo o que falta — em vez de abrir o WhatsApp num número inexistente, que
+falharia em silêncio. O PDF nunca depende de cadastro.
+
+**Ordem longa demais para o `mailto:`**: o Windows corta a linha de comando em
+2048 caracteres, e um `mailto:` maior chega ao programa de e-mail com o corpo
+truncado *no meio* — meia ordem, sem nada indicando que faltou pedaço. Passando
+de 1800 caracteres o link manda um resumo, o botão passa a dizer
+"E-mail (resumo)", e o detalhamento vai no PDF anexado à mão.
+
+E **"Baixar o dia (PDF)"**, no topo: todas as ordens do dia num arquivo — capa
+com a lista e as chaves PIX, depois uma página por ordem. É o que se leva para
+o banco, e é a saída quando o e-mail das 6h não chegou.
+
+---
+
 ## 5. Os casos que não podem passar em branco
 
 | Situação | O que o sistema faz |
@@ -149,6 +185,7 @@ na caixa de spam do investidor, o que é pior do que não chegar.
 | `api/cron-diario.js` | A porta que a Vercel bate, e o `CRON_SECRET` |
 | `api/ordens.js` | Ações do dono: rodar agora, marcar como paga e enviar |
 | `api/_email.js` | Resend e os dois modelos de mensagem |
+| `src/utils/ordemEntrega.js` | Entrega manual: texto, PDF, WhatsApp e `mailto:` |
 | `src/pages/OrdensPagamento.jsx` | A tela |
 
 `/paymentOrders` é a única coleção destas regras com **leitura fechada** — cada

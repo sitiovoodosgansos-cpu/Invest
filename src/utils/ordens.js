@@ -239,6 +239,10 @@ export function construirOrdens({
       // onde mandar o dinheiro — sem isso o dono abre a ordem, depois abre o
       // cadastro do investidor, e faz isso uma vez por investidor todo dia.
       investorPix: (investor.pixKey || '').trim() || null,
+      // O telefone segue pela mesma razao: e o que monta o link do WhatsApp
+      // quando o envio automatico falha. Copiado, e nao consultado na hora, pra
+      // a ordem continuar entregavel mesmo se o cadastro mudar depois.
+      investorPhone: (investor.phone || '').trim() || null,
       kind: temVenda ? ORDEM_TIPO.PAGAMENTO : ORDEM_TIPO.ZERO,
       status: ORDEM_STATUS.PENDENTE,
       items: itens,

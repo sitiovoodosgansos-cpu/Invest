@@ -1,12 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import {
   Receipt, Play, Send, AlertCircle, CheckCircle2, Clock, MailWarning,
-  BellOff, Copy, Check,
+  BellOff, Copy, Check, FileDown, MessageCircle, Mail,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency, formatPercent } from '../utils/helpers';
 import { ORDEM_STATUS, ORDEM_TIPO, diaBrasilia } from '../utils/ordens';
+import {
+  pdfDaOrdem, pdfDoDia, textoDaOrdem, linkWhatsapp, linkEmail,
+} from '../utils/ordemEntrega';
 
 // A tela da manha: quem eu pago hoje, e quanto.
 //
@@ -88,6 +91,79 @@ function ChavePix({ chave }) {
   );
 }
 
+// Entrega manual da ordem: PDF, WhatsApp, e-mail e copiar.
+//
+// Existe porque o envio automatico depende do Resend, e servico de terceiro
+// cai. Quando cair, o dinheiro ja saiu e o investidor esta sem o comprovante —
+// entao precisa haver um caminho que nao passe por servidor nenhum. Estes
+// quatro rodam inteiros no navegador.
+//
+// O e-mail aqui sai da CONTA DO DONO (mailto:), nao do Resend. E o que faz
+// disto uma alternativa de verdade, e nao outro caminho pro mesmo ponto de
+// falha.
+function AcoesEntrega({ ordem, compacto = false }) {
+  const [copiado, setCopiado] = useState(false);
+  const zap = linkWhatsapp(ordem);
+  const email = linkEmail(ordem);
+
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(textoDaOrdem(ordem));
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 1600);
+    } catch {
+      // Navegador sem permissao de area de transferencia: restam os outros tres.
+    }
+  };
+
+  const estilo = {
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    padding: compacto ? '4px 8px' : '6px 10px',
+    fontSize: 12, borderRadius: 8, cursor: 'pointer',
+    border: '1px solid var(--border)', background: '#fff',
+    color: 'var(--text-secondary)', textDecoration: 'none',
+    whiteSpace: 'nowrap',
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+      <button type="button" style={estilo} onClick={() => pdfDaOrdem(ordem)} title="Baixar a ordem em PDF">
+        <FileDown size={13} /> PDF
+      </button>
+
+      {zap ? (
+        <a style={estilo} href={zap} target="_blank" rel="noreferrer"
+           title="Abrir o WhatsApp com a mensagem pronta">
+          <MessageCircle size={13} /> WhatsApp
+        </a>
+      ) : (
+        <span style={{ ...estilo, cursor: 'default', opacity: 0.5 }}
+              title="Sem telefone valido no cadastro deste investidor">
+          <MessageCircle size={13} /> sem telefone
+        </span>
+      )}
+
+      {email ? (
+        <a style={estilo} href={email.href}
+           title={email.resumido
+             ? 'Abrir seu e-mail com um resumo pronto — anexe o PDF, a ordem e longa demais pro corpo'
+             : 'Abrir seu e-mail com a mensagem pronta'}>
+          <Mail size={13} /> E-mail{email.resumido ? ' (resumo)' : ''}
+        </a>
+      ) : (
+        <span style={{ ...estilo, cursor: 'default', opacity: 0.5 }}
+              title="Sem e-mail no cadastro deste investidor">
+          <Mail size={13} /> sem e-mail
+        </span>
+      )}
+
+      <button type="button" style={estilo} onClick={copiar} title="Copiar o texto da ordem">
+        {copiado ? <Check size={13} /> : <Copy size={13} />} {copiado ? 'copiado' : 'Copiar'}
+      </button>
+    </div>
+  );
+}
+
 function LinhaItem({ item }) {
   return (
     <tr>
@@ -125,8 +201,7 @@ function CartaoOrdem({ ordem, selecionada, onToggle, selecionavel }) {
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px',
-        borderBottom: aberta ? '1px solid #e5e7eb' : 'none',
+        display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px 10px',
       }}>
         {selecionavel ? (
           <input
@@ -193,6 +268,16 @@ function CartaoOrdem({ ordem, selecionada, onToggle, selecionavel }) {
         )}
       </div>
 
+      {/* Sempre visivel, e nao escondida atras de "Ver itens": o dia em que
+          isto for necessario e um dia em que o envio automatico falhou, e ai
+          nao da pra o caminho manual estar a um clique de descoberta. */}
+      <div style={{
+        padding: '0 16px 12px 46px',
+        borderBottom: aberta ? '1px solid #e5e7eb' : 'none',
+      }}>
+        <AcoesEntrega ordem={ordem} compacto />
+      </div>
+
       {aberta && (
         <div style={{ padding: '12px 16px 16px 46px', background: '#fafafa' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -215,7 +300,8 @@ function CartaoOrdem({ ordem, selecionada, onToggle, selecionavel }) {
               <Aviso tom="erro">
                 <MailWarning size={15} style={{ flexShrink: 0, marginTop: 1 }} />
                 <span>O e-mail nao saiu: {ordem.sentError}. A ordem continua marcada
-                  como paga — selecione de novo para tentar o envio outra vez.</span>
+                  como paga — selecione de novo para tentar o envio outra vez, ou
+                  use WhatsApp, e-mail ou PDF aqui em cima para entregar na mao.</span>
               </Aviso>
             </div>
           )}
@@ -360,10 +446,24 @@ export default function OrdensPagamento() {
             comprovante vai pra ele.
           </p>
         </div>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={rodar} disabled={rodando}>
-          <Play size={15} />
-          {rodando ? 'Rodando…' : 'Rodar agora'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {/* O PDF do dia sai do que ja esta na tela, sem passar pelo servidor:
+              serve tanto pra levar a lista pro banco quanto pra ter o dia
+              inteiro em maos se o e-mail das 6h nao tiver saido. */}
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => pdfDoDia(doDia, dia)}
+            disabled={doDia.length === 0}
+            title="Baixar todas as ordens do dia em PDF"
+          >
+            <FileDown size={15} /> Baixar o dia (PDF)
+          </button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={rodar} disabled={rodando}>
+            <Play size={15} />
+            {rodando ? 'Rodando…' : 'Rodar agora'}
+          </button>
+        </div>
       </div>
 
       {/* Como foi a ultima rodada. Sem isto, "hoje ninguem vendeu" e "a rotina
