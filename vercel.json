@@ -2,6 +2,16 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
+  "crons": [
+    {
+      "path": "/api/cron-diario",
+      "schedule": "0 9 * * *"
+    }
+  ],
+  "functions": {
+    "api/cron-diario.js": { "maxDuration": 60 },
+    "api/ordens.js": { "maxDuration": 60 }
+  },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],

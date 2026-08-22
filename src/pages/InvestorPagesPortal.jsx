@@ -6,7 +6,8 @@ import EggCollection from './EggCollection';
 import Prateleira from './Prateleira';
 import Incubators from './Incubators';
 import Vitrine from './Vitrine';
-import { Bird, Egg, Layers, Thermometer, Store, Menu, X } from 'lucide-react';
+import VendasOrnabird from './VendasOrnabird';
+import { Bird, Egg, Layers, Thermometer, Store, ShoppingCart, Menu, X } from 'lucide-react';
 
 // Portal do investidor — as telas operacionais, com as aves dele apenas.
 //
@@ -134,6 +135,11 @@ function Conteudo() {
     { to: `${base}/prateleira`, icon: <Layers />, label: 'Prateleira' },
     { to: `${base}/chocadeiras`, icon: <Thermometer />, label: 'Chocadeiras' },
     { to: `${base}/vitrine`, icon: <Store />, label: 'Vitrine' },
+    // As vendas saíram de dentro da Vitrine e viraram página própria. Entram
+    // aqui para o investidor não PERDER o que já via: antes da divisão, a
+    // metade de baixo da Vitrine mostrava as vendas dele. E é o dado mais
+    // direto que ele tem — é dali que sai o pagamento.
+    { to: `${base}/vendas-ornabird`, icon: <ShoppingCart />, label: 'Vendas' },
   ];
 
   return (
@@ -192,6 +198,7 @@ function Conteudo() {
             <Route path="prateleira" element={<Prateleira />} />
             <Route path="chocadeiras" element={<Incubators />} />
             <Route path="vitrine" element={<Vitrine />} />
+            <Route path="vendas-ornabird" element={<VendasOrnabird />} />
             <Route path="*" element={<Navigate to={`${base}/plantel`} replace />} />
           </Routes>
         </main>

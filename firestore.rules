@@ -219,6 +219,35 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    // Ordens de pagamento diarias.
+    //
+    // Este e o unico lugar destas regras onde a LEITURA e fechada, e a razao e
+    // o conteudo: cada documento diz quanto um investidor recebeu num dia. Nas
+    // outras colecoes a leitura fica aberta porque os portais filtram no
+    // navegador; aqui nao ha portal nenhum lendo — o investidor recebe a ordem
+    // DELE por e-mail, e nunca a lista dos outros.
+    //
+    // A ESCRITA E NEGADA PARA TODO MUNDO, inclusive para o administrador
+    // logado. Quem grava e a rotina do servidor (/api/cron-diario e
+    // /api/ordens), pelo firebase-admin, que passa por cima destas regras.
+    // Isso e de proposito: marcar uma ordem como paga registra que um dinheiro
+    // saiu, e o envio do comprovante depende de uma credencial que so existe
+    // no servidor. Um segundo caminho pelo navegador poderia marcar uma ordem
+    // como paga sem nunca enviar nada, e ninguem descobriria ate o investidor
+    // reclamar de um comprovante que nao chegou.
+    match /paymentOrders/{orderId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Como foi a ultima rodada da rotina diaria (quando, se deu certo, o que
+    // gerou). Escrito so pelo servidor, pelo mesmo motivo acima: e o registro
+    // que distingue "hoje ninguem vendeu" de "a rotina nem rodou".
+    match /config/rotinaDiaria {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // Lock down everything else. Any new collections must be added
     // explicitly above.
     match /{document=**} {

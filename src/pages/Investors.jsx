@@ -5,6 +5,18 @@ import { hashPassword } from '../utils/crypto';
 import { UserPlus, Trash2, Edit, Search, Mail, Phone, Users, Key, Eye, EyeOff, Link, Check, XCircle } from 'lucide-react';
 import Portal from '../components/Portal';
 
+// Um so lugar com os campos do formulario. Antes esta lista aparecia escrita
+// por extenso em quatro pontos (estado inicial, "novo investidor", pos-salvar,
+// e a edicao); acrescentar um campo exigia lembrar dos quatro, e o que ficasse
+// de fora viraria um campo que some sozinho ao salvar.
+const FORMULARIO_VAZIO = {
+  name: '', email: '', phone: '', document: '',
+  pixKey: '',
+  // Padrao ligado: o dono pediu que quem nao vendeu receba o aviso do dia.
+  avisoZeroVendas: true,
+  loginUsername: '', loginPassword: '',
+};
+
 export default function Investors() {
   const {
     investors, birds, sales,
@@ -19,7 +31,7 @@ export default function Investors() {
   // loginPassword in the form is always the plaintext value the admin just typed.
   // On save we hash it before persisting. On edit we never pre-fill the field
   // (since we only store the hash) — an empty value means "keep the existing password".
-  const [form, setForm] = useState({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
+  const [form, setForm] = useState(FORMULARIO_VAZIO);
   const [showPassword, setShowPassword] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
   // Track which investor is currently waiting on a generate/revoke round-trip.
@@ -164,7 +176,7 @@ export default function Investors() {
     } else {
       addInvestor(payload);
     }
-    setForm({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' });
+    setForm(FORMULARIO_VAZIO);
     setEditingId(null);
     setShowModal(false);
     setShowPassword(false);
@@ -174,10 +186,14 @@ export default function Investors() {
     // Never pre-fill loginPassword on edit: we only have the hash, and we do
     // not want the admin to accidentally overwrite it with the hash string.
     setForm({
+      ...FORMULARIO_VAZIO,
       name: investor.name,
       email: investor.email || '',
       phone: investor.phone || '',
       document: investor.document || '',
+      pixKey: investor.pixKey || '',
+      // Nunca gravado = recebe o aviso. So o `false` explicito desliga.
+      avisoZeroVendas: investor.avisoZeroVendas !== false,
       loginUsername: investor.loginUsername || '',
       loginPassword: '',
     });
@@ -213,7 +229,7 @@ export default function Investors() {
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-        <button className="btn btn-primary" onClick={() => { setForm({ name: '', email: '', phone: '', document: '', loginUsername: '', loginPassword: '' }); setEditingId(null); setShowModal(true); setShowPassword(false); }}>
+        <button className="btn btn-primary" onClick={() => { setForm(FORMULARIO_VAZIO); setEditingId(null); setShowModal(true); setShowPassword(false); }}>
           <UserPlus size={16} /> Novo Investidor
         </button>
       </div>
@@ -466,9 +482,51 @@ export default function Investors() {
                   <input className="form-input" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="(11) 99999-9999" />
                 </div>
               </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">CPF/CNPJ</label>
+                  <input className="form-input" value={form.document} onChange={e => setForm({ ...form, document: e.target.value })} placeholder="000.000.000-00" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Chave PIX</label>
+                  <input
+                    className="form-input"
+                    value={form.pixKey}
+                    onChange={e => setForm({ ...form, pixKey: e.target.value })}
+                    placeholder="CPF, telefone, e-mail ou aleatoria"
+                  />
+                </div>
+              </div>
+              {/* A ordem do dia sai por e-mail: sem endereco, o investidor
+                  simplesmente nao recebe, e isso so apareceria como um erro
+                  depois do pagamento feito. */}
+              {!form.email.trim() && (
+                <div style={{
+                  marginBottom: 16, padding: '8px 12px', background: '#fffbeb',
+                  borderLeft: '3px solid #f59e0b', borderRadius: 4,
+                  fontSize: 12, color: '#92400e', lineHeight: 1.5,
+                }}>
+                  Sem e-mail, este investidor nao recebe a ordem de pagamento dele.
+                </div>
+              )}
               <div className="form-group">
-                <label className="form-label">CPF/CNPJ</label>
-                <input className="form-input" value={form.document} onChange={e => setForm({ ...form, document: e.target.value })} placeholder="000.000.000-00" />
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={form.avisoZeroVendas}
+                    onChange={e => setForm({ ...form, avisoZeroVendas: e.target.checked })}
+                    style={{ width: 16, height: 16, marginTop: 2, flexShrink: 0 }}
+                  />
+                  <span style={{ fontSize: 13, lineHeight: 1.5 }}>
+                    Avisar quando nao houver venda no dia
+                    <span style={{ display: 'block', color: 'var(--text-muted)', fontSize: 12 }}>
+                      Um e-mail curto dizendo que nao houve venda, com o convite para
+                      aumentar o plantel. Desligue para quem vende raramente — o mesmo
+                      aviso todo dia costuma acabar na caixa de spam, e leva a ordem de
+                      pagamento junto.
+                    </span>
+                  </span>
+                </label>
               </div>
               <div style={{ padding: '12px 16px', background: 'var(--primary-bg)', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>

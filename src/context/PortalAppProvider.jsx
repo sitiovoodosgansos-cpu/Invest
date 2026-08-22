@@ -46,6 +46,7 @@ const ESCRITAS = [
   'generateInvestorPagesToken', 'revokeInvestorPagesToken',
   'addCustomSpecies', 'deleteCustomSpecies',
   'replaceOrnabirdMirror', 'fetchOrnabirdGroups', 'syncFromOrnabird',
+  'rodarRotinaAgora', 'pagarEEnviarOrdens',
   'forceSync',
 ];
 
@@ -88,6 +89,10 @@ export function PortalAppProvider({ payload, loading, error, children }) {
       nurseryBatches: [],
       nurseryEvents: [],
       employeeToken: '',
+      // Ordens de pagamento nao aparecem no portal: o investidor recebe a dele
+      // por e-mail, e a lista completa mostraria quanto os outros receberam.
+      paymentOrders: [],
+      rotinaDiaria: null,
 
       eggProfitRate: taxas.eggProfitRate,
       birdProfitRate: taxas.birdProfitRate,
