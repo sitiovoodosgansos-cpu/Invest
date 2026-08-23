@@ -122,6 +122,115 @@ export const ROTULO_ORIGEM = {
   collected: 'coletado',
 };
 
+function dataCurta(dia) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dia || ''))) return '';
+  const [a, m, d] = dia.split('-');
+  return `${d}/${m}/${a}`;
+}
+
+// A origem de uma linha em texto: "coletado 07/08/2026".
+//
+// Numa linha agrupada vira um periodo — "coletado 07/08 a 09/08/2026" — porque
+// os ovos somados foram coletados em dias diferentes. Quando as duas pontas
+// caem no mesmo ano, o ano so aparece no fim: repeti-lo nas duas so gasta a
+// largura de uma coluna estreita de PDF.
+//
+// Linha antiga, emitida antes de a origem existir, nao tem o campo e devolve
+// travessao em vez de "undefined" — a ordem e congelada na emissao e nunca vai
+// ganhar origem depois.
+export function textoOrigem(item) {
+  const de = item?.originFrom || item?.originDate;
+  if (!de) return '—';
+  const ate = item?.originTo || de;
+  const rotulo = ROTULO_ORIGEM[item?.originKind] || 'de';
+  if (de === ate) return `${rotulo} ${dataCurta(de)}`;
+  const inicio = de.slice(0, 4) === ate.slice(0, 4)
+    ? dataCurta(de).slice(0, 5)
+    : dataCurta(de);
+  return `${rotulo} ${inicio} a ${dataCurta(ate)}`;
+}
+
+// AGRUPAR AS LINHAS QUE O INVESTIDOR LE.
+//
+// O Ornabird registra uma venda de ovos por BANDEJA de origem: um pedido com
+// ovos coletados em 07/08, 08/08 e 09/08 vira tres itens, cada um com a sua
+// data de coleta. Isso esta certo la — e o controle de estoque, e e justamente
+// de onde sai a data de origem que aparece na linha. Mas no documento do
+// investidor viram tres linhas da MESMA galinha, no mesmo dia, com o valor
+// quebrado em tres pedacos que ele tem que somar de cabeca.
+//
+// Entao o documento agrupa. O que ele NAO faz e agrupar o `items` da ordem: o
+// razao e a propria ordem — uma venda esta paga porque o `saleId` dela aparece
+// em `items` (veja vendasJaEmOrdem). Fundir duas linhas ali perderia um
+// saleId, e a venda perdida voltaria pra fila de pendentes pra ser paga de
+// novo. Agrupar e enfeite de apresentacao; o razao continua venda a venda.
+//
+// A REGRA DA CHAVE: so junta o que sairia identico em toda coluna mostrada.
+// Somamos valor, lucro e quantidade, e transformamos a origem num periodo —
+// todo o resto tem que bater. Por isso entram na chave campos que nem sempre
+// vao pro PDF (cliente, lote, vinculo por titulo): eles aparecem na tela, e
+// uma linha somada que mostrasse o cliente de um dos pedacos estaria mentindo.
+export function agruparItens(itens) {
+  const grupos = new Map();
+
+  for (const item of Array.isArray(itens) ? itens : []) {
+    // JSON.stringify e nao join: um separador qualquer pode aparecer DENTRO de
+    // um campo de texto livre, e ai duas linhas diferentes gerariam a mesma
+    // chave e seriam somadas por engano. O stringify escapa por conta propria.
+    const chave = JSON.stringify([
+      item?.birdId ?? '',
+      item?.description ?? '',
+      item?.isEgg ? 'ovo' : 'ave',
+      item?.rate ?? '',
+      // A data da VENDA fica na chave: duas vendas do mesmo lote em dias
+      // diferentes sao dois eventos, e o investidor confere dia a dia.
+      item?.date ?? '',
+      item?.customer ?? '',
+      item?.originKind ?? '',
+      item?.matchedBy ?? '',
+      item?.source ?? '',
+    ]);
+
+    const atual = grupos.get(chave);
+    if (!atual) {
+      grupos.set(chave, {
+        ...item,
+        // Quantas vendas do razao esta linha representa. Vai impresso quando e
+        // mais de uma, pra a contagem de vendas da capa fechar com o detalhe.
+        vendas: 1,
+        saleIds: item?.saleId ? [item.saleId] : [],
+        originFrom: item?.originDate || null,
+        originTo: item?.originDate || null,
+      });
+      continue;
+    }
+
+    atual.vendas += 1;
+    if (item?.saleId) atual.saleIds.push(item.saleId);
+    atual.amount = arredondar((Number(atual.amount) || 0) + (Number(item?.amount) || 0));
+    // O lucro e a SOMA dos lucros ja arredondados, e nao a taxa aplicada de
+    // novo sobre o bruto somado: o total da ordem tambem e a soma das linhas,
+    // e recalcular aqui abriria um centavo de diferenca entre a tabela e o
+    // total impresso logo abaixo dela.
+    atual.profit = arredondar((Number(atual.profit) || 0) + (Number(item?.profit) || 0));
+
+    const somaQuantidade = (Number(atual.quantity) || 0) + (Number(item?.quantity) || 0);
+    atual.quantity = somaQuantidade > 0 ? somaQuantidade : null;
+    // Precos unitarios diferentes nao tem media que signifique alguma coisa.
+    if (atual.unitPrice !== (item?.unitPrice ?? null)) atual.unitPrice = null;
+
+    const dia = item?.originDate || null;
+    if (dia) {
+      if (!atual.originFrom || dia < atual.originFrom) atual.originFrom = dia;
+      if (!atual.originTo || dia > atual.originTo) atual.originTo = dia;
+      // Mantido pra quem le so `originDate`: aponta pra ponta mais antiga.
+      atual.originDate = atual.originFrom;
+    }
+  }
+
+  return [...grupos.values()];
+}
+
 // Uma linha da ordem, a partir de uma venda espelhada do Ornabird.
 function montarItem(venda, bird, rate) {
   const amount = Number(venda.amount) || 0;

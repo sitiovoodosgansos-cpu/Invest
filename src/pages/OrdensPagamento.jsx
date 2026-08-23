@@ -7,8 +7,8 @@ import { useApp, useColecoes } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency, formatPercent, investidorEncerrado } from '../utils/helpers';
 import {
-  ORDEM_STATUS, ORDEM_TIPO, ROTULO_ORIGEM,
-  diaBrasilia, listarPendentes, saldoOrnabird,
+  ORDEM_STATUS, ORDEM_TIPO,
+  diaBrasilia, listarPendentes, saldoOrnabird, agruparItens, textoOrigem,
 } from '../utils/ordens';
 import {
   pdfDaOrdem, pdfDoDia, textoDaOrdem, linkWhatsapp, linkEmail,
@@ -192,7 +192,7 @@ function Origem({ item, separador = ' · ' }) {
   if (!item?.originDate) return null;
   return (
     <span style={{ fontSize: 11, color: '#6b7280' }}>
-      {separador}{ROTULO_ORIGEM[item.originKind] || 'de'} {dataBr(item.originDate)}
+      {separador}{textoOrigem(item)}
     </span>
   );
 }
@@ -209,7 +209,11 @@ function LinhaItem({ item }) {
           {/* Aqui a data da venda FICA: o cartao da ordem e o extrato do que
               foi pago, e cada linha precisa dizer de que dia ela e. */}
           {dataBr(item.date)}
-          {item.originDate ? ` · ${ROTULO_ORIGEM[item.originKind] || 'de'} ${dataBr(item.originDate)}` : ''}
+          {item.originDate ? ` · ${textoOrigem(item)}` : ''}
+          {/* Linha somada: quantas vendas do razao ela representa. Sem isto, o
+              "N venda(s)" do cabecalho do cartao pareceria nao bater com o
+              numero de linhas logo abaixo dele. */}
+          {item.vendas > 1 ? ` · ${item.vendas} vendas somadas` : ''}
           {item.quantity ? ` · ${item.quantity} un` : ''}
           {item.birdName ? ` · ${item.birdName}` : ''}
           {item.customer ? ` · ${item.customer}` : ''}
@@ -354,7 +358,11 @@ function CartaoOrdem({ ordem, selecionada, onToggle, selecionavel, onCancelar, o
         <div style={{ padding: '12px 16px 16px 46px', background: '#fafafa' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <tbody>
-              {ordem.items.map(item => <LinhaItem key={item.saleId} item={item} />)}
+              {/* Agrupado so pra ler: `ordem.items` continua venda a venda no
+                  documento, que e o que prova quais vendas ja foram pagas. */}
+              {agruparItens(ordem.items).map(item => (
+                <LinhaItem key={item.saleId} item={item} />
+              ))}
               <tr>
                 <td colSpan={2} style={{ paddingTop: 10, fontWeight: 600, fontSize: 13 }}>
                   Total a pagar

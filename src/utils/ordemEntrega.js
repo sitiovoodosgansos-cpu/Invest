@@ -13,7 +13,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatCurrency, formatPercent } from './helpers.js';
-import { ROTULO_ORIGEM } from './ordens.js';
+import { agruparItens, textoOrigem } from './ordens.js';
 
 const ROXO = [108, 43, 217];
 const TINTA = [30, 27, 75];
@@ -26,14 +26,13 @@ function dataBr(iso) {
   return `${d}/${m}/${a}`;
 }
 
-// A origem em uma coluna estreita de PDF: "nasceu 10/05/2026".
+// O nome da linha, com a contagem quando ela soma mais de uma venda.
 //
-// Linha antiga (emitida antes de a origem existir) nao tem o campo — devolve
-// travessao em vez de "undefined", que e o que uma ordem historica reaberta
-// mostraria.
-function origemCurta(item) {
-  if (!item?.originDate) return '—';
-  return `${ROTULO_ORIGEM[item.originKind] || 'de'} ${dataBr(item.originDate)}`;
+// "Sebright Prata (3 vendas)" e o que faz a capa fechar com o detalhe: a capa
+// conta VENDAS (o que o razao pagou), a tabela mostra linhas agrupadas, e sem
+// a contagem aqui os dois numeros pareceriam se contradizer.
+function nomeCurto(item) {
+  return item?.vendas > 1 ? `${item.description} (${item.vendas} vendas)` : item.description;
 }
 
 // A coluna Origem so aparece se ALGUMA linha tiver origem.
@@ -80,9 +79,9 @@ export function textoDaOrdem(ordem) {
     ].join('\n');
   }
 
-  const linhas = (ordem.items || []).map(i => {
-    const origem = i.originDate ? `, ${origemCurta(i)}` : '';
-    return `- ${i.description} (${i.isEgg ? 'ovos' : 'ave'}${origem}) `
+  const linhas = agruparItens(ordem.items).map(i => {
+    const origem = i.originDate ? `, ${textoOrigem(i)}` : '';
+    return `- ${nomeCurto(i)} (${i.isEgg ? 'ovos' : 'ave'}${origem}) `
       + `vendida em ${dataBr(i.date)}: ${formatPercent(i.rate)} de `
       + `${formatCurrency(i.amount)} = ${formatCurrency(i.profit)}`;
   });
@@ -271,7 +270,8 @@ export function pdfDaOrdem(ordem) {
     return;
   }
 
-  const comOrigem = temOrigem(ordem.items);
+  const linhas = agruparItens(ordem.items);
+  const comOrigem = temOrigem(linhas);
 
   autoTable(doc, {
     startY: y,
@@ -282,10 +282,10 @@ export function pdfDaOrdem(ordem) {
       ...(comOrigem ? ['Origem'] : []),
       'Data', 'Valor bruto', 'Taxa', 'Seu lucro',
     ]],
-    body: (ordem.items || []).map(i => [
-      i.description,
+    body: linhas.map(i => [
+      nomeCurto(i),
       i.isEgg ? 'Ovos' : 'Ave',
-      ...(comOrigem ? [origemCurta(i)] : []),
+      ...(comOrigem ? [textoOrigem(i)] : []),
       dataBr(i.date),
       formatCurrency(i.amount),
       formatPercent(i.rate),
@@ -342,6 +342,9 @@ export function pdfDoDia(ordens, referenceDate) {
           // pagamento trava e o dono precisa saber disso ANTES de sentar pra
           // pagar, nao no meio.
           o.investorPix || '(sem chave cadastrada)',
+          // A contagem de VENDAS do razao, que pode ser maior que o numero de
+          // linhas da pagina de detalhe — la os ovos da mesma ave no mesmo dia
+          // saem somados numa linha so, com "(3 vendas)" no nome pra fechar.
           String((o.items || []).length),
           formatCurrency(o.totalAmount),
           formatCurrency(o.totalProfit),
@@ -371,7 +374,8 @@ export function pdfDoDia(ordens, referenceDate) {
       `Ordem ${ordem.numero}`,
       periodo ? `${ordem.investorName} · vendas de ${periodo}` : ordem.investorName
     );
-    const comOrigem = temOrigem(ordem.items);
+    const linhas = agruparItens(ordem.items);
+    const comOrigem = temOrigem(linhas);
     autoTable(doc, {
       startY: 54,
       head: [[
@@ -379,9 +383,9 @@ export function pdfDoDia(ordens, referenceDate) {
         ...(comOrigem ? ['Origem'] : []),
         'Data', 'Valor bruto', 'Taxa', 'Lucro',
       ]],
-      body: (ordem.items || []).map(i => [
-        i.description, i.isEgg ? 'Ovos' : 'Ave',
-        ...(comOrigem ? [origemCurta(i)] : []),
+      body: linhas.map(i => [
+        nomeCurto(i), i.isEgg ? 'Ovos' : 'Ave',
+        ...(comOrigem ? [textoOrigem(i)] : []),
         dataBr(i.date), formatCurrency(i.amount),
         formatPercent(i.rate), formatCurrency(i.profit),
       ]),
