@@ -36,15 +36,33 @@ const app = initializeApp(firebaseConfig);
 // `persistentMultipleTabManager` porque o dono deixa o Invest aberto em mais de
 // uma aba. Sem ele, so a primeira aba ganha cache e as outras voltam a pagar
 // tudo — o pior dos dois mundos, e silencioso.
+// O cache pegou? Isto NAO e curiosidade tecnica.
+//
+// Sem cache, cada abertura de cada aba paga a leitura inteira de novo — e o
+// plano gratuito tem teto de 50 mil leituras POR DIA. Cair no `catch` abaixo e
+// a diferenca entre o app funcionar e o dono ficar trancado do lado de fora ate
+// as 4h da manha. Falhar em silencio aqui e caro demais: quem investiga amanha
+// nao tem como saber se o cache estava ligado ontem.
+export let cacheLocalAtivo = false;
+export let cacheLocalMotivo = '';
+
 function abrirFirestore() {
   try {
-    return initializeFirestore(app, {
+    const fs = initializeFirestore(app, {
       localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
     });
-  } catch {
+    cacheLocalAtivo = true;
+    return fs;
+  } catch (err) {
     // Navegador sem IndexedDB (aba anonima, webview antiga) ou modulo ja
-    // inicializado (recarga a quente no desenvolvimento). Sem cache o app
-    // funciona igual — so mais caro. Nunca vale derrubar a tela por isso.
+    // inicializado (recarga a quente no desenvolvimento). Nunca vale derrubar a
+    // tela por isso — mas tambem nao vale esconder.
+    cacheLocalMotivo = err?.code || err?.message || 'motivo desconhecido';
+    // console de propósito, e nao devWarn: em producao e onde o problema mora.
+    console.warn(
+      '[invest] Cache local do Firestore NAO ligou:', cacheLocalMotivo,
+      '— cada abertura vai reler tudo e a cota diaria pode acabar antes do fim do dia.'
+    );
     return getFirestore(app);
   }
 }
