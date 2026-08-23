@@ -1247,8 +1247,14 @@ export function AppProvider({ children }) {
     // cota. Cada uma diz o que fazer, não só o que aconteceu.
     firestore_quota:
       'A cota diária do Firestore acabou. Não é problema do Ornabird nem do código: o plano gratuito tem um teto de leituras por dia e ele foi atingido. A cota zera à meia-noite no horário do Pacífico (4h ou 5h da manhã aqui). Para não travar de novo, ative o plano Blaze no console do Firebase.',
+    // NAO manda mexer nas regras: quem faz esta leitura e o firebase-admin, do
+    // servidor, e ele IGNORA as regras de seguranca. Um permission-denied aqui e
+    // permissao da CONTA DE SERVICO, nunca do firestore.rules.
     firestore_permission:
-      'O Firestore recusou o acesso. Confira as regras de segurança publicadas no console do Firebase.',
+      'O Firestore recusou o acesso ao servidor. As regras de segurança não têm '
+      + 'relação com isto (o servidor passa por cima delas): o que falta é permissão '
+      + 'da conta de serviço da variável FIREBASE_SERVICE_ACCOUNT — ela precisa do '
+      + 'papel de Cloud Datastore User no projeto certo.',
     firestore_unauthenticated:
       'A credencial do Firestore não foi aceita. Confira a variável FIREBASE_SERVICE_ACCOUNT no projeto "invest" da Vercel.',
     firestore_indisponivel:
@@ -1387,10 +1393,12 @@ export function AppProvider({ children }) {
       'A cota diaria gratuita do Firebase acabou (RESOURCE_EXHAUSTED). Ela zera '
       + 'a meia-noite no horario do Pacifico, por volta das 4h da manha aqui. '
       + 'Tente depois disso — ou mude o projeto para o plano Blaze, que resolve de vez.',
+    // Mesmo motivo do outro firestore_permission acima: quem faz esta chamada e
+    // o servidor, com firebase-admin, que nao passa pelo firestore.rules.
     firestore_permission:
-      'O Firestore recusou o acesso (permission-denied). Publique as regras '
-      + 'atualizadas no console do Firebase: faltam os blocos de /paymentOrders '
-      + 'e /config/rotinaDiaria.',
+      'O Firestore recusou o acesso ao servidor (permission-denied). Nao sao as '
+      + 'regras de seguranca — o servidor nao passa por elas. Confira a permissao '
+      + 'da conta de servico em FIREBASE_SERVICE_ACCOUNT.',
     firestore_indisponivel:
       'O Firestore esta indisponivel no momento. Tente de novo em instantes.',
     firestore_timeout: 'A operacao demorou demais e foi cancelada. Tente de novo.',
