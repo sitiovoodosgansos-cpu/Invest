@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import { mapOrnabirdIncubatorBatches } from '../utils/helpers';
 import OrnabirdSync from '../components/OrnabirdSync';
 import {
@@ -106,6 +106,8 @@ function IconeChocadeira({ ativa }) {
 }
 
 export default function Incubators() {
+  // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
+  useColecoes('chocadeiras');
   const { birds, investors, ornabirdIncubatorBatches, saveError } = useApp();
   const [aba, setAba] = useState('ativos'); // ativos | inativos
   const [lotesAbertos, setLotesAbertos] = useState(() => new Set());

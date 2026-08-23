@@ -3,7 +3,7 @@ import {
   Receipt, Play, Send, AlertCircle, CheckCircle2, Clock, MailWarning,
   BellOff, Copy, Check, FileDown, MessageCircle, Mail, Trash2, RotateCcw,
 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency, formatPercent, investidorEncerrado } from '../utils/helpers';
 import {
@@ -922,12 +922,20 @@ function SaldoPorInvestidor({ saldos }) {
 }
 
 export default function OrdensPagamento() {
+  // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
+  useColecoes('vitrine', 'ordens');
   const {
     paymentOrders, rotinaDiaria, rodarRotinaAgora, pagarEEnviarOrdens,
     ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate,
     gerarOrdensDasVendas, acertarVendas, liberarRotinaAutomatica,
-    cancelarOrdensDePagamento,
+    cancelarOrdensDePagamento, colecaoPronta,
   } = useApp();
+  // Os espelhos desta tela sao assinados sob demanda, entao existe um instante
+  // em que eles ainda estao vazios porque NAO CHEGARAM — diferente de vazios
+  // porque nao ha nada. Confundir os dois aqui mostraria "Fila vazia" com o
+  // botao de liberar a emissao automatica, e um clique nesse instante libera a
+  // rotina sobre um historico que ninguem conferiu.
+  const carregado = colecaoPronta('vitrine') && colecaoPronta('ordens');
   const { isAdmin } = useAuth();
   const [selecionadas, setSelecionadas] = useState(() => new Set());
   const [rodando, setRodando] = useState(false);
@@ -1205,7 +1213,7 @@ export default function OrdensPagamento() {
           pessoa clicaria "Rodar agora", veria zero ordens e concluiria que o
           sistema esta quebrado — quando ele esta justamente evitando emitir
           uma ordem gigante de dinheiro que ja saiu. */}
-      {!jaLiberado && pendentes.length > 0 && (
+      {carregado && !jaLiberado && pendentes.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <Aviso>
             <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -1221,7 +1229,7 @@ export default function OrdensPagamento() {
         </div>
       )}
 
-      {!jaLiberado && pendentes.length === 0 && ordens.length === 0 && (
+      {carregado && !jaLiberado && pendentes.length === 0 && ordens.length === 0 && (
         <div style={{ marginBottom: 16 }}>
           <Aviso tom="ok">
             <CheckCircle2 size={15} style={{ flexShrink: 0, marginTop: 1 }} />

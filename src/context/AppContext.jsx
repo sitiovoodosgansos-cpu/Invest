@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { db, auth } from '../firebase';
 import {
   doc, collection, onSnapshot, setDoc, getDoc, getDocs, deleteDoc, writeBatch,
@@ -161,6 +161,51 @@ export function AppProvider({ children }) {
   // profit distribution, reports, portals) can treat sales like any other
   // list without knowing where they're persisted.
   const [sales, setSales] = useState([]);
+  // ESPELHOS SOB DEMANDA.
+  //
+  // Cada listener destes escuta uma COLECAO INTEIRA, e o Firestore cobra uma
+  // leitura por documento toda vez que um listener conecta. So o espelho de
+  // vendas do Ornabird ja passa de mil e quinhentos documentos — e ele era lido
+  // no Dashboard, no Plantel, na Coleta de Ovos e em todas as outras telas que
+  // nao usam venda nenhuma.
+  //
+  // Agora a tela DECLARA de que precisa (useColecoes) e so isso e assinado.
+  //
+  // Uma colecao pedida NUNCA e desligada enquanto a aba viver. Desligar ao sair
+  // da tela pareceria mais economico e seria o contrario: voltar pra tela
+  // reconectaria o listener, e reconectar e o evento que custa. Assinar uma vez
+  // e ficar ouvindo custa so o que muda.
+  const [colecoesPedidas, setColecoesPedidas] = useState(() => new Set());
+  // Quais ja receberam o primeiro snapshot. Sem isto, uma tela nao distingue
+  // "ainda carregando" de "nao ha nada" — e em Ordens de Pagamento essa
+  // diferenca chega a mostrar o botao de liberar a rotina automatica numa fila
+  // que so parece vazia.
+  const [colecoesProntas, setColecoesProntas] = useState(() => new Set());
+
+  const pedirColecoes = useCallback((nomes) => {
+    setColecoesPedidas(prev => {
+      const faltando = (nomes || []).filter(n => n && !prev.has(n));
+      // Devolver o mesmo Set quando nada falta e o que impede o ciclo
+      // render -> efeito -> setState -> render.
+      if (faltando.length === 0) return prev;
+      const proximo = new Set(prev);
+      for (const n of faltando) proximo.add(n);
+      return proximo;
+    });
+  }, []);
+
+  const marcarPronta = useCallback((nome) => {
+    setColecoesProntas(prev => (prev.has(nome) ? prev : new Set(prev).add(nome)));
+  }, []);
+
+  // No portal nao ha listener nenhum: a fatia ja vem pronta do servidor. Entao
+  // tudo conta como pronto, senao as telas do investidor ficariam carregando
+  // para sempre.
+  const colecaoPronta = useCallback(
+    (nome) => PORTAL_MODE || colecoesProntas.has(nome),
+    [colecoesProntas]
+  );
+
   const [ornabirdTrays, setOrnabirdTrays] = useState([]);
   const [ornabirdVitrine, setOrnabirdVitrine] = useState([]);
   const [ornabirdEggCollections, setOrnabirdEggCollections] = useState([]);
@@ -354,63 +399,83 @@ export function AppProvider({ children }) {
 
   // Ornabird mirror listeners. Skipped on portal routes like every other
   // subscription — the portal receives its already-scoped slice from the server.
+  const quer_bandejas = colecoesPedidas.has('bandejas');
   useEffect(() => {
-    if (PORTAL_MODE) return;
+    if (PORTAL_MODE || !quer_bandejas) return;
     const unsub = onSnapshot(ORNABIRD_TRAYS_COLLECTION, (snap) => {
       setOrnabirdTrays(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      marcarPronta('bandejas');
     }, (error) => devError('Ornabird trays listen error:', error));
     return () => unsub();
-  }, []);
+  }, [quer_bandejas, marcarPronta]);
 
+  const quer_vitrine = colecoesPedidas.has('vitrine');
   useEffect(() => {
-    if (PORTAL_MODE) return;
+    if (PORTAL_MODE || !quer_vitrine) return;
     const unsub = onSnapshot(ORNABIRD_VITRINE_COLLECTION, (snap) => {
       setOrnabirdVitrine(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      marcarPronta('vitrine');
     }, (error) => devError('Ornabird vitrine listen error:', error));
     return () => unsub();
-  }, []);
+  }, [quer_vitrine, marcarPronta]);
 
   // Coletas de ovos espelhadas. Coleção SEPARADA da /eggCollections antiga (o
   // cadastro manual que está saindo): misturar as duas faria a sincronização —
   // que apaga o que não veio do Ornabird — engolir o histórico manual sem
   // aviso. Um espelho nunca deve poder destruir dado que não é dele.
+  const quer_coletas = colecoesPedidas.has('coletas');
   useEffect(() => {
-    if (PORTAL_MODE) return;
+    if (PORTAL_MODE || !quer_coletas) return;
     const unsub = onSnapshot(ORNABIRD_EGGS_COLLECTION, (snap) => {
       setOrnabirdEggCollections(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      marcarPronta('coletas');
     }, (error) => devError('Ornabird egg collections listen error:', error));
     return () => unsub();
-  }, []);
+  }, [quer_coletas, marcarPronta]);
 
   // Lotes de chocadeira espelhados do Ornabird.
+  const quer_chocadeiras = colecoesPedidas.has('chocadeiras');
   useEffect(() => {
-    if (PORTAL_MODE) return;
+    if (PORTAL_MODE || !quer_chocadeiras) return;
     const unsub = onSnapshot(ORNABIRD_BATCHES_COLLECTION, (snap) => {
       setOrnabirdIncubatorBatches(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      marcarPronta('chocadeiras');
     }, (error) => devError('Ornabird incubator batches listen error:', error));
     return () => unsub();
-  }, []);
+  }, [quer_chocadeiras, marcarPronta]);
 
   // Catalogo da Vitrine espelhado (os anuncios a venda). Separado de
   // ornabirdVitrine, que guarda as VENDAS — sao duas coisas diferentes.
+  const quer_anuncios = colecoesPedidas.has('anuncios');
   useEffect(() => {
-    if (PORTAL_MODE) return;
+    if (PORTAL_MODE || !quer_anuncios) return;
     const unsub = onSnapshot(ORNABIRD_LISTINGS_COLLECTION, (snap) => {
       setOrnabirdVitrineListings(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      marcarPronta('anuncios');
     }, (error) => devError('Ornabird vitrine listings listen error:', error));
     return () => unsub();
-  }, []);
+  }, [quer_anuncios, marcarPronta]);
 
-  // Ordens de pagamento e o registro da ultima rodada da rotina.
+  // Ordens de pagamento, sob demanda.
+  const quer_ordens = colecoesPedidas.has('ordens');
+  useEffect(() => {
+    if (PORTAL_MODE || !quer_ordens) return;
+    const unsub = onSnapshot(PAYMENT_ORDERS_COLLECTION, (snap) => {
+      setPaymentOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      marcarPronta('ordens');
+    }, (error) => devError('Payment orders listen error:', error));
+    return () => unsub();
+  }, [quer_ordens, marcarPronta]);
+
+  // O registro da ultima rodada e UM documento so — uma leitura. Fica sempre
+  // ligado: e o que permite avisar que a rotina das 6h falhou sem depender de
+  // o dono abrir a tela de Ordens.
   useEffect(() => {
     if (PORTAL_MODE) return;
-    const unsubOrdens = onSnapshot(PAYMENT_ORDERS_COLLECTION, (snap) => {
-      setPaymentOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, (error) => devError('Payment orders listen error:', error));
-    const unsubRotina = onSnapshot(ROTINA_DOC, (snap) => {
+    const unsub = onSnapshot(ROTINA_DOC, (snap) => {
       setRotinaDiaria(snap.exists() ? snap.data() : null);
     }, (error) => devError('Rotina diaria listen error:', error));
-    return () => { unsubOrdens(); unsubRotina(); };
+    return () => unsub();
   }, []);
 
   // One-shot migration: promote legacy appData.sales into /sales/{id}.
@@ -1777,6 +1842,7 @@ export function AppProvider({ children }) {
     generateInvestorPagesToken, revokeInvestorPagesToken,
     addCustomSpecies, deleteCustomSpecies,
     forceSync,
+    pedirColecoes, colecaoPronta,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
@@ -1786,4 +1852,28 @@ export function useApp() {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error('useApp must be used within AppProvider');
   return ctx;
+}
+
+// A tela declara de quais espelhos precisa.
+//
+//   useColecoes('vitrine', 'ordens');
+//
+// Sem esta chamada a colecao NAO e assinada — e o ponto: as ~1.600 vendas do
+// Ornabird nao devem ser lidas no Dashboard, no Plantel nem na Coleta de Ovos,
+// que nao usam venda nenhuma.
+//
+// Nomes validos: 'vitrine' (vendas), 'anuncios' (catalogo), 'bandejas',
+// 'coletas', 'chocadeiras', 'ordens'.
+//
+// Uma vez pedida, a colecao fica ouvindo ate a aba fechar. Trocar de tela nao
+// desassina: reconectar e justamente o evento que o Firestore cobra.
+export function useColecoes(...nomes) {
+  const { pedirColecoes } = useApp();
+  // A chave de texto e o que evita reassinar a cada render por causa de um
+  // array novo com o mesmo conteudo.
+  const chave = nomes.filter(Boolean).sort().join(',');
+  useEffect(() => {
+    if (!chave) return;
+    pedirColecoes(chave.split(','));
+  }, [chave, pedirColecoes]);
 }

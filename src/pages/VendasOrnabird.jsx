@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import {
   formatCurrency, formatDate, formatPercent, getInitials,
   buildOrnabirdGroupIndex, resolveMirrorBird, resolveRateFor,
@@ -28,6 +28,8 @@ import OrnabirdSync from '../components/OrnabirdSync';
 // venda, nao o dono de hoje).
 
 export default function VendasOrnabird() {
+  // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
+  useColecoes('vitrine');
   const {
     investors, birds, ornabirdVitrine, somenteLeitura,
     eggProfitRate, birdProfitRate,

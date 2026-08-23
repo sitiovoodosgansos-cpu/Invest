@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import { formatCurrency, getInitials, calculateProfitDistribution, investidorEncerrado } from '../utils/helpers';
 import { saldoOrnabird, diaBrasilia } from '../utils/ordens';
 import { hashPassword } from '../utils/crypto';
@@ -26,6 +26,8 @@ const FORMULARIO_VAZIO = {
 };
 
 export default function Investors() {
+  // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
+  useColecoes('vitrine', 'ordens');
   const {
     investors, birds, sales,
     addInvestor, updateInvestor, deleteInvestor,
