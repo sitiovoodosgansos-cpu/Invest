@@ -1902,6 +1902,16 @@ export function useColecoes(...nomes) {
   const chave = nomes.filter(Boolean).sort().join(',');
   useEffect(() => {
     if (!chave) return;
+    // SEM pedirColecoes nao ha o que pedir, e isso e uma situacao legitima: no
+    // portal do investidor os dados ja chegam inteiros do servidor e nao ha
+    // assinatura nenhuma pra abrir.
+    //
+    // O guarda existe porque a falta dele DERRUBOU o portal. Cinco das seis
+    // telas de la chamam este hook, e chamar `undefined()` estourava na
+    // montagem — o investidor via "Erro ao carregar" no lugar da pagina, sem
+    // nada dizendo o motivo. Um provedor que nao faz carregamento sob demanda
+    // nao pode custar uma tela em branco.
+    if (typeof pedirColecoes !== 'function') return;
     pedirColecoes(chave.split(','));
   }, [chave, pedirColecoes]);
 }

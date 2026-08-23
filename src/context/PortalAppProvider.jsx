@@ -98,6 +98,20 @@ export function PortalAppProvider({ payload, loading, error, children }) {
       eggProfitRate: taxas.eggProfitRate,
       birdProfitRate: taxas.birdProfitRate,
 
+      // CARREGAMENTO SOB DEMANDA: aqui nao existe.
+      //
+      // No app completo cada tela pede os espelhos que usa, e o provedor abre
+      // a assinatura do Firestore correspondente. No portal nao ha o que
+      // pedir: a fatia ja veio pronta do servidor, inteira, numa resposta so.
+      //
+      // Mas as telas sao AS MESMAS, e cinco delas chamam useColecoes(). Sem
+      // estas duas funcoes, elas quebravam ao montar e o investidor via "Erro
+      // ao carregar" — foi exatamente o que aconteceu. Entao o portal responde
+      // as duas perguntas com a verdade dele: nao ha o que pedir, e tudo que
+      // ia chegar ja chegou.
+      pedirColecoes: () => {},
+      colecaoPronta: () => true,
+
       // As telas que tem cadastro (Plantel, Coleta) leem esta flag para
       // esconder os botoes de escrita. As funcoes ja lancam se chamadas; isto
       // e para o investidor nao ver botao que nao pode usar.
