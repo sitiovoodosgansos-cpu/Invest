@@ -109,9 +109,25 @@ export default function Plantel() {
     const achado = precoOvoDoLote(bird, comissaoConfig, indicePreco);
     return achado.preco == null ? null : achado;
   };
+  // O que o INVESTIDOR ganha por ovo. E isto que o cartao mostra; o preco de
+  // venda no site fica no formulario de edicao, que e onde ele e digitado.
+  //
+  // O cartao fala de comissao — "Ovos 5,2%", "Ave R$ 5,82" —, e o preco cheio
+  // no meio disso era o unico numero que nao era do investidor. Trocado pelo
+  // lucro, as tres etiquetas passam a contar a mesma historia, e a regra dos
+  // quatro ovos fica visivel: R$ 1,46 no ovo, R$ 5,82 na ave.
+  const lucroPorOvoDoLote = (bird) => {
+    const achado = precoDoOvo(bird);
+    if (!achado) return null;
+    return arredondar(percentualDoOvo(bird, comissaoConfig) * achado.preco);
+  };
   const comissaoPorAveDoLote = (bird) => {
     const achado = precoDoOvo(bird);
     if (!achado) return null;
+    // Do preco CHEIO, arredondando uma vez so no fim — nao de lucroPorOvoDoLote
+    // vezes quatro. Sao contas diferentes quando o centavo cai no meio, e esta
+    // e a que a fila de pagamento usa (comissaoDaVenda, em utils/ordens.js).
+    // Mudar aqui pra fechar com a etiqueta do ovo mudaria o que se paga.
     return arredondar(multiplicador * percentualDoOvo(bird, comissaoConfig) * achado.preco);
   };
   const [transferForm, setTransferForm] = useState({ toInvestorId: '', transferDate: '' });
@@ -391,23 +407,25 @@ export default function Plantel() {
                   >
                     Ovos {formatPercent(resolveRateFor(bird, true, globals))}
                   </span>
-                  {/* O PRECO DO OVO, que so existe por lote. Ovo de Brahma sai a
-                      R$ 24 e de Pavao a R$ 180, entao nao ha valor geral que
-                      sirva — e daqui que a comissao da ave e derivada. */}
+                  {/* O LUCRO DO OVO — o que o investidor recebe por ovo vendido.
+                      O preco de venda que gera este numero mora no formulario de
+                      edicao; aqui ele aparece so na dica, pra dar de conferir sem
+                      abrir o lote. */}
                   <span
                     className="badge"
                     style={{
-                      background: precoDoOvo(bird) != null ? '#dcfce7' : '#fee2e2',
-                      color: precoDoOvo(bird) != null ? '#15803d' : '#b91c1c',
+                      background: lucroPorOvoDoLote(bird) != null ? '#dcfce7' : '#fee2e2',
+                      color: lucroPorOvoDoLote(bird) != null ? '#15803d' : '#b91c1c',
                     }}
-                    title={precoDoOvo(bird)?.fonte === 'venda'
-                      ? 'Preco da ultima venda de ovo deste lote'
-                      : precoDoOvo(bird) != null
-                        ? 'Preco digitado neste lote'
-                        : 'Sem preco: preencha no lote ou registre uma venda de ovo'}
+                    title={precoDoOvo(bird) != null
+                      ? `${formatPercent(percentualDoOvo(bird, comissaoConfig))} de ${formatCurrency(precoDoOvo(bird).preco)}`
+                        + (precoDoOvo(bird).fonte === 'venda'
+                          ? ' — preco da ultima venda de ovo deste lote'
+                          : ' — preco digitado neste lote')
+                      : 'Sem preco de ovo: preencha no lote ou registre uma venda de ovo'}
                   >
-                    Ovo {precoDoOvo(bird) != null
-                      ? formatCurrency(precoDoOvo(bird).preco)
+                    Ovo {lucroPorOvoDoLote(bird) != null
+                      ? formatCurrency(lucroPorOvoDoLote(bird))
                       : 'sem preco'}
                   </span>
                   {/* A ave nao tem percentual proprio: ela vale um valor fixo,
@@ -420,7 +438,9 @@ export default function Plantel() {
                       color: comissaoPorAveDoLote(bird) != null ? '#2563eb' : '#b91c1c',
                     }}
                     title={comissaoPorAveDoLote(bird) != null
-                      ? `${multiplicador} ovos deste lote`
+                      ? `${multiplicador} ovos deste lote: `
+                        + `${multiplicador} x ${formatPercent(percentualDoOvo(bird, comissaoConfig))}`
+                        + ` de ${formatCurrency(precoDoOvo(bird).preco)}`
                       : 'Sem preco de ovo: a venda de ave deste lote fica fora da fila'}
                   >
                     {comissaoPorAveDoLote(bird) != null
