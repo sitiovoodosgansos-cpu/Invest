@@ -16,7 +16,7 @@ import { syncGroups } from './ornabird.js';
 import {
   construirOrdens, construirAcerto, listarPendentes, diaBrasilia, ORDEM_STATUS,
 } from '../src/utils/ordens.js';
-import { jsonEstavel } from '../src/utils/helpers.js';
+import { jsonEstavel, fatiaDeComissao } from '../src/utils/helpers.js';
 import { enviarEmail, htmlResumoAdmin } from './_email.js';
 
 // Nome do espelho na resposta da sincronizacao -> colecao do Firestore.
@@ -80,7 +80,7 @@ export async function rodarRotinaDiaria({ agora = new Date() } = {}) {
   const app = appSnap.exists ? appSnap.data() : {};
   const birds = Array.isArray(app.birds) ? app.birds : [];
   const investors = Array.isArray(app.investors) ? app.investors : [];
-  const rates = { eggProfitRate: app.eggProfitRate, birdProfitRate: app.birdProfitRate };
+  const rates = fatiaDeComissao(app);
 
   const groupIds = [...new Set(birds.map(b => b?.ornabirdGroupId).filter(Boolean))];
 
@@ -263,7 +263,7 @@ async function carregarFila(db) {
   return {
     birds: Array.isArray(app.birds) ? app.birds : [],
     investors: Array.isArray(app.investors) ? app.investors : [],
-    rates: { eggProfitRate: app.eggProfitRate, birdProfitRate: app.birdProfitRate },
+    rates: fatiaDeComissao(app),
     vendas: vitrineSnap.docs.map(d => ({ id: d.id, ...d.data() })),
     ordensExistentes: ordensSnap.docs.map(d => ({ id: d.id, ...d.data() })),
   };

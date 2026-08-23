@@ -28,9 +28,10 @@ import {
   buildOrnabirdGroupIndex,
   resolveMirrorBird,
   resolveBirdInvestorForDate,
-  resolveRateFor,
   normalizeDay,
   investidorEncerrado,
+  formatCurrency,
+  formatPercent,
 // Com a extensao .js de proposito: este arquivo tambem e carregado pelo Node
 // nas funcoes da /api, e o Node ESM nao adivinha extensao como o Vite faz.
 } from './helpers.js';
@@ -198,6 +199,10 @@ export function agruparItens(itens) {
       item?.description ?? '',
       item?.isEgg ? 'ovo' : 'ave',
       item?.rate ?? '',
+      // O valor fixo por ave tambem vai impresso, entao duas linhas com valores
+      // diferentes nao podem virar uma — a celula mostraria o valor de uma das
+      // duas e o total nao fecharia com a multiplicacao.
+      item?.comissaoPorAve ?? '',
       // A data da VENDA fica na chave: duas vendas do mesmo lote em dias
       // diferentes sao dois eventos, e o investidor confere dia a dia.
       item?.date ?? '',
@@ -247,9 +252,168 @@ export function agruparItens(itens) {
   return [...grupos.values()];
 }
 
+// ---------------------------------------------------------------------------
+// A COMISSAO: o ovo e a base, a ave vale quatro ovos
+// ---------------------------------------------------------------------------
+//
+// O modelo antigo pagava um percentual sobre o preco de venda dos DOIS. Isso
+// quebra na ave, e o motivo e do negocio, nao do software: o lucro liquido da
+// ave e pre-fixado, mas o preco dela sobe com a idade porque manejo e racao vao
+// se acumulando. Um percentual sobre um preco que sobe faz a comissao subir
+// junto, sem que tenha havido mais lucro pra dividir — o investidor de uma ave
+// vendida com seis meses recebia mais que o de uma ave identica vendida com um,
+// pelo mesmo lucro.
+//
+// A regra nova ancora tudo no ovo:
+//
+//     comissao da ave = MULTIPLICADOR x (percentual do ovo x preco do ovo)
+//
+// Com o padrao de quatro: uma ave vale quatro ovos daquele mesmo lote. O dono
+// so precisa escolher o percentual do ovo, e ele varia por lote justamente
+// porque a postura varia — Brahma bota muito e leva 10%; Pavao Branco bota
+// pouco e leva 32%, pra a conta dos quatro ovos chegar num numero justo.
+//
+//     Brahma:       ovo R$  24,00 x 10%  = R$  2,40  ->  ave = R$   9,60
+//     Pavao Branco: ovo R$ 180,00 x 32%  = R$ 57,60  ->  ave = R$ 230,40
+//
+// O OVO CONTINUA PERCENTUAL sobre o valor da venda: ali o preco de venda ja e
+// o proprio lucro proporcional, e nao carrega custo de idade nenhum.
+export const MULTIPLICADOR_AVE_PADRAO = 4;
+
+function numeroValido(v) {
+  return typeof v === 'number' && isFinite(v) && v > 0;
+}
+
+export function getMultiplicadorAve(rates) {
+  return numeroValido(rates?.multiplicadorAve) ? rates.multiplicadorAve : MULTIPLICADOR_AVE_PADRAO;
+}
+
+// O percentual do lote. E UM SO — o do ovo — e vale pros dois tipos de venda,
+// porque a comissao da ave e derivada dele. `birdProfitRate` continua guardado
+// nas linhas antigas, mas nao entra mais em conta nenhuma nova.
+export function percentualDoOvo(bird, rates) {
+  const override = bird?.eggProfitRate;
+  if (typeof override === 'number' && isFinite(override) && override >= 0) return override;
+  const global = rates?.eggProfitRate;
+  return typeof global === 'number' && isFinite(global) && global >= 0 ? global : 0.10;
+}
+
+// O ultimo preco de ovo praticado em cada lote.
+//
+// Nao existe cadastro de "preco do ovo" em lugar nenhum — nem no Ornabird: o
+// preco do ovo so aparece na hora da venda, no unitPrice do item. Entao o preco
+// de referencia sai da propria historia do lote, e varre TODAS as vendas
+// espelhadas (inclusive as ja pagas), porque um lote pode ter vendido ovo em
+// maio e so ave agora.
+export function indicePrecoOvo(vendas, resolverLote) {
+  const porLote = new Map();
+  for (const venda of Array.isArray(vendas) ? vendas : []) {
+    if (!venda?.isEgg) continue;
+    const preco = Number(venda.unitPrice);
+    if (!numeroValido(preco)) continue;
+    const bird = resolverLote(venda);
+    if (!bird?.id) continue;
+    const dia = normalizeDay(venda.date) || '';
+    const atual = porLote.get(bird.id);
+    // O MAIS RECENTE, e nao a media: a media de um lote que subiu de preco
+    // ficaria eternamente atras do preco de hoje.
+    if (!atual || dia >= atual.dia) porLote.set(bird.id, { dia, preco });
+  }
+  return porLote;
+}
+
+// De onde sai o preco do ovo daquele lote, em ordem de confianca.
+//
+// O que o dono digitou no lote ganha de tudo: e a decisao explicita dele, e o
+// unico jeito de um lote que NUNCA vendeu ovo pagar comissao de ave. Sem isso,
+// uma ave de um lote sem historico de ovo pagaria zero em silencio — que e
+// exatamente o tipo de erro caro que este sistema nao pode ter.
+export function precoOvoDoLote(bird, rates, indice) {
+  if (numeroValido(bird?.precoOvoReferencia)) {
+    return { preco: bird.precoOvoReferencia, fonte: 'lote' };
+  }
+  const observado = bird?.id ? indice?.get(bird.id) : null;
+  if (observado && numeroValido(observado.preco)) {
+    return { preco: observado.preco, fonte: 'venda', dia: observado.dia || null };
+  }
+  if (numeroValido(rates?.precoOvoReferencia)) {
+    return { preco: rates.precoOvoReferencia, fonte: 'geral' };
+  }
+  return { preco: null, fonte: null };
+}
+
+// Quanto aquela venda rende pro investidor.
+//
+// Devolve `semReferencia` em vez de zero quando a ave nao tem preco de ovo pra
+// se apoiar. Zero seria um numero, e um numero passa despercebido; a venda
+// precisa ficar de fora da fila e aparecer num aviso.
+export function comissaoDaVenda({ venda, bird, rates, indice }) {
+  const amount = Number(venda?.amount) || 0;
+  const rate = percentualDoOvo(bird, rates);
+
+  if (venda?.isEgg) {
+    return { isEgg: true, rate, profit: arredondar(amount * rate), semReferencia: false };
+  }
+
+  const { preco, fonte } = precoOvoDoLote(bird, rates, indice);
+  const multiplicador = getMultiplicadorAve(rates);
+  if (!numeroValido(preco)) {
+    return { isEgg: false, rate, profit: 0, semReferencia: true, multiplicador };
+  }
+
+  const comissaoPorAve = arredondar(multiplicador * rate * preco);
+  // Venda sem quantidade e o lancamento manual, que e texto livre. Uma ave e o
+  // palpite menos errado, e a linha ja vai marcada como vinculo incerto.
+  const aves = Number(venda?.quantity) > 0 ? Number(venda.quantity) : 1;
+  return {
+    isEgg: false,
+    rate,
+    precoOvo: preco,
+    fontePrecoOvo: fonte,
+    multiplicador,
+    comissaoPorAve,
+    profit: arredondar(aves * comissaoPorAve),
+    semReferencia: false,
+  };
+}
+
+// COMO aquela linha foi calculada, numa celula de tabela.
+//
+// "10%" pra ovo, "R$ 9,60/ave" pra ave. A coluna nao pode dizer "6,4%" numa
+// linha de ave: a comissao dela nao e percentual do preco de venda, e um
+// investidor que multiplicasse 6,4% por R$ 250 nao chegaria no valor pago —
+// e ligaria pra perguntar quem estava errado.
+//
+// Linha ANTIGA, emitida no modelo de percentual, nao tem comissaoPorAve e cai
+// no percentual. E o certo: aquele documento foi calculado assim mesmo.
+export function textoComissao(item) {
+  if (!item?.isEgg && numeroValido(item?.comissaoPorAve)) {
+    return `${formatCurrency(item.comissaoPorAve)}/ave`;
+  }
+  return formatPercent(item?.rate ?? 0);
+}
+
+// A conta da linha por extenso: "10% de R$ 90,00", "R$ 9,60 por ave x 2".
+//
+// Mora aqui, e nao em cada tela, porque o cartao da ordem, o PDF, o WhatsApp e
+// o e-mail mostram a MESMA conta. Se cada um montasse a sua, um deles ficaria
+// pra tras numa mudanca de regra e o investidor receberia duas explicacoes
+// diferentes do mesmo pagamento.
+export function textoDaConta(item) {
+  const porAve = Number(item?.comissaoPorAve);
+  if (!item?.isEgg && porAve > 0) {
+    const aves = Number(item?.quantity) > 0 ? Number(item.quantity) : 1;
+    return aves > 1
+      ? `${formatCurrency(porAve)} por ave x ${aves}`
+      : `${formatCurrency(porAve)} por ave`;
+  }
+  return `${formatPercent(item?.rate)} de ${formatCurrency(item?.amount)}`;
+}
+
 // Uma linha da ordem, a partir de uma venda espelhada do Ornabird.
-function montarItem(venda, bird, rate) {
+function montarItem(venda, bird, comissao) {
   const amount = Number(venda.amount) || 0;
+  const { rate } = comissao;
   return {
     saleId: venda.id,
     // Data de NEGOCIO da venda, nao a data da rodada. Uma venda retroativa sai
@@ -279,11 +443,20 @@ function montarItem(venda, bird, rate) {
     birdId: bird?.id ?? null,
     birdName: bird?.breed || bird?.name || null,
     amount: arredondar(amount),
-    // A taxa fica CONGELADA na linha. Se o dono mudar o percentual global
-    // depois, uma ordem ja emitida nao pode mudar de valor sozinha — e a mesma
-    // regra que as vendas importadas ja seguem com o profitRate delas.
+    // TUDO que forma o numero fica CONGELADO na linha: o percentual, o preco de
+    // ovo usado como referencia e o multiplicador. Se o dono mudar qualquer um
+    // deles depois, uma ordem ja emitida nao pode mudar de valor sozinha — e a
+    // mesma regra que as vendas importadas ja seguem com o profitRate delas.
+    //
+    // E nao e so o valor: e a EXPLICACAO. Sem o preco do ovo guardado aqui, uma
+    // ordem reaberta daqui a um ano mostraria "R$ 9,60 por ave" sem nada que
+    // permitisse remontar de onde saiu o 9,60.
     rate,
-    profit: arredondar(amount * rate),
+    precoOvo: comissao.precoOvo ?? null,
+    fontePrecoOvo: comissao.fontePrecoOvo ?? null,
+    multiplicadorAve: comissao.multiplicador ?? null,
+    comissaoPorAve: comissao.comissaoPorAve ?? null,
+    profit: comissao.profit,
   };
 }
 
@@ -312,8 +485,14 @@ export function listarPendentes({
   const investidores = Array.isArray(investors) ? investors : [];
   const escolhidas = saleIds ? new Set(saleIds) : null;
 
+  // O preco de referencia do ovo sai de TODAS as vendas espelhadas, e nao so
+  // das que estao nesta varredura: um lote pode ter vendido ovo em maio, ja
+  // pago, e so ave agora. Filtrar antes deixaria a ave sem referencia.
+  const indice = indicePrecoOvo(vendas, (v) => resolveMirrorBird(v, groupIndex));
+
   const pendentes = [];
   const semDono = [];
+  const semReferencia = [];
 
   for (const venda of Array.isArray(vendas) ? vendas : []) {
     if (!venda?.id || jaPagas.has(venda.id)) continue;
@@ -342,9 +521,27 @@ export function listarPendentes({
       continue;
     }
 
-    const rate = resolveRateFor(bird, Boolean(venda.isEgg), rates);
+    const comissao = comissaoDaVenda({ venda, bird, rates, indice });
+
+    // Ave de um lote que nunca vendeu ovo e sem preco de referencia digitado:
+    // nao da pra derivar a comissao. Fica FORA da fila, num aviso proprio — se
+    // entrasse valendo zero, o dono pagaria a ordem sem perceber que uma venda
+    // foi rateada a zero, e o investidor e que descobriria depois.
+    if (comissao.semReferencia) {
+      semReferencia.push({
+        saleId: venda.id,
+        date: diaVenda || null,
+        description: nomeDaVenda(venda),
+        amount: arredondar(amount),
+        birdName: bird?.breed || bird?.name || null,
+        investorName: investor.name || '(sem nome)',
+        motivo: 'lote sem preco de ovo pra derivar a comissao da ave',
+      });
+      continue;
+    }
+
     pendentes.push({
-      ...montarItem(venda, bird, rate),
+      ...montarItem(venda, bird, comissao),
       investorId: investor.id,
       investorName: investor.name || '(sem nome)',
     });
@@ -360,7 +557,7 @@ export function listarPendentes({
   // A ordem EMITIDA continua do mais antigo pro mais novo (ver construirOrdens):
   // la o documento se le como extrato, e extrato comeca no comeco.
   pendentes.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  return { pendentes, semDono };
+  return { pendentes, semDono, semReferencia };
 }
 
 // Quanto cada investidor tem a receber pelas vendas do Ornabird, e quanto disso
@@ -470,12 +667,14 @@ export function construirAcerto({
 
   // Passa pela MESMA atribuicao das ordens: o registro do acerto guarda de
   // quem era cada venda, que e o que uma conferencia futura vai querer saber.
-  const { pendentes, semDono } = listarPendentes({
+  const { pendentes, semDono, semReferencia } = listarPendentes({
     vendas, birds, investors, rates, ordensExistentes, saleIds,
   });
 
   // Venda sem dono tambem pode ser acertada — ela esta na fila do mesmo jeito,
-  // e deixa-la de fora faria o backlog nunca zerar.
+  // e deixa-la de fora faria o backlog nunca zerar. Vale igual pra ave sem
+  // preco de ovo: se ela nao pudesse ser acertada, ficaria pendurada pra
+  // sempre, mesmo depois de o dono ja ter pago aquilo por fora.
   const linhas = [
     ...pendentes.map(p => ({
       saleId: p.saleId, date: p.date, description: p.description,
@@ -486,6 +685,11 @@ export function construirAcerto({
       saleId: v.saleId, date: v.date, description: v.description,
       amount: v.amount, profit: 0,
       investorId: null, investorName: null,
+    })),
+    ...semReferencia.map(v => ({
+      saleId: v.saleId, date: v.date, description: v.description,
+      amount: v.amount, profit: 0,
+      investorId: null, investorName: v.investorName || null,
     })),
   ];
 
@@ -548,7 +752,7 @@ export function construirOrdens({
   const criadoEm = (agora instanceof Date ? agora : new Date(agora)).toISOString();
   const investidores = Array.isArray(investors) ? investors : [];
 
-  const { pendentes, semDono } = listarPendentes({
+  const { pendentes, semDono, semReferencia } = listarPendentes({
     vendas, birds, investors, rates, ordensExistentes, saleIds,
   });
 
@@ -647,5 +851,5 @@ export function construirOrdens({
     });
   }
 
-  return { ordens, semDono, referenceDate: dia };
+  return { ordens, semDono, semReferencia, referenceDate: dia };
 }

@@ -48,8 +48,27 @@ export function isEggProduct(description) {
 export const DEFAULT_EGG_PROFIT_RATE = 0.10;   // 10%
 export const DEFAULT_BIRD_PROFIT_RATE = 0.064; // 6,4%
 
+// A CONFIGURACAO DE COMISSAO, montada num lugar so.
+//
+// Cada tela montava `{ eggProfitRate, birdProfitRate }` na mao — dezoito
+// lugares. Quando a regra ganhou o preco de referencia do ovo e o
+// multiplicador, todo esse ponto teria que lembrar dos campos novos, e o que
+// esquecesse continuaria calculando com METADE da regra sem erro nenhum
+// aparecer: a ave simplesmente sumiria da fila por "falta de referencia". Foi o
+// que aconteceu na rotina das 6h antes deste helper existir.
+export function fatiaDeComissao(fonte) {
+  return {
+    eggProfitRate: fonte?.eggProfitRate,
+    // Nao entra em conta nova nenhuma — a comissao da ave e derivada do ovo —,
+    // mas segue aqui porque linha antiga e venda importada ainda o consultam.
+    birdProfitRate: fonte?.birdProfitRate,
+    precoOvoReferencia: fonte?.precoOvoReferencia,
+    multiplicadorAve: fonte?.multiplicadorAve,
+  };
+}
+
 // Both resolvers take an optional `rates` object — in practice the appData
-// slice `{ eggProfitRate, birdProfitRate }` exposed by useApp(). Calling them
+// slice built by fatiaDeComissao() and exposed by useApp(). Calling them
 // with no argument still yields the historical defaults, so any call site that
 // has not been threaded through yet keeps working unchanged.
 export function getEggProfitRate(rates) {
