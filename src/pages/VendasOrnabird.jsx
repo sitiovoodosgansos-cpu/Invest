@@ -120,16 +120,27 @@ export default function VendasOrnabird() {
           <div className="stat-label">Lucro dos Investidores</div>
           <div className="stat-value" style={{ color: 'var(--info)' }}>{formatCurrency(totals.profit)}</div>
         </div>
-        <div className="stat-card">
-          <div className="stat-card-icon" style={{ background: unlinked > 0 ? '#fef3c7' : '#d1fae5', color: unlinked > 0 ? '#d97706' : '#059669' }}>
-            <Link2 size={20} />
+        {/* O CONTADOR de linhas sem vinculo e diagnostico de cadastro: diz ao
+            dono quantos lotes do Ornabird faltam ligar ao Plantel. No portal
+            do investidor nao cabe — ele nao liga lote nenhum, e o numero seria
+            do criatorio inteiro. */}
+        {!somenteLeitura && (
+          <div className="stat-card">
+            <div className="stat-card-icon" style={{ background: unlinked > 0 ? '#fef3c7' : '#d1fae5', color: unlinked > 0 ? '#d97706' : '#059669' }}>
+              <Link2 size={20} />
+            </div>
+            <div className="stat-label">Sem Vinculo</div>
+            <div className="stat-value" style={{ color: unlinked > 0 ? 'var(--warning)' : 'var(--success)' }}>{unlinked}</div>
           </div>
-          <div className="stat-label">Sem Vinculo</div>
-          <div className="stat-value" style={{ color: unlinked > 0 ? 'var(--warning)' : 'var(--success)' }}>{unlinked}</div>
-        </div>
+        )}
       </div>
 
-      {unlinked > 0 && (
+      {/* AVISO DE ADMINISTRADOR — nao aparece no portal do investidor.
+          E uma instrucao de cadastro ("abra o Plantel, edite o animal"), e o
+          investidor nao tem Plantel pra abrir nem permissao pra editar. Alem
+          disso o numero e do CRIATORIO inteiro, e o portal so deve falar das
+          aves dele. */}
+      {unlinked > 0 && !somenteLeitura && (
         <div style={{
           display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 16px',
           marginBottom: 16, background: '#fef3c7', border: '1px solid #f59e0b',
@@ -170,7 +181,8 @@ export default function VendasOrnabird() {
           >
             <option value="">Todos os investidores</option>
             {investors.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-            <option value="__none__">— Sem vinculo —</option>
+            {/* Filtro de diagnostico do dono; o investidor so tem as aves dele. */}
+            {!somenteLeitura && <option value="__none__">— Sem vinculo —</option>}
           </select>
         )}
       </div>
@@ -222,7 +234,8 @@ export default function VendasOrnabird() {
                           <span style={{ fontSize: 13 }}>{r.investor.name}</span>
                         </div>
                       ) : (
-                        <span className="badge" style={{ background: '#fef3c7', color: '#d97706' }}>Sem vinculo</span>
+                        somenteLeitura ? <span style={{ color: 'var(--text-muted)' }}>—</span>
+                          : <span className="badge" style={{ background: '#fef3c7', color: '#d97706' }}>Sem vinculo</span>
                       )}
                     </td>
                     <td>

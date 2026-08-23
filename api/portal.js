@@ -108,6 +108,14 @@ function publicBird(bird, investorId) {
     breederCount: bird.breederCount ?? '',
     investmentValue: bird.investmentValue ?? '',
     createdAt: bird.createdAt || '',
+    // O ID DO LOTE NO ORNABIRD. Sem ele, as telas do portal nao conseguem
+    // ligar nenhuma linha do espelho a nenhuma ave: toda coleta, bandeja,
+    // chocagem e venda aparecia como "sem vinculo", o lucro dava R$ 0,00 e a
+    // tela ainda mandava o investidor "abrir o Plantel e editar o animal".
+    //
+    // Nao revela nada: e o id de um lote que ELE possui, e o recorte que este
+    // mesmo servidor faz ja e por este id. Ele so recebe as proprias aves.
+    ornabirdGroupId: bird.ornabirdGroupId || null,
   };
 }
 

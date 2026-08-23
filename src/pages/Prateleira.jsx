@@ -124,6 +124,9 @@ function LinhaEntrada({ entrada }) {
 }
 
 function CardBandeja({ tray }) {
+  // O aviso de "sem vinculo" e recado de cadastro pro dono, e este card
+  // tambem e renderizado dentro do portal do investidor.
+  const { somenteLeitura } = useApp();
   const [aberto, setAberto] = useState(false);
   const p = PALETA[tom(tray.dias)];
   const entradas = tray.entradasVivas;
@@ -168,9 +171,14 @@ function CardBandeja({ tray }) {
             <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{tray.investor.name}</span>
           </>
         ) : (
-          <span className="badge" style={{ background: '#fef3c7', color: '#d97706', fontSize: 10 }}>
-            Sem vinculo — nao entra no rateio
-          </span>
+          // "Sem vinculo" e recado de cadastro pro dono. No portal, uma bandeja
+          // sem dono resolvido nao vira acusacao: fica sem a linha do
+          // investidor, e pronto.
+          !somenteLeitura && (
+            <span className="badge" style={{ background: '#fef3c7', color: '#d97706', fontSize: 10 }}>
+              Sem vinculo — nao entra no rateio
+            </span>
+          )
         )}
       </div>
 
@@ -202,7 +210,7 @@ function CardBandeja({ tray }) {
 export default function Prateleira() {
   // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
   useColecoes('bandejas');
-  const { investors, birds, ornabirdTrays } = useApp();
+  const { investors, birds, ornabirdTrays, somenteLeitura } = useApp();
   const [search, setSearch] = useState('');
   const [filterInvestor, setFilterInvestor] = useState('');
 
@@ -296,16 +304,27 @@ export default function Prateleira() {
             {totals.vencidas}
           </div>
         </div>
-        <div className="stat-card">
-          <div className="stat-card-icon" style={{ background: unlinked > 0 ? '#fef3c7' : '#d1fae5', color: unlinked > 0 ? '#d97706' : '#059669' }}>
-            <Link2 size={20} />
+        {/* O CONTADOR de linhas sem vinculo e diagnostico de cadastro: diz ao
+            dono quantos lotes do Ornabird faltam ligar ao Plantel. No portal
+            do investidor nao cabe — ele nao liga lote nenhum, e o numero seria
+            do criatorio inteiro. */}
+        {!somenteLeitura && (
+          <div className="stat-card">
+            <div className="stat-card-icon" style={{ background: unlinked > 0 ? '#fef3c7' : '#d1fae5', color: unlinked > 0 ? '#d97706' : '#059669' }}>
+              <Link2 size={20} />
+            </div>
+            <div className="stat-label">Sem Vinculo</div>
+            <div className="stat-value" style={{ color: unlinked > 0 ? 'var(--warning)' : 'var(--success)' }}>{unlinked}</div>
           </div>
-          <div className="stat-label">Sem Vinculo</div>
-          <div className="stat-value" style={{ color: unlinked > 0 ? 'var(--warning)' : 'var(--success)' }}>{unlinked}</div>
-        </div>
+        )}
       </div>
 
-      {unlinked > 0 && (
+      {/* AVISO DE ADMINISTRADOR — nao aparece no portal do investidor.
+          E uma instrucao de cadastro ("abra o Plantel, edite o animal"), e o
+          investidor nao tem Plantel pra abrir nem permissao pra editar. Alem
+          disso o numero e do CRIATORIO inteiro, e o portal so deve falar das
+          aves dele. */}
+      {unlinked > 0 && !somenteLeitura && (
         <div style={{
           display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 16px',
           marginBottom: 16, background: '#fef3c7', border: '1px solid #f59e0b',
@@ -342,7 +361,9 @@ export default function Prateleira() {
         >
           <option value="">Todos os investidores</option>
           {investors.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-          <option value="__none__">— Sem vinculo —</option>
+          {/* Filtro de diagnostico: serve pro dono isolar o que falta vincular.
+              Sem sentido pro investidor, que so tem as aves dele. */}
+          {!somenteLeitura && <option value="__none__">— Sem vinculo —</option>}
         </select>
       </div>
 
