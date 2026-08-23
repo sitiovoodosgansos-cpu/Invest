@@ -34,7 +34,43 @@ const LEGACY_FALLBACK_ERRORS = new Set([
   'auth/invalid-login-credentials',
 ]);
 
+// POR QUE O LOGIN PRECISA DE UM MOTIVO
+//
+// O papel do usuario nao vem do Firebase Auth: vem de /users/{uid}, lido logo
+// depois de entrar. Quando essa leitura falha — cota do dia estourada, regra
+// recusando, rede caindo —, o codigo antigo fazia `setAdminUserDoc(null)` e
+// seguia calado. Do lado de fora: o Entrar funciona, o Firebase aceita a
+// senha, e a tela de login continua exatamente igual. "Clico no botao e nao
+// faz nada."
+//
+// O SDK do navegador devolve `code` em TEXTO (diferente do firebase-admin no
+// servidor, que devolve numero). Cada um destes vira uma frase que diz o que
+// aconteceu e o que fazer.
+const MOTIVOS_FIRESTORE = {
+  'resource-exhausted':
+    'O banco de dados atingiu o limite diario de acessos. Sua senha esta certa — o que faltou foi ler o seu perfil. O limite zera de madrugada, por volta das 4h.',
+  'permission-denied':
+    'O banco de dados recusou a leitura do seu perfil. As regras de seguranca do Firestore precisam ser revistas.',
+  unavailable:
+    'Nao foi possivel falar com o banco de dados agora. Verifique a conexao e tente de novo.',
+  unauthenticated:
+    'A credencial do aplicativo foi recusada pelo banco de dados.',
+  'deadline-exceeded':
+    'O banco de dados demorou demais para responder. Tente de novo.',
+};
+
+function motivoDoErro(err) {
+  const code = String(err?.code || '').replace(/^firestore\//, '');
+  return MOTIVOS_FIRESTORE[code]
+    || `Nao foi possivel carregar o seu perfil de acesso${code ? ` (${code})` : ''}.`;
+}
+
 export function AuthProvider({ children }) {
+  // O MOTIVO da ultima falha de acesso, para a tela de login poder dizer.
+  //
+  // Sem isto, toda falha de leitura do perfil terminava numa tela de login
+  // que nao mudava e nao explicava nada.
+  const [authError, setAuthError] = useState(null);
   // Firebase Auth state. Populated by onAuthStateChanged.
   const [firebaseUser, setFirebaseUser] = useState(null); // eslint-disable-line no-unused-vars
   const [firebaseAuthReady, setFirebaseAuthReady] = useState(false);
@@ -112,9 +148,15 @@ export function AuthProvider({ children }) {
           const data = snapshot.data();
           if (data.role === 'admin') {
             setAdminUserDoc({ uid: user.uid, ...data });
+            // Entrou de verdade: qualquer motivo antigo deixa de valer.
+            setAuthError(null);
           } else {
-            // Unexpected role — fail closed.
+            // Unexpected role — fail closed, mas dizendo por que.
             setAdminUserDoc(null);
+            setAuthError(
+              'A sua conta existe, mas nao esta marcada como administrador. '
+              + 'Avise quem administra o sistema.'
+            );
             await signOut(auth);
           }
         } else if (pendingAdminUsername.current) {
@@ -127,13 +169,25 @@ export function AuthProvider({ children }) {
             username: pendingAdminUsername.current,
           });
         } else {
-          // Signed-in Firebase user with no /users/{uid} doc and no pending
-          // migration. Not something we expect — sign out to fail closed.
+          // Usuario autenticado no Firebase mas SEM /users/{uid}. Acontece
+          // quando a gravacao desse documento falhou numa entrada anterior —
+          // o ensureAdminUserDoc engole a falha de proposito. Fecha o acesso,
+          // mas agora explica, senao vira uma tela de login que nao reage.
           setAdminUserDoc(null);
+          setAuthError(
+            'A sua senha foi aceita, mas o seu perfil de acesso nao foi '
+            + 'encontrado. Isso acontece quando o banco de dados esteve fora '
+            + 'do ar em algum acesso anterior. Tente entrar de novo; se '
+            + 'persistir, avise quem administra o sistema.'
+          );
           await signOut(auth);
         }
-      } catch {
+      } catch (err) {
+        // O CAMINHO QUE DEIXAVA A TELA MUDA. A senha foi aceita pelo Firebase
+        // Auth, mas o perfil nao pode ser lido — e sem perfil o app volta pra
+        // tela de login. Sem esta mensagem, o botao parecia nao fazer nada.
         setAdminUserDoc(null);
+        setAuthError(motivoDoErro(err));
       } finally {
         setFirebaseAuthReady(true);
       }
@@ -371,6 +425,7 @@ export function AuthProvider({ children }) {
   return (
     <AuthContext.Provider value={{
       currentUser, isAdmin, isInvestor, adminExists, adminLoading,
+      authError,
       login, logout, setupAdmin,
     }}>
       {children}

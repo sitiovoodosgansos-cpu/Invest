@@ -5,7 +5,7 @@ import { hashPassword } from '../utils/crypto';
 import { Bird, LogIn, UserPlus, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 
 export default function Login() {
-  const { adminExists, login, setupAdmin } = useAuth();
+  const { adminExists, login, setupAdmin, authError } = useAuth();
   const { investors, firestoreError, updateInvestor } = useApp();
   // Always show login form by default - never show setup automatically
   const [showSetup, setShowSetup] = useState(false);
@@ -97,6 +97,25 @@ export default function Login() {
 
         {error && (
           <div className="login-error">{error}</div>
+        )}
+
+        {/* O MOTIVO DE UM LOGIN QUE "NAO FEZ NADA".
+            A senha pode ser aceita pelo Firebase e o acesso ainda nao abrir,
+            porque o papel do usuario vem de outro documento. Quando a leitura
+            desse documento falha, o app volta pra esta tela — e antes voltava
+            calado, com o botao parecendo quebrado. */}
+        {authError && !error && (
+          <div style={{
+            padding: '10px 14px', background: '#fff3cd', border: '1px solid #ffc107',
+            borderRadius: 8, marginBottom: 12, fontSize: 12, color: '#856404',
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+          }}>
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <strong>Nao foi possivel abrir o acesso.</strong><br />
+              {authError}
+            </div>
+          </div>
         )}
 
         {isSetup ? (
