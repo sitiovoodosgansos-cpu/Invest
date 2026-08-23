@@ -227,7 +227,23 @@ export function AppProvider({ children }) {
   // next successful write.
   const [saveError, setSaveError] = useState(null);
   const lastLocalWriteTime = useRef(0);
+  // SO O SERVIDOR arma esta. Ela libera o REPUBLICAR — a republicacao dos dados
+  // locais quando um snapshot chega com menos itens do que temos. So faz
+  // sentido contra quem pode discordar de nos, e o cache SOMOS nos: se ele
+  // armasse, uma exclusao feita no celular seria desfeita pelo computador na
+  // manha seguinte.
   const dataLoadedFromFirestore = useRef(false);
+  // O CACHE TAMBEM arma esta. Ela libera a GRAVACAO, que e outra pergunta:
+  // "ja sei o que existe la, entao posso escrever por cima?". O cache responde
+  // isso tao bem quanto o servidor — ele E o que o Firestore nos deu por
+  // ultimo.
+  //
+  // Enquanto as duas perguntas dividiam a mesma flag, o preco do ovo digitado
+  // antes do snapshot do servidor chegar era descartado por um `return` mudo:
+  // a tela mostrava o valor (o React atualizou) e o banco nunca recebia. Com a
+  // cota do Firestore estourada o snapshot do servidor NUNCA chegava, e o dono
+  // preencheu o Plantel cinco vezes sem nada ser gravado.
+  const dadosCarregados = useRef(false);
   const firestoreItemCount = useRef(0);
   const pendingWriteCount = useRef(0);
   // Track local deletes so onSnapshot won't reject fewer items after intentional deletes
@@ -301,13 +317,18 @@ export function AppProvider({ children }) {
 
         localDeleteCount.current = 0;
         firestoreItemCount.current = incomingCount;
-        // So o servidor arma a protecao. Se o cache armasse, uma exclusao feita
-        // no celular seria desfeita pelo computador na manha seguinte.
+        // Chegaram dados — de onde quer que seja. A partir daqui uma edicao do
+        // dono pode ser gravada: sabemos o que ha no banco.
+        dadosCarregados.current = true;
+        // Ja o republicar continua so com snapshot do servidor (ver a
+        // declaracao das duas flags).
         if (!doCache) dataLoadedFromFirestore.current = true;
         setData(firestoreData);
       } else {
-        // First time: try to migrate from localStorage
+        // First time: try to migrate from localStorage. Nao existe documento la,
+        // entao ja sabemos tudo que ha pra saber — as duas flags valem.
         dataLoadedFromFirestore.current = true;
+        dadosCarregados.current = true;
         try {
           const stored = localStorage.getItem(STORAGE_KEY);
           if (stored) {
@@ -626,8 +647,21 @@ export function AppProvider({ children }) {
       isFirstRender.current = false;
       return;
     }
-    // PROTECTION: Don't save until we've loaded from Firestore at least once
-    if (!dataLoadedFromFirestore.current) return;
+    // Nao gravar antes de saber o que ja existe la — do cache ou do servidor,
+    // tanto faz. Antes esta linha exigia o snapshot DO SERVIDOR, e era por ela
+    // que o Plantel preenchido com a cota estourada nao gravava nada.
+    //
+    // E se ainda assim nao der pra gravar, o dono precisa SABER. Um `return`
+    // mudo aqui e o que deixou o defeito rodar cinco vezes: a tela mostrava o
+    // valor salvo e o banco continuava vazio.
+    if (!dadosCarregados.current) {
+      devWarn('Gravacao adiada: os dados ainda nao carregaram.');
+      setSaveError(
+        'Ainda carregando os dados — a alteracao NAO foi salva. '
+        + 'Espere a tela terminar de abrir e faca de novo.'
+      );
+      return;
+    }
 
     const newCount = countItems(data);
 
@@ -635,6 +669,14 @@ export function AppProvider({ children }) {
     // (prevents accidental wipe from race conditions or bugs)
     if (newCount === 0 && firestoreItemCount.current > 0) {
       devWarn('Blocked: tentativa de salvar dados vazios no Firestore (havia', firestoreItemCount.current, 'itens)');
+      // Tambem avisa, pelo mesmo motivo do bloqueio acima: gravacao recusada em
+      // silencio e indistinguivel de gravacao bem-sucedida, e o dono so descobre
+      // dias depois — quando o numero que ele conferiu nao esta mais la.
+      setSaveError(
+        'A alteracao NAO foi salva: a tela ficaria vazia por cima de '
+        + `${firestoreItemCount.current} registro(s) que existem no banco. `
+        + 'Recarregue a pagina e tente de novo.'
+      );
       return;
     }
 
