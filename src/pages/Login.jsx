@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { hashPassword } from '../utils/crypto';
+import { cacheLocalAtivo } from '../firebase';
 import { Bird, LogIn, UserPlus, Eye, EyeOff, AlertTriangle } from 'lucide-react';
 
 export default function Login() {
@@ -205,6 +206,18 @@ export default function Login() {
           <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
             {firestoreError ? '⚠ Offline' : '✓ Online'}
           </span>
+          {/* O cache desligado nao e detalhe: sem ele cada abertura relê tudo e
+              a cota diaria de 50 mil leituras acaba antes do fim do dia — que e
+              exatamente o sintoma de "nao entra mais". Fica aqui, no rodape que
+              o dono ja olha quando algo da errado, e some quando esta tudo bem. */}
+          {!cacheLocalAtivo && (
+            <>
+              <br />
+              <span style={{ fontSize: 10, color: 'var(--warning)' }}>
+                ⚠ Cache local desligado — o app vai gastar muito mais leituras
+              </span>
+            </>
+          )}
         </p>
       </div>
     </div>
