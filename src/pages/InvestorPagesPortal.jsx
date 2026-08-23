@@ -82,9 +82,74 @@ const MENSAGENS = {
   firestore_timeout: 'A consulta demorou demais e foi cancelada. Tente de novo.',
 };
 
+// A ULTIMA FATIA QUE CHEGOU, guardada no navegador DELE.
+//
+// POR QUE ISTO EXISTE
+// -------------------
+// Quando a cota diaria do criatorio acaba, o portal inteiro virava uma tela de
+// "Link indisponivel". Quem paga por isso e o INVESTIDOR — um terceiro, que
+// abriu o link dele e levou um erro sobre um limite que nao e problema dele.
+//
+// Abrir com o que ja se sabia, dizendo de quando e, e melhor que nao abrir.
+// Se o numero esta atualizado ou nao e outra conversa; a tela em branco nao da
+// nem essa escolha.
+//
+// ONDE MORA: localStorage do proprio investidor, na chave do token dele. Nao e
+// cache compartilhado — o payload e por investidor, e servir o de um para o
+// outro seria catastrofico. Por isso tambem o /api/portal continua com
+// no-store: nada disso pode encostar em CDN.
+const CHAVE_ESPELHO = (token) => `portal:ultimo:${token}`;
+
+// FALHAS DE INFRAESTRUTURA — o servidor nao conseguiu responder.
+//
+// SO estas liberam a copia local. `token_not_found` e `invalid_token` NUNCA
+// entram aqui, e isso e a parte que importa: um link revogado tem que parar de
+// funcionar na hora, e nao continuar abrindo do cache do navegador de quem ja
+// tinha aberto antes. Codigo desconhecido tambem nao entra — o padrao e falhar
+// fechado.
+const FALHAS_DE_INFRA = new Set([
+  'firestore_quota',
+  'firestore_indisponivel',
+  'firestore_timeout',
+  'firestore_permission',
+  'firestore_unauthenticated',
+  'server_error',
+  'network_error',
+]);
+
+function guardarEspelho(token, dados) {
+  try {
+    localStorage.setItem(CHAVE_ESPELHO(token), JSON.stringify({
+      em: new Date().toISOString(),
+      dados,
+    }));
+  } catch {
+    // Sem espaco ou storage bloqueado. Perde-se a rede de seguranca, nao a tela.
+  }
+}
+
+function lerEspelho(token) {
+  try {
+    const cru = localStorage.getItem(CHAVE_ESPELHO(token));
+    if (!cru) return null;
+    const { em, dados } = JSON.parse(cru);
+    return dados ? { em, dados } : null;
+  } catch {
+    return null;
+  }
+}
+
+function dataCurtaBR(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 function Conteudo() {
   const { token } = useParams();
-  const [estado, setEstado] = useState({ carregando: true, dados: null, erro: null });
+  const [estado, setEstado] = useState({ carregando: true, dados: null, erro: null, deQuando: null });
   const [menuAberto, setMenuAberto] = useState(false);
 
   useEffect(() => {
@@ -105,14 +170,26 @@ function Conteudo() {
         const corpo = await res.json().catch(() => ({}));
         if (cancelado) return;
         if (!res.ok) {
-          setEstado({ carregando: false, dados: null, erro: corpo.error || 'server_error' });
+          cair(corpo.error || 'server_error');
           return;
         }
-        setEstado({ carregando: false, dados: corpo, erro: null });
+        guardarEspelho(token, corpo);
+        setEstado({ carregando: false, dados: corpo, erro: null, deQuando: null });
       })
       .catch(() => {
-        if (!cancelado) setEstado({ carregando: false, dados: null, erro: 'network_error' });
+        if (!cancelado) cair('network_error');
       });
+
+    // O servidor nao respondeu. Se a falha for de infraestrutura E houver uma
+    // copia local, abre com ela — datada. Senao, a tela de erro de sempre.
+    function cair(erro) {
+      const espelho = FALHAS_DE_INFRA.has(erro) ? lerEspelho(token) : null;
+      if (espelho) {
+        setEstado({ carregando: false, dados: espelho.dados, erro: null, deQuando: espelho.em });
+        return;
+      }
+      setEstado({ carregando: false, dados: null, erro, deQuando: null });
+    }
     return () => { cancelado = true; };
   }, [token]);
 
@@ -158,6 +235,20 @@ function Conteudo() {
   return (
     <PortalAppProvider payload={estado.dados} loading={false} error={null}>
       <div className="app-layout">
+        {/* A DATA E OBRIGATORIA quando os dados vem da copia local.
+            Mostrar numeros antigos sem dizer que sao antigos e pior do que nao
+            mostrar nada: o investidor confere o lucro dele achando que e o de
+            hoje. Com a data, ele ve o que tem e sabe o que esta vendo. */}
+        {estado.deQuando && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50,
+            background: '#fef3c7', color: '#92400e', borderBottom: '1px solid #f59e0b',
+            padding: '8px 16px', fontSize: 13, textAlign: 'center',
+          }}>
+            Mostrando os dados de <strong>{dataCurtaBR(estado.deQuando)}</strong> —
+            o sistema está temporariamente sem acesso ao banco e não deu para atualizar agora.
+          </div>
+        )}
         <button className="mobile-menu-btn" onClick={() => setMenuAberto(!menuAberto)}>
           {menuAberto ? <X size={20} /> : <Menu size={20} />}
         </button>
