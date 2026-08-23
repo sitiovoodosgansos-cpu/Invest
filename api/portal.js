@@ -217,6 +217,57 @@ function mirrorBelongsTo(row, myGroupIds) {
   return myGroupIds.has(row.originGroupId) || myGroupIds.has(row.ornabirdGroupId);
 }
 
+// O Firestore aceita no maximo 30 valores num `in` — e o limite e de disjuncoes,
+// nao do operador: 30 vale pra `in` e `array-contains-any` juntos na mesma
+// consulta. Aqui cada consulta tem um `in` so, entao 30 e o teto exato.
+const LIMITE_IN = 30;
+
+function emBlocos(lista, tamanho) {
+  const saida = [];
+  for (let i = 0; i < lista.length; i += tamanho) saida.push(lista.slice(i, i + tamanho));
+  return saida;
+}
+
+// Le SO as linhas do espelho que pertencem a estes lotes.
+//
+// POR QUE ISTO EXISTE
+// -------------------
+// Antes esta funcao nao existia: o endpoint fazia `.get()` nas cinco colecoes
+// do espelho INTEIRAS e so depois filtrava com mirrorBelongsTo, em JavaScript.
+// O recorte estava certo — nunca vazou linha de ninguem — mas a conta era paga
+// sobre a base toda. Com o espelho de vendas na casa dos milhares de
+// documentos, CADA abertura do link de um investidor custava alguns milhares de
+// leituras pra devolver algumas dezenas de linhas. A cota diaria gratuita do
+// Firestore (50 mil leituras) acabava antes do meio-dia e o portal respondia
+// 503 pro resto do dia — foi exatamente o que os registros da Vercel mostraram.
+//
+// Empurrando o filtro pro servidor do Firestore, a leitura passa a custar so o
+// que casa.
+//
+// DUAS CONSULTAS, NAO UMA
+// -----------------------
+// mirrorBelongsTo casa por DOIS campos (originGroupId OU ornabirdGroupId). Um
+// OU entre campos diferentes existe no Firestore (Filter.or), mas ele conta as
+// disjuncoes dos dois lados somadas: `or(in[30], in[30])` = 60, o dobro do
+// limite. Duas consultas separadas, unidas por id, dao o MESMO conjunto sem
+// esbarrar nisso — e sem indice composto, porque cada uma filtra por um campo
+// so e o Firestore ja indexa campo simples sozinho.
+async function lerEspelhoDoInvestidor(db, colecao, groupIds) {
+  const ids = [...groupIds].filter(Boolean);
+  if (ids.length === 0) return [];
+
+  const porId = new Map();
+  for (const campo of ['originGroupId', 'ornabirdGroupId']) {
+    for (const bloco of emBlocos(ids, LIMITE_IN)) {
+      const snap = await db.collection(colecao).where(campo, 'in', bloco).get();
+      // A linha que casa pelos dois campos volta duas vezes; o Map desempata
+      // pelo id e ela entra uma vez so.
+      snap.docs.forEach(d => porId.set(d.id, { id: d.id, ...d.data() }));
+    }
+  }
+  return [...porId.values()];
+}
+
 function publicTray(t) {
   return {
     id: t.id,
@@ -351,6 +402,22 @@ export async function buildPortalPayload(db, token) {
   if (!investor) return { status: 404, body: { error: 'token_not_found' } };
 
   const allBirds = Array.isArray(app.birds) ? app.birds : [];
+  // ESTA leitura continua sendo a colecao inteira, e e de proposito.
+  //
+  // O espelho do Ornabird da pra recortar por consulta porque cada linha carrega
+  // o lote de origem: e um campo, e o Firestore filtra por ele. `sales` nao. O
+  // dono de uma venda sai de tres caminhos no calculateProfitDistribution, e o
+  // terceiro e matchSaleToBird(description, birds) — casamento por TEXTO da
+  // descricao. Uma venda sem matchedBirdId e sem matchedInvestorId ainda pode
+  // ser deste investidor, e so da pra saber lendo a descricao.
+  //
+  // Filtrar por `where('matchedInvestorId','==',id)` pegaria a maioria e perderia
+  // justamente essas — o investidor abriria o portal e veria menos lucro do que
+  // tem direito, sem nenhum erro na tela. Ler a mais e caro; pagar a menos e pior.
+  //
+  // O birdList tambem continua sendo o plantel INTEIRO pelo mesmo motivo: com so
+  // as aves dele, uma venda que casaria com a ave de outro passaria a casar com a
+  // dele. Recortar a entrada do calculo muda quem recebe.
   const salesSnap = await db.collection('sales').get();
   const allSales = salesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
@@ -384,45 +451,37 @@ export async function buildPortalPayload(db, token) {
     ornabirdVitrine: [],
   };
   if (myGroupIds.size > 0) {
-    const [traySnap, vitrineSnap, eggSnap, batchSnap, listingSnap] = await Promise.all([
-      db.collection('ornabirdTrays').get(),
-      db.collection('ornabirdVitrine').get(),
-      db.collection('ornabirdEggCollections').get(),
-      db.collection('ornabirdIncubatorBatches').get(),
-      db.collection('ornabirdVitrineListings').get(),
+    const [trayRows, vitrineRows, eggRows, batchRows, listingRows] = await Promise.all([
+      lerEspelhoDoInvestidor(db, 'ornabirdTrays', myGroupIds),
+      lerEspelhoDoInvestidor(db, 'ornabirdVitrine', myGroupIds),
+      lerEspelhoDoInvestidor(db, 'ornabirdEggCollections', myGroupIds),
+      lerEspelhoDoInvestidor(db, 'ornabirdIncubatorBatches', myGroupIds),
+      lerEspelhoDoInvestidor(db, 'ornabirdVitrineListings', myGroupIds),
     ]);
-    const meu = (snap) => snap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(r => mirrorBelongsTo(r, myGroupIds));
-    paginas.ornabirdTrays = meu(traySnap);
-    paginas.ornabirdEggCollections = meu(eggSnap);
-    paginas.ornabirdIncubatorBatches = meu(batchSnap);
-    paginas.ornabirdVitrineListings = meu(listingSnap);
+    // A consulta ja recortou por lote, entao este filtro nao tira mais nada.
+    // Fica de proposito: esta e a funcao que decide o que sai do servidor, e o
+    // recorte nao pode depender de UMA consulta estar escrita certa. Custa uma
+    // passada numa lista que agora e pequena, e e a ultima linha de defesa se
+    // um `where` for editado errado um dia.
+    const meu = (rows) => rows.filter(r => mirrorBelongsTo(r, myGroupIds));
+    paginas.ornabirdTrays = meu(trayRows);
+    paginas.ornabirdEggCollections = meu(eggRows);
+    paginas.ornabirdIncubatorBatches = meu(batchRows);
+    paginas.ornabirdVitrineListings = meu(listingRows);
     // Nome do cliente sai: e cliente do criatorio, nao do investidor. Mesma
     // decisao ja tomada em publicVitrineSale.
-    paginas.ornabirdVitrine = meu(vitrineSnap).map(({ customer, ...resto }) => resto);
-    myTrays = traySnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(t => mirrorBelongsTo(t, myGroupIds))
-      .map(publicTray);
-    myVitrine = vitrineSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(v => mirrorBelongsTo(v, myGroupIds))
+    paginas.ornabirdVitrine = meu(vitrineRows).map(({ customer, ...resto }) => resto);
+    myTrays = meu(trayRows).map(publicTray);
+    myVitrine = meu(vitrineRows)
       .map(v => publicVitrineSale(v, resolveRateFor(mirrorBird(v, myBirds), !!v.isEgg, rates)));
     // A coleta agora e espelhada do Ornabird, entao ela e filtrada pelo LOTE e
     // nao pelo birdId gravado no documento — que nao existe mais. Mesma regra
     // das bandejas: lote nao vinculado nao pertence a investidor nenhum e nao
     // sai do servidor.
-    myEggCollections = eggSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(c => mirrorBelongsTo(c, myGroupIds))
-      .map(c => publicEggCollection(c, mirrorBird(c, myBirds)));
+    myEggCollections = meu(eggRows).map(c => publicEggCollection(c, mirrorBird(c, myBirds)));
     // Chocagem segue a mesma regra de posse: lote nao vinculado, ou vinculado
     // a outro investidor, nao sai do servidor.
-    myBatches = batchSnap.docs
-      .map(d => ({ id: d.id, ...d.data() }))
-      .filter(b => mirrorBelongsTo(b, myGroupIds))
-      .map(b => publicBatch(b, mirrorBird(b, myBirds)));
+    myBatches = meu(batchRows).map(b => publicBatch(b, mirrorBird(b, myBirds)));
   }
 
   // Só as chocadeiras referenciadas por esses lotes, nome apenas — a maquina
