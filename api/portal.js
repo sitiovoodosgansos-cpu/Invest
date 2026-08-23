@@ -140,6 +140,27 @@ function publicSale(item, investorId) {
   };
 }
 
+// A fatia de UM investidor no calculo de lucro, ja no formato que sai daqui.
+//
+// Mora nesta funcao — e nao em duas — porque agora tem dois autores: a rotina
+// diaria a GRAVA em portalResumo/{investorId}, e este arquivo a DEVOLVE. Se
+// cada lado montasse o proprio objeto, bastaria alguem acrescentar um campo de
+// um lado pro portal passar a mostrar um numero e o resumo gravado mostrar
+// outro — e a diferenca so apareceria pro investidor.
+//
+// publicSale e idempotente de proposito: aplicar de novo sobre a propria saida
+// devolve o mesmo objeto. E o que permite gravar ja recortado (documento
+// pequeno) e AINDA passar pelo recorte na volta, sem duplicar regra nenhuma.
+export function resumoDoInvestidor(fatia, investorId) {
+  const f = fatia || {};
+  return {
+    eggProfit: Number(f.eggProfit) || 0,
+    birdProfit: Number(f.birdProfit) || 0,
+    totalProfit: Number(f.totalProfit) || 0,
+    items: (Array.isArray(f.items) ? f.items : []).map(s => publicSale(s, investorId)),
+  };
+}
+
 // Operational records the employee portal needs. Deliberately excludes every
 // financial and personal field: no investors, no sales, no payments, no
 // aportes, no expenses (whose rows also carry base64 receipt images).
@@ -402,29 +423,42 @@ export async function buildPortalPayload(db, token) {
   if (!investor) return { status: 404, body: { error: 'token_not_found' } };
 
   const allBirds = Array.isArray(app.birds) ? app.birds : [];
-  // ESTA leitura continua sendo a colecao inteira, e e de proposito.
-  //
-  // O espelho do Ornabird da pra recortar por consulta porque cada linha carrega
-  // o lote de origem: e um campo, e o Firestore filtra por ele. `sales` nao. O
-  // dono de uma venda sai de tres caminhos no calculateProfitDistribution, e o
-  // terceiro e matchSaleToBird(description, birds) — casamento por TEXTO da
-  // descricao. Uma venda sem matchedBirdId e sem matchedInvestorId ainda pode
-  // ser deste investidor, e so da pra saber lendo a descricao.
-  //
-  // Filtrar por `where('matchedInvestorId','==',id)` pegaria a maioria e perderia
-  // justamente essas — o investidor abriria o portal e veria menos lucro do que
-  // tem direito, sem nenhum erro na tela. Ler a mais e caro; pagar a menos e pior.
-  //
-  // O birdList tambem continua sendo o plantel INTEIRO pelo mesmo motivo: com so
-  // as aves dele, uma venda que casaria com a ave de outro passaria a casar com a
-  // dele. Recortar a entrada do calculo muda quem recebe.
-  const salesSnap = await db.collection('sales').get();
-  const allSales = salesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-  // Attribution runs on the server over the full dataset; only this investor's
-  // slice leaves the building.
-  const { distribution } = calculateProfitDistribution(allSales, allBirds, rates);
-  const mine = distribution[investor.id] || { eggProfit: 0, birdProfit: 0, totalProfit: 0, items: [] };
+  // O LUCRO: uma leitura quando a rotina ja calculou, a base toda quando nao.
+  //
+  // A colecao `sales` nao da pra recortar por consulta, e por um motivo que nao
+  // e falta de indice: o dono de uma venda sai de tres caminhos no
+  // calculateProfitDistribution, e o terceiro e matchSaleToBird(description,
+  // birds) — casamento por TEXTO da descricao. Uma venda sem matchedBirdId e
+  // sem matchedInvestorId ainda pode ser deste investidor, e so da pra saber
+  // lendo a descricao. Filtrar por `where('matchedInvestorId','==',id)` pegaria
+  // a maioria e perderia justamente essas: ele veria menos lucro do que tem
+  // direito, sem nenhum erro na tela.
+  //
+  // Entao a leitura nao foi recortada — foi MUDADA DE HORA. A rotina diaria le
+  // `sales` uma vez, calcula, e grava a fatia de cada um em portalResumo/{id}.
+  // Aqui isso vira uma leitura.
+  //
+  // O caminho ao vivo continua inteiro embaixo, e nao e sobra: cobre o
+  // investidor novo cadastrado depois da ultima rodada, o resumo grande demais
+  // pro limite de 1 MB do Firestore, e o dia em que a rotina falhou. Nesses
+  // casos o portal fica caro — e certo. Nunca o contrario.
+  let mine;
+  let resumoCalculadoEm = null;
+  const resumoSnap = await db.doc(`portalResumo/${investor.id}`).get();
+  if (resumoSnap.exists) {
+    const r = resumoSnap.data() || {};
+    mine = resumoDoInvestidor(r, investor.id);
+    resumoCalculadoEm = r.calculadoEm || null;
+  } else {
+    // O birdList e o plantel INTEIRO de proposito: com so as aves dele, uma
+    // venda que casaria com a ave de outro passaria a casar com a dele.
+    // Recortar a entrada do calculo muda quem recebe.
+    const salesSnap = await db.collection('sales').get();
+    const allSales = salesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const { distribution } = calculateProfitDistribution(allSales, allBirds, rates);
+    mine = resumoDoInvestidor(distribution[investor.id], investor.id);
+  }
 
   // Only animals the investor currently owns — the same set the portal showed
   // before. Including previously-owned animals would mean shipping a bird
@@ -507,12 +541,20 @@ export async function buildPortalPayload(db, token) {
       incubators: myIncubators,
       // Fatia crua para as telas operacionais do portal do investidor.
       paginas,
+      // O publicSale roda de novo aqui, e o resumoDoInvestidor ja o aplicou.
+      // E idempotente, entao nao muda nada — e fica porque a redacao pertence a
+      // SAIDA. Se um dia alguem gravar em portalResumo por outro caminho, o que
+      // sai daqui continua sendo o que esta funcao deixa sair.
       sales: (mine.items || []).map(sale => publicSale(sale, investor.id)),
       summary: {
         eggProfit: mine.eggProfit || 0,
         birdProfit: mine.birdProfit || 0,
         totalProfit: mine.totalProfit || 0,
       },
+      // De quando e o numero acima. Nulo quando foi calculado ao vivo — aí e
+      // deste instante. A tela usa pra dizer "atualizado em ..." em vez de
+      // deixar o investidor supor que e de agora.
+      resumoCalculadoEm,
       financialInvestments: (app.financialInvestments || [])
         .filter(f => f && f.investorId === investor.id)
         .map(f => ({ id: f.id, investorId: investor.id, amount: f.amount, date: f.date })),

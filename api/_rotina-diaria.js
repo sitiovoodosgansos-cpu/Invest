@@ -16,8 +16,11 @@ import { syncGroups } from './ornabird.js';
 import {
   construirOrdens, construirAcerto, listarPendentes, diaBrasilia, ORDEM_STATUS,
 } from '../src/utils/ordens.js';
-import { jsonEstavel, fatiaDeComissao } from '../src/utils/helpers.js';
+import {
+  jsonEstavel, fatiaDeComissao, calculateProfitDistribution,
+} from '../src/utils/helpers.js';
 import { enviarEmail, htmlResumoAdmin } from './_email.js';
+import { resumoDoInvestidor } from './portal.js';
 
 // Nome do espelho na resposta da sincronizacao -> colecao do Firestore.
 const ESPELHOS = {
@@ -73,6 +76,98 @@ async function gravarEspelho(db, colecao, rows) {
   return { gravadas: mudadas.length, apagadas: sumiram.length, inalteradas: rows.length - mudadas.length };
 }
 
+// Um documento do Firestore vai ate 1 MB. Um investidor com historico longo
+// pode ter mais linhas do que cabe — e estourar o limite aqui derrubaria a
+// rotina INTEIRA, junto com as ordens de pagamento do dia. 800 KB deixa folga
+// pro que o Firestore soma por cima do JSON.
+const TETO_RESUMO = 800 * 1024;
+
+// Pre-calcula a fatia de lucro de cada investidor.
+//
+// POR QUE ISTO EXISTE
+// -------------------
+// O /api/portal precisava da colecao `sales` INTEIRA a cada abertura do link,
+// porque o dono de uma venda pode sair de um casamento por texto da descricao
+// — coisa que nenhuma consulta do Firestore alcanca. Com o espelho ja recortado
+// por consulta, essa leitura virou o maior custo que sobrou no portal.
+//
+// A conta nao muda de lugar por acaso: a rotina ja roda uma vez por dia e ja
+// carrega birds/investors/rates. Calcular aqui troca "N leituras a cada
+// abertura" por "N leituras uma vez por dia" — e o portal passa a custar UMA.
+//
+// O QUE ISTO NAO E
+// ----------------
+// Nao e cache com validade. O portal usa o que esta gravado quando existe, e
+// calcula ao vivo quando nao existe. Entao o numero que o investidor ve e
+// sempre o da ultima rodada, com o carimbo junto (calculadoEm) pra tela poder
+// dizer de quando e. Quem quiser atualizar agora clica "Rodar agora".
+async function gravarResumosDoPortal(db, { birds, investors, rates, agora }) {
+  const salesSnap = await db.collection('sales').get();
+  const vendas = salesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const { distribution } = calculateProfitDistribution(vendas, birds, rates);
+
+  const calculadoEm = (agora instanceof Date ? agora : new Date(agora)).toISOString();
+
+  // Resumo de investidor que nao existe mais e numero velho esperando pra
+  // confundir. Some junto, como no gravarEspelho.
+  const anteriores = await db.collection('portalResumo').get();
+  const anteriorPorId = new Map();
+  anteriores.forEach(d => anteriorPorId.set(d.id, d.data()));
+  const vivos = new Set(investors.map(i => i?.id).filter(Boolean));
+  const sumiram = [...anteriorPorId.keys()].filter(id => !vivos.has(id));
+
+  const ops = sumiram.map(id => (b) => b.delete(db.collection('portalResumo').doc(id)));
+  let gravados = 0;
+  let inalterados = 0;
+  let grandesDemais = 0;
+
+  // O carimbo muda toda rodada; os numeros quase nunca. Comparar COM ele faria
+  // toda rodada regravar tudo — o mesmo desperdicio que o gravarEspelho existe
+  // pra evitar, so que em outra colecao. Fora da comparacao, uma rodada sem
+  // novidade custa zero gravacoes, e `calculadoEm` passa a significar "quando
+  // estes numeros foram apurados" — que e o que a tela precisa dizer.
+  const semCarimbo = ({ calculadoEm: _ignorado, ...resto } = {}) => jsonEstavel(resto);
+
+  for (const inv of investors) {
+    if (!inv?.id) continue;
+    const limpo = JSON.parse(JSON.stringify({
+      investorId: inv.id,
+      calculadoEm,
+      ...resumoDoInvestidor(distribution[inv.id], inv.id),
+    }));
+
+    // Grande demais nao vira resumo pela metade: o documento simplesmente nao
+    // e gravado, e o portal cai no calculo ao vivo pra ESSE investidor — que ja
+    // e o caminho que existe pra quem ainda nao tem resumo. Um resumo truncado
+    // seria pior que nenhum: mostraria menos lucro do que ele tem, sem avisar.
+    if (Buffer.byteLength(JSON.stringify(limpo), 'utf8') > TETO_RESUMO) {
+      grandesDemais += 1;
+      if (anteriorPorId.has(inv.id)) {
+        ops.push((b) => b.delete(db.collection('portalResumo').doc(inv.id)));
+      }
+      continue;
+    }
+
+    const anterior = anteriorPorId.get(inv.id);
+    if (anterior && semCarimbo(anterior) === semCarimbo(limpo)) {
+      inalterados += 1;
+      continue;
+    }
+    gravados += 1;
+    ops.push((b) => b.set(db.collection('portalResumo').doc(inv.id), limpo));
+  }
+
+  await commitEmLotes(db, ops);
+  return {
+    vendasLidas: vendas.length,
+    gravados,
+    inalterados,
+    apagados: sumiram.length,
+    grandesDemais,
+    calculadoEm,
+  };
+}
+
 export async function rodarRotinaDiaria({ agora = new Date() } = {}) {
   const { db } = getFirebase();
 
@@ -105,7 +200,16 @@ export async function rodarRotinaDiaria({ agora = new Date() } = {}) {
     espelhos[chave] = await gravarEspelho(db, colecao, payload[chave] || []);
   }
 
-  // --- 2. Ordens ---
+  // --- 2. Resumo do portal ---
+  //
+  // ANTES da trava da emissao automatica, de proposito. O resumo e o que o
+  // investidor ve quando abre o link dele; a trava so decide se ORDEM sai. Se
+  // isto ficasse depois do `if (!liberado) return`, o portal ficaria sem resumo
+  // — e caindo no calculo ao vivo, que e o custo que esta rotina veio cortar —
+  // exatamente enquanto o dono ainda nao liberou a emissao.
+  const resumos = await gravarResumosDoPortal(db, { birds, investors, rates, agora });
+
+  // --- 3. Ordens ---
   //
   // As ordens existentes sao o registro de quais vendas ja foram pagas (ver
   // vendasJaEmOrdem, em src/utils/ordens.js), entao a colecao inteira e lida a
@@ -136,6 +240,7 @@ export async function rodarRotinaDiaria({ agora = new Date() } = {}) {
       referenceDate: diaBrasilia(agora),
       groupIds: groupIds.length,
       espelhos,
+      resumos,
       ordens: 0,
       aPagar: 0,
       avisosZero: 0,
@@ -166,7 +271,7 @@ export async function rodarRotinaDiaria({ agora = new Date() } = {}) {
     )
   );
 
-  // --- 3. O aviso da madrugada pro dono ---
+  // --- 4. O aviso da madrugada pro dono ---
   //
   // Sai DEPOIS de gravar as ordens, nunca antes: um e-mail dizendo "pague
   // estes cinco" sobre ordens que nao chegaram a existir mandaria o dono pagar
@@ -196,6 +301,7 @@ export async function rodarRotinaDiaria({ agora = new Date() } = {}) {
     referenceDate: referenceDate || diaBrasilia(agora),
     groupIds: groupIds.length,
     espelhos,
+    resumos,
     ordens: ordens.length,
     aPagar: ordens.reduce((s, o) => s + o.totalProfit, 0),
     avisosZero: ordens.filter(o => o.kind === 'zero').length,

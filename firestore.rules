@@ -240,6 +240,23 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // O lucro de cada investidor, ja calculado pela rotina diaria, um documento
+    // por investidor. Existe pra que /api/portal custe UMA leitura em vez da
+    // colecao `sales` inteira a cada abertura do link.
+    //
+    // FECHADO DOS DOIS LADOS, e e o mais fechado do arquivo. Cada documento diz
+    // quanto UM investidor ganhou, e o id dele e o nome do documento: leitura
+    // aberta entregaria "quem ganha quanto" a qualquer um que soubesse um id.
+    // O investidor nao le isto — ele fala com /api/portal, que usa o
+    // firebase-admin (passa por cima destas regras) depois de conferir o token
+    // dele. A escrita e negada ate pro administrador logado porque o unico
+    // autor legitimo e a rotina do servidor; um segundo caminho pelo navegador
+    // poderia gravar um lucro que ninguem calculou.
+    match /portalResumo/{investorId} {
+      allow read: if false;
+      allow write: if false;
+    }
+
     // Como foi a ultima rodada da rotina diaria (quando, se deu certo, o que
     // gerou). Escrito so pelo servidor, pelo mesmo motivo acima: e o registro
     // que distingue "hoje ninguem vendeu" de "a rotina nem rodou".
