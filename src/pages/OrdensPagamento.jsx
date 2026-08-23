@@ -9,6 +9,7 @@ import { formatCurrency, formatPercent, investidorEncerrado } from '../utils/hel
 import {
   ORDEM_STATUS, ORDEM_TIPO,
   diaBrasilia, listarPendentes, saldoOrnabird, agruparItens, textoOrigem,
+  contarMercadoria,
 } from '../utils/ordens';
 import {
   pdfDaOrdem, pdfDoDia, textoDaOrdem, linkWhatsapp, linkEmail,
@@ -212,9 +213,10 @@ function LinhaItem({ item }) {
           {item.originDate ? ` · ${textoOrigem(item)}` : ''}
           {/* Linha somada: quantas vendas do razao ela representa. Sem isto, o
               "N venda(s)" do cabecalho do cartao pareceria nao bater com o
-              numero de linhas logo abaixo dele. */}
+              numero de linhas logo abaixo dele. Fica so aqui, na tela do dono:
+              o documento do investidor conta a mercadoria, nao as linhas. */}
           {item.vendas > 1 ? ` · ${item.vendas} vendas somadas` : ''}
-          {item.quantity ? ` · ${item.quantity} un` : ''}
+          {contarMercadoria(item) ? ` · ${contarMercadoria(item)}` : ''}
           {item.birdName ? ` · ${item.birdName}` : ''}
           {item.customer ? ` · ${item.customer}` : ''}
           {/* Vinculo por titulo do lote quebra em silencio se alguem renomear

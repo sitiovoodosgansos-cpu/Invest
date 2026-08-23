@@ -150,6 +150,22 @@ export function textoOrigem(item) {
   return `${rotulo} ${inicio} a ${dataCurta(ate)}`;
 }
 
+// O QUE foi vendido, contado: "18 ovos", "2 aves", "1 ovo".
+//
+// Conta a MERCADORIA, e nao quantas linhas do razao a linha somou. Sao numeros
+// diferentes — tres bandejas de seis ovos sao uma venda de dezoito ovos — e o
+// unico dos dois que o investidor consegue conferir contra o que recebeu e a
+// quantidade.
+//
+// Devolve vazio quando nao ha quantidade: o lancamento manual do Ornabird e
+// texto livre e nao diz quantas unidades sao, e "0 ovos" seria pior que nada.
+export function contarMercadoria(item) {
+  const n = Number(item?.quantity) || 0;
+  if (n <= 0) return '';
+  if (item?.isEgg) return `${n} ${n === 1 ? 'ovo' : 'ovos'}`;
+  return `${n} ${n === 1 ? 'ave' : 'aves'}`;
+}
+
 // AGRUPAR AS LINHAS QUE O INVESTIDOR LE.
 //
 // O Ornabird registra uma venda de ovos por BANDEJA de origem: um pedido com
