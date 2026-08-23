@@ -322,22 +322,24 @@ export function indicePrecoOvo(vendas, resolverLote) {
   return porLote;
 }
 
-// De onde sai o preco do ovo daquele lote, em ordem de confianca.
+// De onde sai o preco do ovo daquele lote.
 //
-// O que o dono digitou no lote ganha de tudo: e a decisao explicita dele, e o
-// unico jeito de um lote que NUNCA vendeu ovo pagar comissao de ave. Sem isso,
-// uma ave de um lote sem historico de ovo pagaria zero em silencio — que e
-// exatamente o tipo de erro caro que este sistema nao pode ter.
-export function precoOvoDoLote(bird, rates, indice) {
+// NAO EXISTE PRECO DE OVO GERAL, e isso e uma decisao, nao uma falta. Ovo de
+// Brahma sai a R$ 24 e ovo de Pavao Branco a R$ 180 — sete vezes mais. Um
+// valor geral aplicado ao lote errado nao daria "mais ou menos certo": daria
+// uma comissao com uma casa decimal de diferenca, e daria em silencio. Melhor
+// a venda ficar de fora com aviso do que ser paga errado sem ninguem ver.
+//
+// Sobram duas fontes, as duas do proprio lote: o preco que o dono digitou no
+// Plantel (ganha, e a decisao explicita dele) e o preco da ultima venda de ovo
+// daquele lote.
+export function precoOvoDoLote(bird, _rates, indice) {
   if (numeroValido(bird?.precoOvoReferencia)) {
     return { preco: bird.precoOvoReferencia, fonte: 'lote' };
   }
   const observado = bird?.id ? indice?.get(bird.id) : null;
   if (observado && numeroValido(observado.preco)) {
     return { preco: observado.preco, fonte: 'venda', dia: observado.dia || null };
-  }
-  if (numeroValido(rates?.precoOvoReferencia)) {
-    return { preco: rates.precoOvoReferencia, fonte: 'geral' };
   }
   return { preco: null, fonte: null };
 }

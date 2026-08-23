@@ -62,7 +62,9 @@ export function fatiaDeComissao(fonte) {
     // Nao entra em conta nova nenhuma — a comissao da ave e derivada do ovo —,
     // mas segue aqui porque linha antiga e venda importada ainda o consultam.
     birdProfitRate: fonte?.birdProfitRate,
-    precoOvoReferencia: fonte?.precoOvoReferencia,
+    // Nao ha preco de ovo geral: ele e por lote, no Plantel. Ovo de Brahma
+    // sai a R$ 24 e de Pavao a R$ 180 — um valor geral pagaria errado em um
+    // dos dois, e em silencio.
     multiplicadorAve: fonte?.multiplicadorAve,
   };
 }
