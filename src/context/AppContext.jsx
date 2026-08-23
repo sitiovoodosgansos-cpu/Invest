@@ -572,16 +572,30 @@ export function AppProvider({ children }) {
       }
     };
 
-    const handleBeforeUnload = (e) => {
+    // AQUI NAO SE GRAVA NO FIRESTORE. A copia local, sim; o banco, nunca.
+    //
+    // Ate 08/2026 este handler mandava um setDoc com dataRef.current inteiro
+    // "por garantia". A garantia era falsa e o preco era alto:
+    //
+    //   * FALSA porque ele so chegava a gravar quando pendingWriteCount === 0
+    //     e dataLoadedFromFirestore === true — ou seja, exatamente quando o
+    //     efeito de salvar ja tinha descarregado toda mudanca. Nunca houve nada
+    //     pra ele salvar que ja nao estivesse salvo.
+    //
+    //   * CARA porque o /config/appData e regravado INTEIRO (setDoc sem merge).
+    //     Uma aba aberta desde de manha tem em memoria a versao de manha. Ao
+    //     fechar, ela mandava essa versao por cima do que outra aba — ou o
+    //     celular — tinha acabado de gravar. O dono via o preco do ovo sumir
+    //     "sozinho depois de um tempo", sem erro nenhum na tela.
+    //
+    // A protecao do onSnapshot nao pegava porque ela compara CONTAGEM de itens
+    // (decidirSnapshot). Preencher um campo numa ave nao muda contagem: sao as
+    // mesmas N aves antes e depois. Ela enxerga linha apagada e e cega a campo
+    // sobrescrito.
+    //
+    // Coberto por teste-duas-abas.mjs, que abre duas abas de verdade.
+    const handleBeforeUnload = () => {
       saveToLocalStorage();
-      // Also attempt Firestore save (best-effort, may not complete)
-      if (pendingWriteCount.current > 0 || !dataLoadedFromFirestore.current) return;
-      try {
-        const sanitized = JSON.parse(JSON.stringify(dataRef.current));
-        setDoc(FIRESTORE_DOC, sanitized).catch(() => {});
-      } catch {
-        // ignore
-      }
     };
 
     const handleVisibilityChange = () => {
