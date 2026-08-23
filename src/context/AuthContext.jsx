@@ -49,8 +49,21 @@ const LEGACY_FALLBACK_ERRORS = new Set([
 const MOTIVOS_FIRESTORE = {
   'resource-exhausted':
     'O banco de dados atingiu o limite diario de acessos. Sua senha esta certa — o que faltou foi ler o seu perfil. O limite zera de madrugada, por volta das 4h.',
+  // NAO acuse as regras com certeza.
+  //
+  // Em 23/08 a cota diaria estourou e esta mensagem apareceu no login dizendo
+  // que "as regras precisam ser revistas". As regras estavam certas: faltava
+  // cota — os registros do servidor mostravam RESOURCE_EXHAUSTED no mesmo
+  // minuto. Mandar o dono reescrever regra que funciona e pior do que nao
+  // explicar nada: ele mexe no que esta certo e abre um buraco de verdade.
+  //
+  // Daqui nao da pra separar as duas causas, entao a frase diz as duas — a mais
+  // provavel primeiro, porque neste projeto a cota estoura direto.
   'permission-denied':
-    'O banco de dados recusou a leitura do seu perfil. As regras de seguranca do Firestore precisam ser revistas.',
+    'O banco de dados recusou a leitura do seu perfil. Quase sempre e a cota '
+    + 'diaria do Firestore esgotada — ela zera de madrugada, por volta das 4h. '
+    + 'Tente de novo depois disso. Se continuar amanha de manha, ai sim as regras '
+    + 'de seguranca precisam ser olhadas; nao mexa nelas antes disso.',
   unavailable:
     'Nao foi possivel falar com o banco de dados agora. Verifique a conexao e tente de novo.',
   unauthenticated:
