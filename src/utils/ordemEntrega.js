@@ -13,7 +13,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatCurrency, formatPercent } from './helpers.js';
-import { agruparItens, textoOrigem } from './ordens.js';
+import { agruparItens, textoOrigem, contarMercadoria } from './ordens.js';
 
 const ROXO = [108, 43, 217];
 const TINTA = [30, 27, 75];
@@ -26,13 +26,18 @@ function dataBr(iso) {
   return `${d}/${m}/${a}`;
 }
 
-// O nome da linha, com a contagem quando ela soma mais de uma venda.
+// A contagem da linha: a mercadoria, e so quando ela nao existe, as linhas.
 //
-// "Sebright Prata (3 vendas)" e o que faz a capa fechar com o detalhe: a capa
-// conta VENDAS (o que o razao pagou), a tabela mostra linhas agrupadas, e sem
-// a contagem aqui os dois numeros pareceriam se contradizer.
+// O lancamento manual do Ornabird e texto livre e nao traz quantidade; ali
+// dizer "18 ovos" seria invencao, e o numero honesto que sobra e quantas
+// vendas foram somadas naquela linha.
+function contagem(item) {
+  return contarMercadoria(item) || (item?.vendas > 1 ? `${item.vendas} vendas` : '');
+}
+
 function nomeCurto(item) {
-  return item?.vendas > 1 ? `${item.description} (${item.vendas} vendas)` : item.description;
+  const quanto = contagem(item);
+  return quanto ? `${item.description} (${quanto})` : item.description;
 }
 
 // A coluna Origem so aparece se ALGUMA linha tiver origem.
@@ -80,8 +85,11 @@ export function textoDaOrdem(ordem) {
   }
 
   const linhas = agruparItens(ordem.items).map(i => {
-    const origem = i.originDate ? `, ${textoOrigem(i)}` : '';
-    return `- ${nomeCurto(i)} (${i.isEgg ? 'ovos' : 'ave'}${origem}) `
+    // A contagem ja diz "ovos" ou "aves"; quando ela nao existe, o tipo entra
+    // sozinho, pra a linha nunca deixar de dizer o que foi vendido.
+    const dentro = [contagem(i) || (i.isEgg ? 'ovos' : 'ave')];
+    if (i.originDate) dentro.push(textoOrigem(i));
+    return `- ${i.description} (${dentro.join(', ')}) `
       + `vendida em ${dataBr(i.date)}: ${formatPercent(i.rate)} de `
       + `${formatCurrency(i.amount)} = ${formatCurrency(i.profit)}`;
   });
@@ -334,7 +342,7 @@ export function pdfDoDia(ordens, referenceDate) {
 
   autoTable(doc, {
     startY: 54,
-    head: [['Investidor', 'Chave PIX', 'Vendas', 'Bruto', 'A pagar']],
+    head: [['Investidor', 'Chave PIX', 'Linhas', 'Bruto', 'A pagar']],
     body: aPagar.length > 0
       ? aPagar.map(o => [
           o.investorName,
@@ -342,10 +350,11 @@ export function pdfDoDia(ordens, referenceDate) {
           // pagamento trava e o dono precisa saber disso ANTES de sentar pra
           // pagar, nao no meio.
           o.investorPix || '(sem chave cadastrada)',
-          // A contagem de VENDAS do razao, que pode ser maior que o numero de
-          // linhas da pagina de detalhe — la os ovos da mesma ave no mesmo dia
-          // saem somados numa linha so, com "(3 vendas)" no nome pra fechar.
-          String((o.items || []).length),
+          // LINHAS, e nao vendas: e exatamente quantas linhas a pagina de
+          // detalhe daquele investidor tem. A contagem de vendas do razao seria
+          // maior (os ovos da mesma ave no mesmo dia saem somados) e quem
+          // conferisse uma contra a outra acharia que uma das duas esta errada.
+          String(agruparItens(o.items).length),
           formatCurrency(o.totalAmount),
           formatCurrency(o.totalProfit),
         ])
