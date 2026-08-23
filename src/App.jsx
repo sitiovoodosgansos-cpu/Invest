@@ -158,7 +158,12 @@ function AdminLayout() {
           >
             <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
             <div style={{ flex: 1 }}>
-              <strong>Erro ao salvar alteracoes.</strong>
+              {/* Titulo NEUTRO: este aviso mostra qualquer falha do sistema, e
+                  a maioria nao e de gravacao — falha de leitura, de cota, de
+                  sincronizacao. Chamar tudo de "erro ao salvar" mandava o dono
+                  procurar o que ele tinha acabado de digitar, quando o problema
+                  estava em outro lugar. Cada mensagem ja diz o que aconteceu. */}
+              <strong>Algo nao funcionou.</strong>
               <div style={{ marginTop: 2 }}>{saveError}</div>
             </div>
           </div>

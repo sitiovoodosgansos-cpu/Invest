@@ -104,11 +104,15 @@ export default function Plantel() {
     ? arredondar(multiplicador * percentualAtual * precoAtual)
     : null;
 
-  // A mesma conta, pro cartao de cada lote da lista.
+  // As mesmas contas, pro cartao de cada lote da lista.
+  const precoDoOvo = (bird) => {
+    const achado = precoOvoDoLote(bird, comissaoConfig, indicePreco);
+    return achado.preco == null ? null : achado;
+  };
   const comissaoPorAveDoLote = (bird) => {
-    const preco = precoOvoDoLote(bird, comissaoConfig, indicePreco).preco;
-    if (preco == null) return null;
-    return arredondar(multiplicador * percentualDoOvo(bird, comissaoConfig) * preco);
+    const achado = precoDoOvo(bird);
+    if (!achado) return null;
+    return arredondar(multiplicador * percentualDoOvo(bird, comissaoConfig) * achado.preco);
   };
   const [transferForm, setTransferForm] = useState({ toInvestorId: '', transferDate: '' });
   // Bird whose ownership history panel is expanded.
@@ -381,9 +385,30 @@ export default function Plantel() {
                       background: typeof bird.eggProfitRate === 'number' ? '#fef3c7' : 'var(--bg-secondary)',
                       color: typeof bird.eggProfitRate === 'number' ? '#d97706' : 'var(--text-secondary)',
                     }}
-                    title={typeof bird.eggProfitRate === 'number' ? 'Taxa propria deste animal' : 'Usando a taxa geral'}
+                    title={typeof bird.eggProfitRate === 'number'
+                      ? 'Percentual proprio deste lote'
+                      : 'Ainda sem percentual proprio — usando o geral'}
                   >
                     Ovos {formatPercent(resolveRateFor(bird, true, globals))}
+                  </span>
+                  {/* O PRECO DO OVO, que so existe por lote. Ovo de Brahma sai a
+                      R$ 24 e de Pavao a R$ 180, entao nao ha valor geral que
+                      sirva — e daqui que a comissao da ave e derivada. */}
+                  <span
+                    className="badge"
+                    style={{
+                      background: precoDoOvo(bird) != null ? '#dcfce7' : '#fee2e2',
+                      color: precoDoOvo(bird) != null ? '#15803d' : '#b91c1c',
+                    }}
+                    title={precoDoOvo(bird)?.fonte === 'venda'
+                      ? 'Preco da ultima venda de ovo deste lote'
+                      : precoDoOvo(bird) != null
+                        ? 'Preco digitado neste lote'
+                        : 'Sem preco: preencha no lote ou registre uma venda de ovo'}
+                  >
+                    Ovo {precoDoOvo(bird) != null
+                      ? formatCurrency(precoDoOvo(bird).preco)
+                      : 'sem preco'}
                   </span>
                   {/* A ave nao tem percentual proprio: ela vale um valor fixo,
                       derivado do ovo. O cartao mostra o valor ja calculado —
@@ -561,7 +586,7 @@ export default function Plantel() {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Preco do ovo (R$)</label>
+                  <label className="form-label">Preco do ovo no site (R$)</label>
                   <input
                     className="form-input"
                     type="number"
@@ -586,8 +611,9 @@ export default function Plantel() {
                 <strong>{precoAtual != null ? formatCurrency(comissaoDaAve) : '—'} por ave</strong>,
                 independente da idade e do preco de venda dela.
                 {precoAtual == null && (
-                  <> Sem preco de ovo — nem digitado aqui, nem de venda anterior, nem geral — a
-                  venda de ave deste lote fica fora da fila de pagamento.</>
+                  <> Sem preco de ovo — nem digitado aqui, nem de uma venda de ovo anterior deste
+                  lote — a venda de ave dele fica fora da fila de pagamento. Nao ha valor geral
+                  pra cair: ovo de Brahma sai a R$ 24 e de Pavao a R$ 180.</>
                 )}
               </div>
               <div className="form-group">
@@ -604,11 +630,14 @@ export default function Plantel() {
               </div>
 
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -4, marginBottom: 8 }}>
-                Os dois sao opcionais. Em branco, o percentual cai no geral e o preco do ovo sai da
-                ultima venda de ovo deste lote — ou do preco geral, se este lote ainda nao vendeu
-                ovo nenhum. Preencha quando o lote tiver margem ou preco proprios: e o caso de quem
-                bota poucos ovos e precisa de um percentual maior pra a conta da ave fechar.
-                Vale para vendas novas — as ordens ja emitidas ficam com os valores com que sairam.
+                O <strong>preco do ovo nao tem valor geral</strong>: ovo de Brahma sai a R$ 24 e de
+                Pavao Branco a R$ 180, entao ele mora aqui, no lote. Em branco, o sistema usa o preco
+                da ultima venda de ovo deste lote; sem nenhuma venda de ovo, a venda de ave deste
+                lote fica fora da fila de pagamento ate voce preencher.
+                {' '}O percentual em branco cai no geral — preencha quando este lote tiver margem
+                propria, que e o caso de quem bota poucos ovos e precisa de um percentual maior pra
+                a conta da ave fechar.
+                {' '}Vale para vendas novas: as ordens ja emitidas ficam com os valores com que sairam.
               </div>
 
               <div className="form-row">

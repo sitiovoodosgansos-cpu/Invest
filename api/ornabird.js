@@ -27,7 +27,7 @@
 //   * Upstream errors are not forwarded verbatim — they could leak the
 //     Ornabird host or token state. The client gets a coarse code.
 
-import { requireAdmin } from './_firebase.js';
+import { requireAdmin, codigoDoErro } from './_firebase.js';
 
 function ornabirdConfig() {
   // trim(): valor colado com espaco/quebra de linha sobrando e comum e daria
@@ -426,6 +426,19 @@ export default async function handler(req, res) {
     }
     if (err?.code === 'ornabird_not_json') return res.status(502).json({ error: 'ornabird_not_json' });
     if (err?.code === 'ornabird_error') return res.status(502).json({ error: 'ornabird_error' });
+
+    // ERRO DO FIRESTORE, e nao do Ornabird.
+    //
+    // O firebase-admin devolve `code` NUMERICO, entao nenhuma comparacao com
+    // string acima pega — e a cota estourada do Firestore virava
+    // "server_error", que a tela traduz como "falha antes de chegar ao
+    // Ornabird". Manda o dono procurar defeito no lado errado, num dia em que
+    // o problema e so a cota diaria. E o caso 8, que ja aconteceu duas vezes.
+    const doFirestore = codigoDoErro(err);
+    if (typeof doFirestore === 'string' && doFirestore.startsWith('firestore_')) {
+      return res.status(503).json({ error: doFirestore });
+    }
+
     return res.status(500).json({ error: 'server_error' });
   }
 }

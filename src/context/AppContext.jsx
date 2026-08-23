@@ -113,10 +113,6 @@ const defaultData = {
   // from useApp(). Existing sales keep the rate they were registered with.
   eggProfitRate: DEFAULT_EGG_PROFIT_RATE,
   birdProfitRate: DEFAULT_BIRD_PROFIT_RATE,
-  // Preco de ovo de que a comissao da AVE e derivada, quando o lote nao tem o
-  // proprio nem historico de venda de ovo. Sem nenhum dos tres, a venda de ave
-  // sai da fila num aviso em vez de valer zero em silencio.
-  precoOvoReferencia: null,
   // Quantos ovos uma ave vale. Quatro foi o numero acertado com os
   // investidores; fica configuravel porque e um acordo, nao uma lei.
   multiplicadorAve: MULTIPLICADOR_AVE_PADRAO,
@@ -1027,23 +1023,15 @@ export function AppProvider({ children }) {
   // recalculateAllSaleProfits() is the explicit, opt-in path that reprices the
   // entire history — the admin is asked which behaviour they want on save.
   // -----------------------------------------------------------------
-  const updateProfitRates = ({
-    eggProfitRate, birdProfitRate, precoOvoReferencia, multiplicadorAve,
-  }) => {
+  const updateProfitRates = ({ eggProfitRate, birdProfitRate, multiplicadorAve }) => {
     const egg = Number(eggProfitRate);
     const bird = Number(birdProfitRate);
     if (!isFinite(egg) || egg < 0 || !isFinite(bird) || bird < 0) return;
-    // Preco geral do ovo: null e um valor legitimo ("nao tenho preco geral"),
-    // e nao um campo esquecido — por isso o undefined e que preserva o atual.
-    const preco = Number(precoOvoReferencia);
     const mult = Number(multiplicadorAve);
     setData(prev => ({
       ...prev,
       eggProfitRate: egg,
       birdProfitRate: bird,
-      precoOvoReferencia: precoOvoReferencia === undefined
-        ? prev.precoOvoReferencia
-        : (isFinite(preco) && preco > 0 ? preco : null),
       multiplicadorAve: isFinite(mult) && mult > 0 ? mult : prev.multiplicadorAve,
     }));
   };
@@ -1197,6 +1185,20 @@ export function AppProvider({ children }) {
     // build/dependência). NÃO é culpa do Ornabird — dizer que era custou uma
     // investigação inteira olhando o lado errado.
     proxy_error: 'A função /api/ornabird do Invest não respondeu. Veja os logs do projeto invest na Vercel.',
+    // O PROBLEMA E O FIRESTORE, e nao o Ornabird. Estas mensagens existem
+    // porque a genérica ("falha antes de chegar ao Ornabird") é verdadeira e
+    // inútil: manda procurar defeito no lado errado num dia em que só acabou a
+    // cota. Cada uma diz o que fazer, não só o que aconteceu.
+    firestore_quota:
+      'A cota diária do Firestore acabou. Não é problema do Ornabird nem do código: o plano gratuito tem um teto de leituras por dia e ele foi atingido. A cota zera à meia-noite no horário do Pacífico (4h ou 5h da manhã aqui). Para não travar de novo, ative o plano Blaze no console do Firebase.',
+    firestore_permission:
+      'O Firestore recusou o acesso. Confira as regras de segurança publicadas no console do Firebase.',
+    firestore_unauthenticated:
+      'A credencial do Firestore não foi aceita. Confira a variável FIREBASE_SERVICE_ACCOUNT no projeto "invest" da Vercel.',
+    firestore_indisponivel:
+      'O Firestore está fora do ar ou inacessível neste momento. Tente de novo em alguns minutos.',
+    firestore_timeout:
+      'O Firestore demorou demais para responder. Tente de novo.',
   };
 
   const ornabirdRequest = async (body) => {
