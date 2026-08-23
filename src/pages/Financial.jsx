@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import {
   formatCurrency, formatDate, getInitials,
   getMonthsDifference, calculateCompoundInterest, calculateProfitDistribution,
@@ -15,6 +15,8 @@ import Portal from '../components/Portal';
 const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#14B8A6'];
 
 export default function Financial() {
+  // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
+  useColecoes('vitrine', 'ordens');
   const {
     investors, birds, sales, financialInvestments, payments,
     addFinancialInvestment, deleteFinancialInvestment, addPayment, deletePayment,

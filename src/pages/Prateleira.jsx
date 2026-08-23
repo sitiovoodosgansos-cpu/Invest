@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import {
   getInitials, buildOrnabirdGroupIndex, resolveMirrorBird,
 } from '../utils/helpers';
@@ -200,6 +200,8 @@ function CardBandeja({ tray }) {
 }
 
 export default function Prateleira() {
+  // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
+  useColecoes('bandejas');
   const { investors, birds, ornabirdTrays } = useApp();
   const [search, setSearch] = useState('');
   const [filterInvestor, setFilterInvestor] = useState('');

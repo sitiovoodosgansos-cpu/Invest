@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import {
   // `formatDate` e usada duas vezes em LinhaAnuncio — data de insercao e data
   // da vacina. Ela saiu desta lista junto com a tabela de vendas, quando a
@@ -184,6 +184,8 @@ function LinhaAnuncio({ linha, nomeInvestidor, tituloCard }) {
 }
 
 export default function Vitrine() {
+  // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
+  useColecoes('anuncios');
   const { investors, birds, ornabirdVitrineListings } = useApp();
   const [aba, setAba] = useState('plantel'); // plantel | revenda
   const [buscaCatalogo, setBuscaCatalogo] = useState('');

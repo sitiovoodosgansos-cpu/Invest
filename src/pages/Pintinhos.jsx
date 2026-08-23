@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import { formatDate, mapOrnabirdIncubatorBatches } from '../utils/helpers';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -37,6 +37,8 @@ const EVENT_TYPES = {
 };
 
 export default function Pintinhos() {
+  // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
+  useColecoes('chocadeiras');
   const {
     birds, ornabirdIncubatorBatches,
     nurseryRooms, nurseryBatches, nurseryEvents,

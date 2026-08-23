@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useApp, BIRD_SPECIES } from '../context/AppContext';
+import { useApp, BIRD_SPECIES, useColecoes } from '../context/AppContext';
 import { mapOrnabirdEggCollections } from '../utils/helpers';
 import OrnabirdSync from '../components/OrnabirdSync';
 import {
@@ -57,6 +57,8 @@ function getActiveBirdCount(bird) {
 }
 
 export default function EggCollection() {
+  // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
+  useColecoes('coletas');
   const {
     birds, ornabirdEggCollections, customSpecies,
     updateBird,

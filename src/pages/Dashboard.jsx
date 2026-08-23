@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import {
   formatCurrency, formatDate, calculateProfitDistribution, getMonthsDifference,
   calculateCompoundInterest, groupSalesByPeriod, mapOrnabirdEggCollections,
@@ -18,6 +18,8 @@ const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444'
 const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
 export default function Dashboard() {
+  // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
+  useColecoes('coletas', 'chocadeiras');
   const {
     investors, birds, sales, financialInvestments, expenses,
     ornabirdEggCollections, ornabirdIncubatorBatches,
