@@ -36,6 +36,26 @@ function origemCurta(item) {
   return `${ROTULO_ORIGEM[item.originKind] || 'de'} ${dataBr(item.originDate)}`;
 }
 
+// A coluna Origem so aparece se ALGUMA linha tiver origem.
+//
+// Ordem emitida antes de a origem existir tem todas as linhas vazias, e uma
+// coluna inteira de travessoes nao informa nada — so rouba largura das colunas
+// que importam. E a linha da ordem e congelada na emissao: uma ordem antiga
+// nunca vai ganhar origem, nem depois de sincronizar de novo.
+function temOrigem(itens) {
+  return (itens || []).some(i => i?.originDate);
+}
+
+// O periodo das VENDAS de uma ordem, pra o cabecalho poder dizer de que dias
+// ela e — que nao e a mesma coisa que a data da ordem.
+function periodoDasVendas(itens) {
+  const dias = (itens || []).map(i => i?.date).filter(Boolean).sort();
+  if (dias.length === 0) return null;
+  const primeiro = dataBr(dias[0]);
+  const ultimo = dataBr(dias[dias.length - 1]);
+  return primeiro === ultimo ? primeiro : `${primeiro} a ${ultimo}`;
+}
+
 // ---------------------------------------------------------------------------
 // Texto puro
 //
@@ -70,7 +90,7 @@ export function textoDaOrdem(ordem) {
   return [
     `Ola, ${ordem.investorName}.`,
     '',
-    `Pagamento referente a ${dataBr(ordem.referenceDate)} — ordem ${ordem.numero}.`,
+    `Pagamento de ${dataBr(ordem.referenceDate)} — ordem ${ordem.numero}.`,
     '',
     'Vendas:',
     ...linhas,
@@ -149,7 +169,7 @@ export function linkEmail(ordem) {
   const resumido = [
     `Ola, ${ordem.investorName}.`,
     '',
-    `Pagamento referente a ${dataBr(ordem.referenceDate)} — ordem ${ordem.numero}.`,
+    `Pagamento de ${dataBr(ordem.referenceDate)} — ordem ${ordem.numero}.`,
     `${(ordem.items || []).length} venda(s).`,
     '',
     `TOTAL PAGO: ${formatCurrency(ordem.totalProfit)}`,
@@ -224,9 +244,19 @@ export function pdfDaOrdem(ordem) {
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...CINZA);
-  doc.text(`Referente a ${dataBr(ordem.referenceDate)}`, 14, y);
+  // DUAS datas, e confundi-las e o caminho mais curto pra uma discussao com o
+  // investidor: a data da ORDEM (o dia do pagamento) e o periodo das VENDAS que
+  // ela paga. Um "Referente a 22/08" sozinho se le como "vendas de 22/08" —
+  // mas as vendas podem ser de qualquer dia anterior.
+  const periodo = ehAviso ? null : periodoDasVendas(ordem.items);
+  doc.text(`Pagamento de ${dataBr(ordem.referenceDate)}`, 14, y);
   if (ordem.investorEmail) doc.text(ordem.investorEmail, largura - 14, y, { align: 'right' });
-  y += 12;
+  y += 6;
+  if (periodo) {
+    doc.text(`Vendas de ${periodo}`, 14, y);
+    y += 6;
+  }
+  y += 6;
 
   if (ehAviso) {
     doc.setTextColor(...TINTA);
@@ -241,15 +271,21 @@ export function pdfDaOrdem(ordem) {
     return;
   }
 
+  const comOrigem = temOrigem(ordem.items);
+
   autoTable(doc, {
     startY: y,
     // A data da VENDA fica no PDF, ainda que tenha saido da fila na tela: este
     // e o documento que o investidor confere contra o extrato dele.
-    head: [['Venda', 'Tipo', 'Origem', 'Data', 'Valor bruto', 'Taxa', 'Seu lucro']],
+    head: [[
+      'Venda', 'Tipo',
+      ...(comOrigem ? ['Origem'] : []),
+      'Data', 'Valor bruto', 'Taxa', 'Seu lucro',
+    ]],
     body: (ordem.items || []).map(i => [
       i.description,
       i.isEgg ? 'Ovos' : 'Ave',
-      origemCurta(i),
+      ...(comOrigem ? [origemCurta(i)] : []),
       dataBr(i.date),
       formatCurrency(i.amount),
       formatPercent(i.rate),
@@ -258,9 +294,11 @@ export function pdfDaOrdem(ordem) {
     theme: 'striped',
     headStyles: { fillColor: ROXO, fontSize: 9 },
     bodyStyles: { fontSize: 9 },
-    columnStyles: {
-      4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' },
-    },
+    // As tres ultimas colunas sao dinheiro e alinham a direita — o indice muda
+    // conforme a Origem entra ou nao.
+    columnStyles: comOrigem
+      ? { 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } }
+      : { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
     margin: { left: 14, right: 14 },
   });
 
@@ -327,19 +365,32 @@ export function pdfDoDia(ordens, referenceDate) {
   // comprovante e nao so numa lista de valores.
   for (const ordem of aPagar) {
     doc.addPage();
-    cabecalho(doc, `Ordem ${ordem.numero}`, ordem.investorName);
+    const periodo = periodoDasVendas(ordem.items);
+    cabecalho(
+      doc,
+      `Ordem ${ordem.numero}`,
+      periodo ? `${ordem.investorName} · vendas de ${periodo}` : ordem.investorName
+    );
+    const comOrigem = temOrigem(ordem.items);
     autoTable(doc, {
       startY: 54,
-      head: [['Venda', 'Tipo', 'Origem', 'Data', 'Valor bruto', 'Taxa', 'Lucro']],
+      head: [[
+        'Venda', 'Tipo',
+        ...(comOrigem ? ['Origem'] : []),
+        'Data', 'Valor bruto', 'Taxa', 'Lucro',
+      ]],
       body: (ordem.items || []).map(i => [
-        i.description, i.isEgg ? 'Ovos' : 'Ave', origemCurta(i),
+        i.description, i.isEgg ? 'Ovos' : 'Ave',
+        ...(comOrigem ? [origemCurta(i)] : []),
         dataBr(i.date), formatCurrency(i.amount),
         formatPercent(i.rate), formatCurrency(i.profit),
       ]),
       theme: 'striped',
       headStyles: { fillColor: ROXO, fontSize: 9 },
       bodyStyles: { fontSize: 9 },
-      columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } },
+      columnStyles: comOrigem
+        ? { 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } }
+        : { 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
       margin: { left: 14, right: 14 },
     });
     y = doc.lastAutoTable.finalY + 10;

@@ -119,6 +119,16 @@ Mensagem automatica do sistema de investidores. Duvida sobre um valor? Responda 
 </body></html>`;
 }
 
+// O periodo das VENDAS de uma ordem. Nao e a data da ordem: uma ordem emitida
+// hoje pode pagar vendas de ontem, da semana passada, ou de varios dias juntos.
+function periodoDasVendas(itens) {
+  const dias = (itens || []).map(i => i?.date).filter(Boolean).sort();
+  if (dias.length === 0) return null;
+  const primeiro = dataBr(dias[0]);
+  const ultimo = dataBr(dias[dias.length - 1]);
+  return primeiro === ultimo ? primeiro : `${primeiro} a ${ultimo}`;
+}
+
 function linhasDaOrdem(itens) {
   return (itens || []).map(item => `<tr>
 <td style="padding:8px 0;border-bottom:1px solid ${BORDA};font-size:13px;vertical-align:top">
@@ -140,8 +150,12 @@ export function htmlOrdemInvestidor(ordem) {
   }
 
   const total = dinheiro(ordem?.totalProfit);
+  // "Pagamento de DD/MM" e nao "referente a DD/MM": a segunda forma se le como
+  // "vendas daquele dia", e as vendas de uma ordem podem ser de qualquer dia
+  // anterior. O periodo delas vai logo em seguida, quando existe.
+  const periodo = periodoDasVendas(ordem?.items);
   return moldura(`Pagamento enviado · ${total}`, `
-<p style="font-size:14px;line-height:1.6;margin:0 0 16px">Ola, ${esc(ordem.investorName)}. O pagamento referente a ${dataBr(ordem.referenceDate)} <strong>ja foi enviado</strong>. Abaixo, o que entrou nele.</p>
+<p style="font-size:14px;line-height:1.6;margin:0 0 16px">Ola, ${esc(ordem.investorName)}. O pagamento de ${dataBr(ordem.referenceDate)} <strong>ja foi enviado</strong>.${periodo ? ` Ele cobre as vendas de ${periodo}.` : ''} Abaixo, o que entrou nele.</p>
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
 <tr>
