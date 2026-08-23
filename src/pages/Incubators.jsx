@@ -108,7 +108,7 @@ function IconeChocadeira({ ativa }) {
 export default function Incubators() {
   // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
   useColecoes('chocadeiras');
-  const { birds, investors, ornabirdIncubatorBatches, saveError } = useApp();
+  const { birds, investors, ornabirdIncubatorBatches, saveError, somenteLeitura } = useApp();
   const [aba, setAba] = useState('ativos'); // ativos | inativos
   const [lotesAbertos, setLotesAbertos] = useState(() => new Set());
   const [maquinasExpandidas, setMaquinasExpandidas] = useState(() => new Set());
@@ -335,7 +335,12 @@ export default function Incubators() {
 
       {/* Chocagem de lote nao vinculado nao pertence a investidor nenhum:
           entra nos totais mas fica sem dono no rateio. Avisar, nao esconder. */}
-      {semVinculo > 0 && (
+      {/* AVISO DE ADMINISTRADOR — nao aparece no portal do investidor.
+          E uma instrucao de cadastro ("abra o Plantel, edite o animal"), e o
+          investidor nao tem Plantel pra abrir nem permissao pra editar. Alem
+          disso o numero e do CRIATORIO inteiro, e o portal so deve falar das
+          aves dele. */}
+      {semVinculo > 0 && !somenteLeitura && (
         <div style={{
           display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 16px',
           marginBottom: 16, background: '#fef3c7', border: '1px solid #f59e0b',

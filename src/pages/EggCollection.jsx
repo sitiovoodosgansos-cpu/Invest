@@ -512,7 +512,12 @@ export default function EggCollection() {
       {/* Coleta de lote nao vinculado nao pertence a investidor nenhum: entra
           nos totais gerais mas some do desempenho por ave. Avisar em vez de
           esconder — ovo que nao rende pra ninguem precisa ser notado. */}
-      {semVinculo > 0 && (
+      {/* AVISO DE ADMINISTRADOR — nao aparece no portal do investidor.
+          E uma instrucao de cadastro ("abra o Plantel, edite o animal"), e o
+          investidor nao tem Plantel pra abrir nem permissao pra editar. Alem
+          disso o numero e do CRIATORIO inteiro, e o portal so deve falar das
+          aves dele. */}
+      {semVinculo > 0 && !somenteLeitura && (
         <div style={{
           display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 16px',
           marginBottom: 16, background: '#fef3c7', border: '1px solid #f59e0b',
