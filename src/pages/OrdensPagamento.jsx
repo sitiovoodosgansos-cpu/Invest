@@ -9,7 +9,7 @@ import { formatCurrency, formatPercent, investidorEncerrado } from '../utils/hel
 import {
   ORDEM_STATUS, ORDEM_TIPO,
   diaBrasilia, listarPendentes, saldoOrnabird, agruparItens, textoOrigem,
-  contarMercadoria,
+  contarMercadoria, textoDaConta,
 } from '../utils/ordens';
 import {
   pdfDaOrdem, pdfDoDia, textoDaOrdem, linkWhatsapp, linkEmail,
@@ -226,7 +226,10 @@ function LinhaItem({ item }) {
         </div>
       </td>
       <td style={{ fontSize: 12, color: '#6b7280', textAlign: 'right', whiteSpace: 'nowrap' }}>
-        {formatPercent(item.rate)} de {formatCurrency(item.amount)}
+        {/* A conta como ela e: percentual pro ovo, valor por cabeca pra ave.
+            Mostrar "6,4% de R$ 250" numa ave cuja comissao e fixa faria o
+            investidor conferir a multiplicacao e nao chegar no valor pago. */}
+        {textoDaConta(item)}
       </td>
       <td style={{
         fontSize: 13, fontWeight: 600, textAlign: 'right',
@@ -723,7 +726,7 @@ function FilaPendentes({ pendentes, semDono, encerrados, onGerar, onAcertar, ocu
                           <Origem item={linha} />
                         </td>
                         <td style={{ fontSize: 12, color: '#6b7280', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          {formatPercent(linha.rate)} de {formatCurrency(linha.amount)}
+                          {textoDaConta(linha)}
                         </td>
                         <td style={{ fontSize: 13, fontWeight: 600, textAlign: 'right', paddingLeft: 12, whiteSpace: 'nowrap' }}>
                           {formatCurrency(linha.profit)}
@@ -936,7 +939,7 @@ export default function OrdensPagamento() {
   useColecoes('vitrine', 'ordens');
   const {
     paymentOrders, rotinaDiaria, rodarRotinaAgora, pagarEEnviarOrdens,
-    ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate,
+    ornabirdVitrine, birds, investors, comissaoConfig,
     gerarOrdensDasVendas, acertarVendas, liberarRotinaAutomatica,
     cancelarOrdensDePagamento, colecaoPronta,
   } = useApp();
@@ -959,15 +962,19 @@ export default function OrdensPagamento() {
   // A fila de pendentes, calculada aqui no navegador com a MESMA funcao que o
   // servidor usa pra emitir. Se a tela calculasse de outro jeito, o numero
   // conferido e o numero pago seriam dois numeros diferentes.
-  const { pendentes, semDono: pendentesSemDono } = useMemo(
+  const {
+    pendentes,
+    semDono: pendentesSemDono,
+    semReferencia: pendentesSemReferencia,
+  } = useMemo(
     () => listarPendentes({
       vendas: Array.isArray(ornabirdVitrine) ? ornabirdVitrine : [],
       birds,
       investors,
-      rates: { eggProfitRate, birdProfitRate },
+      rates: comissaoConfig,
       ordensExistentes: ordens,
     }),
-    [ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate, ordens]
+    [ornabirdVitrine, birds, investors, comissaoConfig, ordens]
   );
 
   const encerrados = useMemo(
@@ -983,14 +990,14 @@ export default function OrdensPagamento() {
       vendas: Array.isArray(ornabirdVitrine) ? ornabirdVitrine : [],
       birds,
       investors,
-      rates: { eggProfitRate, birdProfitRate },
+      rates: comissaoConfig,
       ordens,
     }).map(s => ({
       ...s,
       nome: (investors || []).find(i => i.id === s.investorId)?.name || '(investidor removido)',
       encerrado: encerrados.has(s.investorId),
     })).sort((a, b) => b.aPagar - a.aPagar || a.nome.localeCompare(b.nome)),
-    [ornabirdVitrine, birds, investors, eggProfitRate, birdProfitRate, ordens, encerrados]
+    [ornabirdVitrine, birds, investors, comissaoConfig, ordens, encerrados]
   );
 
   // A emissao automatica das 6h so e liberada depois que o dono revisa a fila.
@@ -1309,6 +1316,32 @@ export default function OrdensPagamento() {
               enquanto isso. Some {formatCurrency(semDono.reduce((s, v) => s + (v.amount || 0), 0))}:{' '}
               {semDono.slice(0, 4).map(v => `${v.description} (${dataBr(v.date)})`).join('; ')}
               {semDono.length > 4 ? ` e mais ${semDono.length - 4}.` : '.'}
+            </span>
+          </Aviso>
+        </div>
+      )}
+
+      {/* A comissao da AVE e derivada do ovo (4 x % x preco do ovo). Um lote
+          que nunca vendeu ovo e nao tem preco de referencia digitado nao tem de
+          onde derivar, e a venda de ave dele fica FORA da fila. Este aviso e o
+          que impede isso de acontecer em silencio: sem ele, o dono pagaria a
+          rodada sem perceber que faltou uma venda, e o investidor e que
+          descobriria. */}
+      {pendentesSemReferencia.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <Aviso tom="erro">
+            <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              <strong>{pendentesSemReferencia.length} venda(s) de ave estao fora da fila</strong>{' '}
+              porque o lote nao tem preco de ovo pra derivar a comissao — nem venda de ovo no
+              historico, nem preco digitado no Plantel, nem preco geral configurado. Somam{' '}
+              {formatCurrency(pendentesSemReferencia.reduce((s, v) => s + (v.amount || 0), 0))} em
+              valor bruto:{' '}
+              {pendentesSemReferencia.slice(0, 4)
+                .map(v => `${v.description}${v.investorName ? ` — ${v.investorName}` : ''}`)
+                .join('; ')}
+              {pendentesSemReferencia.length > 4 ? ` e mais ${pendentesSemReferencia.length - 4}.` : '.'}
+              {' '}Preencha o preco do ovo do lote no Plantel e elas voltam pra fila.
             </span>
           </Aviso>
         </div>

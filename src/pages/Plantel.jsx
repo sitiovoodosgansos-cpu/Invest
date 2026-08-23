@@ -2,9 +2,13 @@ import React, { useState, useMemo } from 'react';
 import { useApp, BIRD_SPECIES } from '../context/AppContext';
 import {
   formatCurrency, getInitials, formatDate, formatPercent, getOwnershipPeriods,
-  getEggProfitRate, getBirdProfitRate, resolveRateFor, hasRateOverride,
-  calculateBirdReturns, investidorEncerrado,
+  getEggProfitRate, resolveRateFor, hasRateOverride,
+  calculateBirdReturns, investidorEncerrado, buildOrnabirdGroupIndex,
+  resolveMirrorBird,
 } from '../utils/helpers';
+import {
+  percentualDoOvo, precoOvoDoLote, indicePrecoOvo, getMultiplicadorAve, arredondar,
+} from '../utils/ordens';
 import { Plus, Trash2, Edit, Search, Bird, PlusCircle, X, ArrowLeftRight, History, Link2 } from 'lucide-react';
 import Portal from '../components/Portal';
 import OrnabirdGroupPicker from '../components/OrnabirdGroupPicker';
@@ -12,7 +16,7 @@ import OrnabirdGroupPicker from '../components/OrnabirdGroupPicker';
 const EMPTY_BIRD_FORM = {
   investorId: '', species: '', breed: '', matrixCount: '', breederCount: '',
   investmentValue: '', ownershipStartDate: '', ownershipEndDate: '',
-  eggProfitRate: '', birdProfitRate: '', ornabirdGroupId: '',
+  eggProfitRate: '', precoOvoReferencia: '', ornabirdGroupId: '',
 };
 
 // Form <-> stored value conversion for the optional per-animal rates.
@@ -24,6 +28,15 @@ const pctToRate = (value) => {
   const n = parseFloat(s);
   return isFinite(n) && n >= 0 && n <= 100 ? n / 100 : null;
 };
+// Preco em reais digitado no formulario. Vazio = 'nao tenho preco proprio',
+// e ai a referencia vem do historico de venda de ovo do lote ou do geral.
+const precoDigitado = (value) => {
+  const s = String(value ?? '').trim().replace(',', '.');
+  if (!s) return null;
+  const n = parseFloat(s);
+  return isFinite(n) && n > 0 ? n : null;
+};
+
 const rateToPct = (rate) =>
   typeof rate === 'number' && isFinite(rate)
     ? String((rate * 100).toFixed(4).replace(/0+$/, '').replace(/\.$/, ''))
@@ -42,6 +55,7 @@ export default function Plantel() {
     investors, birds, sales, addBird, updateBird, deleteBird, transferBird,
     customSpecies, addCustomSpecies, deleteCustomSpecies,
     eggProfitRate: globalEggRate, birdProfitRate: globalBirdRate,
+    comissaoConfig, ornabirdVitrine,
     somenteLeitura,
   } = useApp();
   // Global fallback rates, used as placeholders and to show each animal's
@@ -63,6 +77,39 @@ export default function Plantel() {
   const [form, setForm] = useState({ ...EMPTY_BIRD_FORM });
   // Bird currently being handed over to another investor.
   const [transferTarget, setTransferTarget] = useState(null);
+
+  // A CONTA DA AVE, mostrada enquanto o dono digita.
+  //
+  // Sem isto o formulario pede um percentual e um preco de ovo e nao diz o que
+  // sai deles — e o que sai deles e exatamente o que o investidor vai receber
+  // por cada ave vendida. Ver o "R$ 9,60 por ave" aparecer enquanto se digita e
+  // o que transforma dois campos soltos numa decisao consciente.
+  const indicePreco = useMemo(
+    () => indicePrecoOvo(
+      Array.isArray(ornabirdVitrine) ? ornabirdVitrine : [],
+      (v) => resolveMirrorBird(v, buildOrnabirdGroupIndex(birds)),
+    ),
+    [ornabirdVitrine, birds]
+  );
+  const loteEmEdicao = {
+    id: editingId,
+    eggProfitRate: pctToRate(form.eggProfitRate),
+    precoOvoReferencia: precoDigitado(form.precoOvoReferencia),
+  };
+  const precoObservado = editingId ? (indicePreco.get(editingId)?.preco ?? null) : null;
+  const percentualAtual = percentualDoOvo(loteEmEdicao, comissaoConfig);
+  const precoAtual = precoOvoDoLote(loteEmEdicao, comissaoConfig, indicePreco).preco;
+  const multiplicador = getMultiplicadorAve(comissaoConfig);
+  const comissaoDaAve = precoAtual != null
+    ? arredondar(multiplicador * percentualAtual * precoAtual)
+    : null;
+
+  // A mesma conta, pro cartao de cada lote da lista.
+  const comissaoPorAveDoLote = (bird) => {
+    const preco = precoOvoDoLote(bird, comissaoConfig, indicePreco).preco;
+    if (preco == null) return null;
+    return arredondar(multiplicador * percentualDoOvo(bird, comissaoConfig) * preco);
+  };
   const [transferForm, setTransferForm] = useState({ toInvestorId: '', transferDate: '' });
   // Bird whose ownership history panel is expanded.
   const [historyBirdId, setHistoryBirdId] = useState(null);
@@ -94,7 +141,8 @@ export default function Plantel() {
     const payload = {
       ...form,
       eggProfitRate: pctToRate(form.eggProfitRate),
-      birdProfitRate: pctToRate(form.birdProfitRate),
+      // Preco em reais, nao percentual: vai como numero ou null.
+      precoOvoReferencia: precoDigitado(form.precoOvoReferencia),
       ornabirdGroupId: (form.ornabirdGroupId || '').trim() || null,
     };
     if (editingId) {
@@ -122,7 +170,8 @@ export default function Plantel() {
       ownershipStartDate: bird.ownershipStartDate || '',
       ownershipEndDate: bird.ownershipEndDate || '',
       eggProfitRate: rateToPct(bird.eggProfitRate),
-      birdProfitRate: rateToPct(bird.birdProfitRate),
+      precoOvoReferencia: typeof bird.precoOvoReferencia === 'number'
+        ? String(bird.precoOvoReferencia) : '',
       ornabirdGroupId: bird.ornabirdGroupId || '',
     });
     setEditingId(bird.id);
@@ -336,15 +385,22 @@ export default function Plantel() {
                   >
                     Ovos {formatPercent(resolveRateFor(bird, true, globals))}
                   </span>
+                  {/* A ave nao tem percentual proprio: ela vale um valor fixo,
+                      derivado do ovo. O cartao mostra o valor ja calculado —
+                      um percentual aqui seria uma conta que nao existe mais. */}
                   <span
                     className="badge"
                     style={{
-                      background: typeof bird.birdProfitRate === 'number' ? '#dbeafe' : 'var(--bg-secondary)',
-                      color: typeof bird.birdProfitRate === 'number' ? '#2563eb' : 'var(--text-secondary)',
+                      background: comissaoPorAveDoLote(bird) != null ? '#dbeafe' : '#fee2e2',
+                      color: comissaoPorAveDoLote(bird) != null ? '#2563eb' : '#b91c1c',
                     }}
-                    title={typeof bird.birdProfitRate === 'number' ? 'Taxa propria deste animal' : 'Usando a taxa geral'}
+                    title={comissaoPorAveDoLote(bird) != null
+                      ? `${multiplicador} ovos deste lote`
+                      : 'Sem preco de ovo: a venda de ave deste lote fica fora da fila'}
                   >
-                    Animal {formatPercent(resolveRateFor(bird, false, globals))}
+                    {comissaoPorAveDoLote(bird) != null
+                      ? `Ave ${formatCurrency(comissaoPorAveDoLote(bird))}`
+                      : 'Ave sem preco de ovo'}
                   </span>
                 </div>
               </div>
@@ -505,18 +561,34 @@ export default function Plantel() {
                   />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Taxa de Lucro - Venda do Animal (%)</label>
+                  <label className="form-label">Preco do ovo (R$)</label>
                   <input
                     className="form-input"
                     type="number"
                     step="0.01"
                     min="0"
-                    max="100"
-                    value={form.birdProfitRate}
-                    onChange={e => setForm({ ...form, birdProfitRate: e.target.value })}
-                    placeholder={`Padrao: ${formatPercent(getBirdProfitRate(globals))}`}
+                    value={form.precoOvoReferencia}
+                    onChange={e => setForm({ ...form, precoOvoReferencia: e.target.value })}
+                    placeholder={precoObservado != null
+                      ? `Ultima venda: ${formatCurrency(precoObservado)}`
+                      : 'Sem venda de ovo ainda'}
                   />
                 </div>
+              </div>
+              <div style={{
+                fontSize: 12, color: 'var(--text-muted)', marginTop: -4, marginBottom: 14,
+                lineHeight: 1.5,
+              }}>
+                O ovo rende esse percentual sobre o valor da venda. A <strong>ave rende um
+                valor fixo</strong>: {multiplicador} ovos deste lote — {formatPercent(percentualAtual)}{' '}
+                x {precoAtual != null ? formatCurrency(precoAtual) : 'preco do ovo'} x{' '}
+                {multiplicador} ={' '}
+                <strong>{precoAtual != null ? formatCurrency(comissaoDaAve) : '—'} por ave</strong>,
+                independente da idade e do preco de venda dela.
+                {precoAtual == null && (
+                  <> Sem preco de ovo — nem digitado aqui, nem de venda anterior, nem geral — a
+                  venda de ave deste lote fica fora da fila de pagamento.</>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Vinculo com o Ornabird</label>
@@ -532,9 +604,11 @@ export default function Plantel() {
               </div>
 
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -4, marginBottom: 8 }}>
-                Opcional. Deixe em branco para usar a taxa geral. Preencha so quando a margem deste
-                animal for diferente das demais. Vale para vendas novas — as ja registradas mantem
-                a taxa com que foram lancadas.
+                Os dois sao opcionais. Em branco, o percentual cai no geral e o preco do ovo sai da
+                ultima venda de ovo deste lote — ou do preco geral, se este lote ainda nao vendeu
+                ovo nenhum. Preencha quando o lote tiver margem ou preco proprios: e o caso de quem
+                bota poucos ovos e precisa de um percentual maior pra a conta da ave fechar.
+                Vale para vendas novas — as ordens ja emitidas ficam com os valores com que sairam.
               </div>
 
               <div className="form-row">

@@ -12,8 +12,10 @@
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { formatCurrency, formatPercent } from './helpers.js';
-import { agruparItens, textoOrigem, contarMercadoria } from './ordens.js';
+import { formatCurrency } from './helpers.js';
+import {
+  agruparItens, textoOrigem, contarMercadoria, textoComissao, textoDaConta,
+} from './ordens.js';
 
 const ROXO = [108, 43, 217];
 const TINTA = [30, 27, 75];
@@ -38,6 +40,21 @@ function contagem(item) {
 function nomeCurto(item) {
   const quanto = contagem(item);
   return quanto ? `${item.description} (${quanto})` : item.description;
+}
+
+// A frase que explica a conta, no fim do documento.
+//
+// Muda com o que a ordem tem dentro: uma ordem so de ovo nao deve falar de ave,
+// e uma ordem so de ave nao pode dizer "percentual sobre o valor bruto" — nela
+// isso simplesmente nao e verdade.
+function explicacaoDaConta(linhas) {
+  const temAve = linhas.some(i => !i.isEgg && Number(i.comissaoPorAve) > 0);
+  const temOvo = linhas.some(i => i.isEgg);
+  const partes = [];
+  if (temOvo) partes.push('o ovo rende o percentual acordado sobre o valor da venda');
+  if (temAve) partes.push('cada ave rende um valor fixo, que nao muda com a idade nem com o preco dela');
+  if (partes.length === 0) return 'Seu lucro e calculado linha a linha.';
+  return `Seu lucro e calculado linha a linha: ${partes.join(', e ')}.`;
 }
 
 // A coluna Origem so aparece se ALGUMA linha tiver origem.
@@ -84,14 +101,14 @@ export function textoDaOrdem(ordem) {
     ].join('\n');
   }
 
-  const linhas = agruparItens(ordem.items).map(i => {
+  const agrupadas = agruparItens(ordem.items);
+  const linhas = agrupadas.map(i => {
     // A contagem ja diz "ovos" ou "aves"; quando ela nao existe, o tipo entra
     // sozinho, pra a linha nunca deixar de dizer o que foi vendido.
     const dentro = [contagem(i) || (i.isEgg ? 'ovos' : 'ave')];
     if (i.originDate) dentro.push(textoOrigem(i));
     return `- ${i.description} (${dentro.join(', ')}) `
-      + `vendida em ${dataBr(i.date)}: ${formatPercent(i.rate)} de `
-      + `${formatCurrency(i.amount)} = ${formatCurrency(i.profit)}`;
+      + `vendida em ${dataBr(i.date)}: ${textoDaConta(i)} = ${formatCurrency(i.profit)}`;
   });
 
   return [
@@ -105,8 +122,7 @@ export function textoDaOrdem(ordem) {
     `TOTAL PAGO: ${formatCurrency(ordem.totalProfit)}`,
     `(valor bruto das vendas: ${formatCurrency(ordem.totalAmount)})`,
     '',
-    'Seu lucro e o percentual acordado sobre o valor bruto de cada venda,',
-    'calculado linha a linha.',
+    explicacaoDaConta(agrupadas),
     '',
     'Sitio Voo dos Gansos',
   ].join('\n');
@@ -288,7 +304,7 @@ export function pdfDaOrdem(ordem) {
     head: [[
       'Venda', 'Tipo',
       ...(comOrigem ? ['Origem'] : []),
-      'Data', 'Valor bruto', 'Taxa', 'Seu lucro',
+      'Data', 'Valor bruto', 'Comissao', 'Seu lucro',
     ]],
     body: linhas.map(i => [
       nomeCurto(i),
@@ -296,7 +312,7 @@ export function pdfDaOrdem(ordem) {
       ...(comOrigem ? [textoOrigem(i)] : []),
       dataBr(i.date),
       formatCurrency(i.amount),
-      formatPercent(i.rate),
+      textoComissao(i),
       formatCurrency(i.profit),
     ]),
     theme: 'striped',
@@ -323,7 +339,7 @@ export function pdfDaOrdem(ordem) {
   doc.setTextColor(...CINZA);
   doc.text(
     `Valor bruto das vendas: ${formatCurrency(ordem.totalAmount)}. `
-    + 'Seu lucro e o percentual acordado sobre o valor bruto de cada venda, calculado linha a linha.',
+    + explicacaoDaConta(linhas),
     14, y, { maxWidth: largura - 28 }
   );
 
@@ -390,13 +406,13 @@ export function pdfDoDia(ordens, referenceDate) {
       head: [[
         'Venda', 'Tipo',
         ...(comOrigem ? ['Origem'] : []),
-        'Data', 'Valor bruto', 'Taxa', 'Lucro',
+        'Data', 'Valor bruto', 'Comissao', 'Lucro',
       ]],
       body: linhas.map(i => [
         nomeCurto(i), i.isEgg ? 'Ovos' : 'Ave',
         ...(comOrigem ? [textoOrigem(i)] : []),
         dataBr(i.date), formatCurrency(i.amount),
-        formatPercent(i.rate), formatCurrency(i.profit),
+        textoComissao(i), formatCurrency(i.profit),
       ]),
       theme: 'striped',
       headStyles: { fillColor: ROXO, fontSize: 9 },

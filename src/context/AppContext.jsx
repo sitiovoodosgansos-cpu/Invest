@@ -5,8 +5,9 @@ import {
 } from 'firebase/firestore';
 import {
   partitionSaleDuplicates, isEggProduct, normalizeDay, previousDay, resolveRateFor,
-  DEFAULT_EGG_PROFIT_RATE, DEFAULT_BIRD_PROFIT_RATE, jsonEstavel,
+  DEFAULT_EGG_PROFIT_RATE, DEFAULT_BIRD_PROFIT_RATE, jsonEstavel, fatiaDeComissao,
 } from '../utils/helpers';
+import { MULTIPLICADOR_AVE_PADRAO } from '../utils/ordens';
 import { PORTAL_API_ENABLED, isPortalRoute } from '../hooks/usePortalData';
 import { decidirSnapshot, ACAO } from '../utils/protecaoSnapshot';
 
@@ -112,6 +113,13 @@ const defaultData = {
   // from useApp(). Existing sales keep the rate they were registered with.
   eggProfitRate: DEFAULT_EGG_PROFIT_RATE,
   birdProfitRate: DEFAULT_BIRD_PROFIT_RATE,
+  // Preco de ovo de que a comissao da AVE e derivada, quando o lote nao tem o
+  // proprio nem historico de venda de ovo. Sem nenhum dos tres, a venda de ave
+  // sai da fila num aviso em vez de valer zero em silencio.
+  precoOvoReferencia: null,
+  // Quantos ovos uma ave vale. Quatro foi o numero acertado com os
+  // investidores; fica configuravel porque e um acordo, nao uma lei.
+  multiplicadorAve: MULTIPLICADOR_AVE_PADRAO,
 };
 
 // Cadastro manual de chocadeiras/chocagens, descontinuado em favor do espelho
@@ -1019,11 +1027,25 @@ export function AppProvider({ children }) {
   // recalculateAllSaleProfits() is the explicit, opt-in path that reprices the
   // entire history — the admin is asked which behaviour they want on save.
   // -----------------------------------------------------------------
-  const updateProfitRates = ({ eggProfitRate, birdProfitRate }) => {
+  const updateProfitRates = ({
+    eggProfitRate, birdProfitRate, precoOvoReferencia, multiplicadorAve,
+  }) => {
     const egg = Number(eggProfitRate);
     const bird = Number(birdProfitRate);
     if (!isFinite(egg) || egg < 0 || !isFinite(bird) || bird < 0) return;
-    setData(prev => ({ ...prev, eggProfitRate: egg, birdProfitRate: bird }));
+    // Preco geral do ovo: null e um valor legitimo ("nao tenho preco geral"),
+    // e nao um campo esquecido — por isso o undefined e que preserva o atual.
+    const preco = Number(precoOvoReferencia);
+    const mult = Number(multiplicadorAve);
+    setData(prev => ({
+      ...prev,
+      eggProfitRate: egg,
+      birdProfitRate: bird,
+      precoOvoReferencia: precoOvoReferencia === undefined
+        ? prev.precoOvoReferencia
+        : (isFinite(preco) && preco > 0 ? preco : null),
+      multiplicadorAve: isFinite(mult) && mult > 0 ? mult : prev.multiplicadorAve,
+    }));
   };
 
   // Reprice every stored sale with the given rates. Irreversible: it
@@ -1802,6 +1824,10 @@ export function AppProvider({ children }) {
 
   const value = {
     ...data,
+    // A configuracao de comissao pronta, pra nenhuma tela ter que lembrar
+    // quais campos formam a regra. Antes cada uma montava o objeto na mao, e
+    // um campo novo ficava faltando em silencio em quem esquecesse.
+    comissaoConfig: fatiaDeComissao(data),
     sales,
     ornabirdTrays,
     ornabirdVitrine,

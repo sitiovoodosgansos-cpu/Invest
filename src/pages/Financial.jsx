@@ -20,7 +20,7 @@ export default function Financial() {
   const {
     investors, birds, sales, financialInvestments, payments,
     addFinancialInvestment, deleteFinancialInvestment, addPayment, deletePayment,
-    eggProfitRate, birdProfitRate,
+    eggProfitRate, birdProfitRate, comissaoConfig,
     ornabirdVitrine, paymentOrders,
   } = useApp();
   const [showModal, setShowModal] = useState(false);
@@ -63,7 +63,7 @@ export default function Financial() {
       vendas: Array.isArray(ornabirdVitrine) ? ornabirdVitrine : [],
       birds,
       investors,
-      rates: { eggProfitRate, birdProfitRate },
+      rates: comissaoConfig,
       ordens: Array.isArray(paymentOrders) ? paymentOrders : [],
     })) mapa.set(s.investorId, s);
     return mapa;

@@ -5,6 +5,7 @@ import {
   isEggProduct, getEggProfitRate, getBirdProfitRate, filterValidTransactions, matchSaleToBird,
   resolveBirdInvestorForDate, getSaleRateInfo, resolveRateFor
 } from '../utils/helpers';
+import { MULTIPLICADOR_AVE_PADRAO, getMultiplicadorAve } from '../utils/ordens';
 import { parseCSV, readFileAsText } from '../utils/csvParser';
 import { parseWixOrderText } from '../utils/pdfParser';
 import {
@@ -22,7 +23,8 @@ export default function Sales() {
   const {
     investors, birds, sales,
     addSales, clearSales, deleteSale, updateSale, removeDuplicateSales, recoverLegacySales, forceReloadSales,
-    eggProfitRate, birdProfitRate, updateProfitRates, recalculateAllSaleProfits,
+    eggProfitRate, birdProfitRate, precoOvoReferencia, comissaoConfig,
+    updateProfitRates, recalculateAllSaleProfits,
   } = useApp();
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
@@ -42,7 +44,7 @@ export default function Sales() {
   // Profit-rate configuration modal. Two steps: edit the values, then choose
   // whether the change applies only going forward or reprices the history.
   const [showRatesModal, setShowRatesModal] = useState(false);
-  const [ratesForm, setRatesForm] = useState({ egg: '', bird: '' });
+  const [ratesForm, setRatesForm] = useState({ egg: '', bird: '', precoOvo: '', multiplicador: '' });
   const [ratesPending, setRatesPending] = useState(null);
   const [ratesSaving, setRatesSaving] = useState(false);
   const [ratesResult, setRatesResult] = useState(null);
@@ -409,8 +411,28 @@ export default function Sales() {
       setRatesResult({ error: 'Informe porcentagens validas entre 0 e 100.' });
       return;
     }
+    // Preco geral do ovo: opcional. Vazio quer dizer "cada lote se vira com o
+    // proprio preco ou com o historico de venda dele"; preenchido, e a rede de
+    // seguranca que impede uma venda de ave de cair fora da fila.
+    const precoTexto = String(ratesForm.precoOvo).trim().replace(',', '.');
+    const preco = precoTexto ? parseFloat(precoTexto) : null;
+    if (precoTexto && (!isFinite(preco) || preco <= 0)) {
+      setRatesResult({ error: 'O preco geral do ovo precisa ser um valor maior que zero.' });
+      return;
+    }
+    const multTexto = String(ratesForm.multiplicador).trim().replace(',', '.');
+    const mult = multTexto ? parseFloat(multTexto) : MULTIPLICADOR_AVE_PADRAO;
+    if (!isFinite(mult) || mult <= 0) {
+      setRatesResult({ error: 'Uma ave tem que valer mais que zero ovos.' });
+      return;
+    }
     setRatesResult(null);
-    setRatesPending({ eggProfitRate: egg / 100, birdProfitRate: bird / 100 });
+    setRatesPending({
+      eggProfitRate: egg / 100,
+      birdProfitRate: bird / 100,
+      precoOvoReferencia: preco,
+      multiplicadorAve: mult,
+    });
   };
 
   // Step 2: apply. `recalculate` reprices every stored sale (irreversible).
@@ -1241,9 +1263,13 @@ export default function Sales() {
               /* Step 1: edit the percentages */
               <form onSubmit={handleRatesContinue}>
                 <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
-                  Porcentagem do valor da venda que vai para o investidor. Vale para os animais que
-                  nao tem taxa propria — no Plantel voce pode definir uma taxa especifica por animal,
-                  e ela tem prioridade sobre esta.
+                  O <strong>ovo</strong> rende uma porcentagem do valor da venda. A{' '}
+                  <strong>ave</strong> rende um valor fixo, que sai dessa mesma porcentagem
+                  aplicada ao preco do ovo e multiplicada — por padrao, uma ave vale quatro ovos.
+                  E por isso que a idade da ave nao muda mais a comissao.
+                  <br /><br />
+                  Estes sao os valores gerais. No Plantel cada lote pode ter a porcentagem e o
+                  preco de ovo dele, e ai o do lote tem prioridade.
                 </p>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                   <div>
@@ -1256,17 +1282,50 @@ export default function Sales() {
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Lucro Aves (%)</label>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                      Preco geral do ovo (R$)
+                    </label>
+                    <input
+                      type="number" className="input" step="0.01" min="0"
+                      value={ratesForm.precoOvo}
+                      onChange={e => setRatesForm(prev => ({ ...prev, precoOvo: e.target.value }))}
+                      placeholder="Opcional"
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                      Uma ave vale quantos ovos
+                    </label>
+                    <input
+                      type="number" className="input" step="0.5" min="0.5"
+                      value={ratesForm.multiplicador}
+                      onChange={e => setRatesForm(prev => ({ ...prev, multiplicador: e.target.value }))}
+                      placeholder={String(MULTIPLICADOR_AVE_PADRAO)}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                      Lucro Aves (%) — so importacoes
+                    </label>
                     <input
                       type="number" className="input" step="0.01" min="0" max="100" required
                       value={ratesForm.bird}
                       onChange={e => setRatesForm(prev => ({ ...prev, bird: e.target.value }))}
                       style={{ width: '100%' }}
                     />
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginTop: 4 }}>
+                      Nao vale mais para as vendas do Ornabird — la a ave e valor fixo. Sobra
+                      para as vendas importadas de PDF/CSV, que continuam por percentual.
+                    </span>
                   </div>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)' }}>
-                  Atual: ovos {formatPercent(eggRate)}, aves {formatPercent(birdRate)}.
+                  Atual: ovos {formatPercent(eggRate)}, preco geral do ovo{' '}
+                  {precoOvoReferencia ? formatCurrency(precoOvoReferencia) : 'nao definido'}, uma ave
+                  vale {getMultiplicadorAve(comissaoConfig)} ovos, aves importadas{' '}
+                  {formatPercent(birdRate)}.
                 </div>
                 <div style={{ display: 'flex', gap: 12, marginTop: 20, justifyContent: 'flex-end' }}>
                   <button type="button" className="btn btn-secondary" onClick={closeRatesModal}>Cancelar</button>
@@ -1278,7 +1337,12 @@ export default function Sales() {
               <div>
                 <p style={{ fontSize: 13, marginTop: 0, marginBottom: 16 }}>
                   Novas taxas: <strong>ovos {formatPercent(ratesPending.eggProfitRate)}</strong>,{' '}
-                  <strong>aves {formatPercent(ratesPending.birdProfitRate)}</strong>.
+                  preco geral do ovo{' '}
+                  <strong>
+                    {ratesPending.precoOvoReferencia
+                      ? formatCurrency(ratesPending.precoOvoReferencia) : 'nao definido'}
+                  </strong>, uma ave vale <strong>{ratesPending.multiplicadorAve} ovos</strong>,{' '}
+                  <strong>aves importadas {formatPercent(ratesPending.birdProfitRate)}</strong>.
                   <br />Como aplicar?
                 </p>
 
