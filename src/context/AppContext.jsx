@@ -244,6 +244,49 @@ export function AppProvider({ children }) {
   // cota do Firestore estourada o snapshot do servidor NUNCA chegava, e o dono
   // preencheu o Plantel cinco vezes sem nada ser gravado.
   const dadosCarregados = useRef(false);
+  // O OBJETO QUE O SNAPSHOT ENTREGOU — para nao gravar de volta o que acabou
+  // de chegar.
+  //
+  // O DEFEITO
+  // ---------
+  // O efeito de gravar depende de `data`. Ele dispara quando a IDENTIDADE do
+  // objeto muda, e nao tem como saber por que mudou. Mas ela muda por dois
+  // motivos bem diferentes:
+  //
+  //   1. o dono editou alguma coisa   -> tem que gravar;
+  //   2. chegou um snapshot do banco  -> NAO tem que gravar, isso ja e o que
+  //      esta gravado.
+  //
+  // O caminho 2 monta `{ ...defaultData, ...dados }` — objeto novo toda vez —,
+  // entao toda novidade que chegava virava uma gravacao de volta.
+  //
+  // POR QUE ISSO NAO PARAVA SOZINHO
+  // -------------------------------
+  // Com o Invest aberto no computador E no celular (que e como o dono usa), a
+  // gravacao de volta de um chega no outro como novidade, e o outro grava de
+  // volta tambem. A protecao de JANELA_ESCRITA_MS ignora o que chega ate 10s
+  // depois da propria gravacao, o que matava a troca quando a rede era rapida
+  // — e so quando era rapida.
+  //
+  // Medido em medir-dois-aparelhos.mjs, com o AppProvider de verdade:
+  //
+  //     devolucao em  1s, 5s, 9s  -> 1 gravacao,  a troca morre
+  //     devolucao em 12s, 20s     -> nao para mais
+  //
+  // Passando de 10s a troca fica de pe para sempre. E de madrugada que ela
+  // passa: o navegador segura os timers de aba em segundo plano, o celular
+  // fica de tela apagada, a conexao ociosa demora. O console do Firebase
+  // mostrou 634 mil leituras em 24h com picos as 2h e as 4h da manha.
+  //
+  // A CORRECAO E POR IDENTIDADE, NAO POR SINALIZADOR
+  // ------------------------------------------------
+  // Guardar o proprio objeto que veio do snapshot e comparar por `===` e o que
+  // torna isto seguro. Um sinalizador booleano ("ignore a proxima") engoliria
+  // uma edicao feita no mesmo instante em que um snapshot chega — e perder
+  // gravacao em silencio e o defeito que este projeto ja consertou cinco
+  // vezes. Comparando identidade nao ha esse risco: se o dono editou, `data`
+  // e um objeto DIFERENTE do que o snapshot entregou, e a gravacao acontece.
+  const dataDoSnapshot = useRef(null);
   const firestoreItemCount = useRef(0);
   const pendingWriteCount = useRef(0);
   // Track local deletes so onSnapshot won't reject fewer items after intentional deletes
@@ -323,6 +366,9 @@ export function AppProvider({ children }) {
         // Ja o republicar continua so com snapshot do servidor (ver a
         // declaracao das duas flags).
         if (!doCache) dataLoadedFromFirestore.current = true;
+        // Isto veio do banco. Marcar ANTES do setData para o efeito de gravar
+        // reconhecer o objeto e nao devolve-lo. Ver dataDoSnapshot.
+        dataDoSnapshot.current = firestoreData;
         setData(firestoreData);
       } else {
         // First time: try to migrate from localStorage. Nao existe documento la,
@@ -645,6 +691,19 @@ export function AppProvider({ children }) {
     if (loading) return;
     if (isFirstRender.current) {
       isFirstRender.current = false;
+      return;
+    }
+    // ISTO CHEGOU DO BANCO — nao devolve.
+    //
+    // O `data` atual e, por identidade, o mesmo objeto que o snapshot entregou:
+    // ninguem editou nada desde entao. Gravar aqui seria mandar de volta o que
+    // ja esta gravado, e era isso que alimentava a troca sem fim entre o
+    // computador e o celular. Ver dataDoSnapshot, onde a medicao esta descrita.
+    //
+    // Este `return` NAO precisa de setSaveError: ao contrario dos dois abaixo,
+    // ele nao esta recusando nada do dono. Nao ha alteracao dele aqui — se
+    // houvesse, `data` seria outro objeto e a comparacao falharia.
+    if (dataDoSnapshot.current !== null && data === dataDoSnapshot.current) {
       return;
     }
     // Nao gravar antes de saber o que ja existe la — do cache ou do servidor,
@@ -1246,7 +1305,7 @@ export function AppProvider({ children }) {
     // inútil: manda procurar defeito no lado errado num dia em que só acabou a
     // cota. Cada uma diz o que fazer, não só o que aconteceu.
     firestore_quota:
-      'A cota diária do Firestore acabou. Não é problema do Ornabird nem do código: o plano gratuito tem um teto de leituras por dia e ele foi atingido. A cota zera à meia-noite no horário do Pacífico (4h ou 5h da manhã aqui). Para não travar de novo, ative o plano Blaze no console do Firebase.',
+      'O Firestore bloqueou o acesso por limite da conta (RESOURCE_EXHAUSTED). Não é problema do Ornabird nem do código. ATENÇÃO: não é só esperar — em 24/08 o bloqueio continuou depois da renovação diária, com zero requisições no meio. Abra o console do Firebase e veja o USO do projeto (leituras E armazenamento) antes de qualquer outra coisa.',
     // NAO manda mexer nas regras: quem faz esta leitura e o firebase-admin, do
     // servidor, e ele IGNORA as regras de seguranca. Um permission-denied aqui e
     // permissao da CONTA DE SERVICO, nunca do firestore.rules.
@@ -1390,9 +1449,10 @@ export function AppProvider({ children }) {
     // tela mostrava "falhou: 8", que nao diz nada a quem le. O servidor agora
     // traduz para estes nomes.
     firestore_quota:
-      'A cota diaria gratuita do Firebase acabou (RESOURCE_EXHAUSTED). Ela zera '
-      + 'a meia-noite no horario do Pacifico, por volta das 4h da manha aqui. '
-      + 'Tente depois disso — ou mude o projeto para o plano Blaze, que resolve de vez.',
+      'O Firebase bloqueou o acesso por limite da conta (RESOURCE_EXHAUSTED). '
+      + 'NAO adianta so esperar a virada do dia: em 24/08 o bloqueio continuou '
+      + 'depois da renovacao, sem nenhuma requisicao no meio. Abra o console do '
+      + 'Firebase e veja o USO do projeto — leituras E armazenamento.',
     // Mesmo motivo do outro firestore_permission acima: quem faz esta chamada e
     // o servidor, com firebase-admin, que nao passa pelo firestore.rules.
     firestore_permission:
