@@ -1246,7 +1246,7 @@ export function AppProvider({ children }) {
     // inútil: manda procurar defeito no lado errado num dia em que só acabou a
     // cota. Cada uma diz o que fazer, não só o que aconteceu.
     firestore_quota:
-      'A cota diária do Firestore acabou. Não é problema do Ornabird nem do código: o plano gratuito tem um teto de leituras por dia e ele foi atingido. A cota zera à meia-noite no horário do Pacífico (4h ou 5h da manhã aqui). Para não travar de novo, ative o plano Blaze no console do Firebase.',
+      'O Firestore bloqueou o acesso por limite da conta (RESOURCE_EXHAUSTED). Não é problema do Ornabird nem do código. ATENÇÃO: não é só esperar — em 24/08 o bloqueio continuou depois da renovação diária, com zero requisições no meio. Abra o console do Firebase e veja o USO do projeto (leituras E armazenamento) antes de qualquer outra coisa.',
     // NAO manda mexer nas regras: quem faz esta leitura e o firebase-admin, do
     // servidor, e ele IGNORA as regras de seguranca. Um permission-denied aqui e
     // permissao da CONTA DE SERVICO, nunca do firestore.rules.
@@ -1390,9 +1390,10 @@ export function AppProvider({ children }) {
     // tela mostrava "falhou: 8", que nao diz nada a quem le. O servidor agora
     // traduz para estes nomes.
     firestore_quota:
-      'A cota diaria gratuita do Firebase acabou (RESOURCE_EXHAUSTED). Ela zera '
-      + 'a meia-noite no horario do Pacifico, por volta das 4h da manha aqui. '
-      + 'Tente depois disso — ou mude o projeto para o plano Blaze, que resolve de vez.',
+      'O Firebase bloqueou o acesso por limite da conta (RESOURCE_EXHAUSTED). '
+      + 'NAO adianta so esperar a virada do dia: em 24/08 o bloqueio continuou '
+      + 'depois da renovacao, sem nenhuma requisicao no meio. Abra o console do '
+      + 'Firebase e veja o USO do projeto — leituras E armazenamento.',
     // Mesmo motivo do outro firestore_permission acima: quem faz esta chamada e
     // o servidor, com firebase-admin, que nao passa pelo firestore.rules.
     firestore_permission:

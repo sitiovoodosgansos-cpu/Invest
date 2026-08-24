@@ -70,12 +70,28 @@ const MENSAGENS = {
   // Falhas do banco, com nome.
   //
   // Antes todas elas chegavam aqui como `server_error`, e a tela dava um
-  // conselho errado justamente para a mais provável: a cota diária não volta
-  // "em instantes", volta de madrugada. Quem lê esta tela é o investidor,
-  // então o texto fala de limite de acessos e não de planos do Firebase — o
-  // detalhe técnico fica no registro da função, para o administrador.
-  firestore_quota: 'O sistema atingiu o limite diário de acessos ao banco de dados. '
-    + 'Ele volta a funcionar de madrugada, por volta das 4h. Avise o administrador.',
+  // conselho errado justamente para a mais provável. Quem lê esta tela é o
+  // investidor, então o texto fala do acesso ao banco e não de planos do
+  // Firebase — o detalhe técnico fica no registro da função.
+  //
+  // O TEXTO NAO PROMETE MAIS "volta as 4h".
+  //
+  // Ele prometia, e em 24/08 a promessa falhou na cara do dono: ele esperou a
+  // virada do dia e o portal continuou fechado. O console do Firebase mostrou
+  // por que — 634 MIL leituras em 24 horas, doze vezes o teto de 50 mil, com
+  // picos as 2h (140 mil/hora) e as 4h (115 mil/hora), de madrugada, com o dono
+  // dormindo. As 4h e exatamente a hora em que a cota renova: a cota nova era
+  // torrada na mesma hora em que nascia, e por isso esperar nao adiantava.
+  //
+  // Esses picos NAO passam pela Vercel (os registros do servidor nao mostram
+  // nenhuma requisicao no mesmo intervalo) — quem le e o proprio navegador,
+  // falando direto com o Firestore. Enquanto essa leitura de fundo existir,
+  // nenhum horario e uma promessa que da pra cumprir.
+  //
+  // Uma tela que promete um horario e nao cumpre e pior do que uma que so diz
+  // o que sabe: o dono espera a noite inteira por nada.
+  firestore_quota: 'O sistema está sem acesso ao banco de dados no momento. '
+    + 'Isso precisa ser resolvido por quem administra — avise o administrador.',
   firestore_permission: 'O banco de dados recusou o acesso. Avise o administrador.',
   firestore_unauthenticated: 'A credencial do servidor foi recusada. Avise o administrador.',
   firestore_indisponivel: 'O banco de dados está indisponível no momento. Tente de novo em instantes.',

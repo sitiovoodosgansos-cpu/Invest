@@ -47,8 +47,15 @@ const LEGACY_FALLBACK_ERRORS = new Set([
 // servidor, que devolve numero). Cada um destes vira uma frase que diz o que
 // aconteceu e o que fazer.
 const MOTIVOS_FIRESTORE = {
+  // SEM PROMESSA DE HORARIO. Ver o comentario extenso em InvestorPagesPortal:
+  // o console do Firebase mostrou 634 mil leituras em 24h, com pico as 4h da
+  // manha — a hora exata em que a cota renova. A cota nova era gasta assim que
+  // nascia, entao esperar a virada do dia nao resolvia; dizer que resolvia fez
+  // o dono esperar a noite inteira por nada.
   'resource-exhausted':
-    'O banco de dados atingiu o limite diario de acessos. Sua senha esta certa — o que faltou foi ler o seu perfil. O limite zera de madrugada, por volta das 4h.',
+    'O banco de dados recusou o acesso. Sua senha esta certa — o que faltou foi '
+    + 'ler o seu perfil. Isso precisa ser resolvido no console do Firebase; nao '
+    + 'adianta so esperar.',
   // NAO acuse as regras com certeza.
   //
   // Em 23/08 a cota diaria estourou e esta mensagem apareceu no login dizendo
@@ -58,12 +65,14 @@ const MOTIVOS_FIRESTORE = {
   // explicar nada: ele mexe no que esta certo e abre um buraco de verdade.
   //
   // Daqui nao da pra separar as duas causas, entao a frase diz as duas — a mais
-  // provavel primeiro, porque neste projeto a cota estoura direto.
+  // provavel primeiro, porque neste projeto o bloqueio do Firestore e o comum.
+  //
+  // E TAMBEM NAO PROMETE HORARIO, pelo mesmo motivo do resource-exhausted
+  // acima: em 24/08 esperar a madrugada nao resolveu nada.
   'permission-denied':
-    'O banco de dados recusou a leitura do seu perfil. Quase sempre e a cota '
-    + 'diaria do Firestore esgotada — ela zera de madrugada, por volta das 4h. '
-    + 'Tente de novo depois disso. Se continuar amanha de manha, ai sim as regras '
-    + 'de seguranca precisam ser olhadas; nao mexa nelas antes disso.',
+    'O banco de dados recusou a leitura do seu perfil. Quase sempre e um bloqueio '
+    + 'do Firestore (limite da conta), e nao as regras de seguranca. Abra o console '
+    + 'do Firebase e veja o uso do projeto antes de mexer nas regras.',
   unavailable:
     'Nao foi possivel falar com o banco de dados agora. Verifique a conexao e tente de novo.',
   unauthenticated:
