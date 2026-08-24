@@ -72,11 +72,75 @@ const MOTIVOS_FIRESTORE = {
     'O banco de dados demorou demais para responder. Tente de novo.',
 };
 
+function codigoLimpo(err) {
+  return String(err?.code || '').replace(/^firestore\//, '');
+}
+
 function motivoDoErro(err) {
-  const code = String(err?.code || '').replace(/^firestore\//, '');
+  const code = codigoLimpo(err);
   return MOTIVOS_FIRESTORE[code]
     || `Nao foi possivel carregar o seu perfil de acesso${code ? ` (${code})` : ''}.`;
 }
+
+// O PAPEL DE ADMINISTRADOR, guardado no navegador DESTE computador.
+//
+// POR QUE ISTO EXISTE
+// -------------------
+// "Por que no celular entra e no computador nao?" O papel do usuario vem de
+// /users/{uid}, relido a cada entrada — e essa leitura NAO usa o cache do
+// Firestore (getDoc vai ao servidor). Quando a cota diaria do criatorio acaba,
+// ela falha, e o dono fica trancado do lado de fora mesmo com o app inteiro
+// disponivel no cache local.
+//
+// O celular "entrava" porque nunca perdeu a sessao: ja tinha o papel resolvido
+// e servia o Plantel do proprio cache, sem tocar no servidor. O computador
+// perdeu a sessao (a persistencia e por aba), precisou reler o perfil, e essa
+// unica leitura batia na cota estourada.
+//
+// Guardando o ultimo papel CONFIRMADO, o login passa a sobreviver a uma queda
+// do banco — como o celular ja fazia.
+//
+// A LINHA DE SEGURANCA
+// --------------------
+// So uma FALHA DE LEITURA cai no cache. Uma resposta AUTORITATIVA do servidor
+// — "existe, mas nao e admin", ou "nao existe" — LIMPA o cache e fecha o
+// acesso. Rebaixar um administrador continua funcionando: a proxima leitura que
+// der certo derruba o cache na hora. E o cache so vale para o MESMO uid, por 30
+// dias, e nunca dispensa a senha: o Firebase Auth valida a senha ANTES de isto
+// rodar. Ele resgata a leitura do perfil, nunca a autenticacao.
+const PAPEL_ADMIN_KEY = 'invest:papelAdmin';
+const PAPEL_ADMIN_VALIDADE_MS = 30 * 24 * 60 * 60 * 1000;
+
+function guardarPapelAdmin(uid, data) {
+  try {
+    localStorage.setItem(PAPEL_ADMIN_KEY, JSON.stringify({
+      uid, username: data.username || '', confirmadoEm: Date.now(),
+    }));
+  } catch { /* storage bloqueado: perde-se a rede de seguranca, so isso */ }
+}
+
+function limparPapelAdmin() {
+  try { localStorage.removeItem(PAPEL_ADMIN_KEY); } catch { /* ignore */ }
+}
+
+function papelAdminGuardado(uid) {
+  try {
+    const p = JSON.parse(localStorage.getItem(PAPEL_ADMIN_KEY) || 'null');
+    if (!p || p.uid !== uid) return null;
+    if (Date.now() - (p.confirmadoEm || 0) > PAPEL_ADMIN_VALIDADE_MS) return null;
+    return { uid, role: 'admin', username: p.username || '' };
+  } catch { return null; }
+}
+
+// Codigos que dizem "nao deu para ler", e nao "nao autorizado".
+// permission-denied entra na lista de proposito: com a cota estourada o SDK do
+// navegador devolve exatamente esse codigo (o servidor, via firebase-admin,
+// mostra resource-exhausted no mesmo minuto). Ler o PROPRIO doc de /users/{uid}
+// e sempre permitido pelas regras, entao um permission-denied aqui e, na
+// pratica, cota — nunca uma regra barrando de verdade.
+const FALHAS_DE_LEITURA = new Set([
+  'resource-exhausted', 'permission-denied', 'unavailable', 'deadline-exceeded',
+]);
 
 export function AuthProvider({ children }) {
   // O MOTIVO da ultima falha de acesso, para a tela de login poder dizer.
@@ -161,9 +225,16 @@ export function AuthProvider({ children }) {
           const data = snapshot.data();
           if (data.role === 'admin') {
             setAdminUserDoc({ uid: user.uid, ...data });
+            // O servidor confirmou: guarda o papel para o login sobreviver a
+            // uma queda do banco na proxima vez.
+            guardarPapelAdmin(user.uid, data);
             // Entrou de verdade: qualquer motivo antigo deixa de valer.
             setAuthError(null);
           } else {
+            // Resposta AUTORITATIVA: existe e NAO e admin. Rebaixou — o cache
+            // do papel tem que cair junto, senao uma cota estourada depois
+            // deixaria entrar quem acabou de perder o acesso.
+            limparPapelAdmin();
             // Unexpected role — fail closed, mas dizendo por que.
             setAdminUserDoc(null);
             setAuthError(
@@ -182,10 +253,12 @@ export function AuthProvider({ children }) {
             username: pendingAdminUsername.current,
           });
         } else {
-          // Usuario autenticado no Firebase mas SEM /users/{uid}. Acontece
-          // quando a gravacao desse documento falhou numa entrada anterior —
-          // o ensureAdminUserDoc engole a falha de proposito. Fecha o acesso,
-          // mas agora explica, senao vira uma tela de login que nao reage.
+          // Usuario autenticado no Firebase mas SEM /users/{uid}. Resposta
+          // AUTORITATIVA de "nao existe" — limpa o cache do papel tambem.
+          // Acontece quando a gravacao desse documento falhou numa entrada
+          // anterior; o ensureAdminUserDoc engole a falha de proposito. Fecha
+          // o acesso, mas agora explica, senao vira uma tela de login muda.
+          limparPapelAdmin();
           setAdminUserDoc(null);
           setAuthError(
             'A sua senha foi aceita, mas o seu perfil de acesso nao foi '
@@ -196,11 +269,23 @@ export function AuthProvider({ children }) {
           await signOut(auth);
         }
       } catch (err) {
-        // O CAMINHO QUE DEIXAVA A TELA MUDA. A senha foi aceita pelo Firebase
-        // Auth, mas o perfil nao pode ser lido — e sem perfil o app volta pra
-        // tela de login. Sem esta mensagem, o botao parecia nao fazer nada.
-        setAdminUserDoc(null);
-        setAuthError(motivoDoErro(err));
+        // A senha foi aceita pelo Firebase Auth, mas o perfil nao pode ser
+        // lido. Se for FALHA DE LEITURA (cota, banco fora) e este computador ja
+        // confirmou este admin antes, entra com o papel guardado — e o que faz
+        // o computador se comportar como o celular. Fora disso, fecha e explica.
+        const guardado = FALHAS_DE_LEITURA.has(codigoLimpo(err))
+          ? papelAdminGuardado(user.uid)
+          : null;
+        if (guardado) {
+          setAdminUserDoc(guardado);
+          setAuthError(null);
+        } else {
+          // O CAMINHO QUE DEIXAVA A TELA MUDA: sem perfil e sem cache, o app
+          // volta pra tela de login. Sem esta mensagem, o botao parecia nao
+          // fazer nada.
+          setAdminUserDoc(null);
+          setAuthError(motivoDoErro(err));
+        }
       } finally {
         setFirebaseAuthReady(true);
       }
