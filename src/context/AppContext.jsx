@@ -10,6 +10,9 @@ import {
 import { MULTIPLICADOR_AVE_PADRAO } from '../utils/ordens';
 import { PORTAL_API_ENABLED, isPortalRoute } from '../hooks/usePortalData';
 import { decidirSnapshot, ACAO } from '../utils/protecaoSnapshot';
+// O AuthProvider e pai deste provedor (App.jsx). O import na outra direcao nao
+// existe — o AuthContext nao conhece o AppContext —, entao nao ha ciclo.
+import { useAuth } from './AuthContext';
 
 // Generate a collision-free, non-enumerable ID for any locally-created entity.
 // Prefers the Web Crypto API (128 bits of entropy) and falls back to a
@@ -233,6 +236,27 @@ export function AppProvider({ children }) {
   // torrou 467 mil leituras num dia (ver o listener de /sales). O certo e
   // contar o que houve e deixar a pessoa recarregar.
   const [espelhosComFalha, setEspelhosComFalha] = useState(() => ({}));
+
+  // QUEM ENTROU — e, portanto, o que pode ser assinado.
+  //
+  // O AuthProvider agora e PAI deste provedor (ver o comentario em App.jsx),
+  // entao daqui da para saber se ha alguem logado antes de ligar um listener
+  // que custa a colecao inteira so para existir.
+  //
+  // `currentUser` cobre os DOIS tipos de acesso, e isso importa: o investidor
+  // nao passa pelo Firebase Auth (ver "Investor path" no AuthContext — ele e
+  // conferido contra a lista `investors` e a sessao vai pro sessionStorage).
+  // Um gate que olhasse so `onAuthStateChanged` deixaria todo investidor
+  // entrar e ficar sem dado nenhum na tela.
+  //
+  // As rotas de portal nao tem login e dependem destes listeners hoje, entao
+  // passam direto: o comportamento delas fica exatamente como era.
+  //
+  // Os dois valores sao primitivos (booleano / objeto-ou-null virando `!!`),
+  // entao usa-los como dependencia de efeito nao religa nada a cada render —
+  // o cuidado de sempre desde a tempestade de religacao do PR #142.
+  const { currentUser, isAdmin } = useAuth();
+  const podeLerColecoes = !!currentUser || isPortalRoute();
 
   // As duas entram na lista de dependencias dos efeitos de espelho. Isso SO e
   // seguro porque `useCallback([])` as torna estaveis: se elas mudassem a cada
@@ -498,6 +522,19 @@ export function AppProvider({ children }) {
   useEffect(() => {
     // PRIVACY: the full /sales collection must never reach a portal browser.
     if (PORTAL_MODE) { setSalesLoading(false); return; }
+
+    // SO DEPOIS DE ALGUEM ENTRAR.
+    //
+    // Este listener custa a colecao INTEIRA para ligar. Antes ele ligava na
+    // montagem do provedor, que acontecia antes de existir login — entao toda
+    // abertura da URL, por qualquer pessoa, baixava as vendas todas. Ver o
+    // comentario extenso em App.jsx, onde a ordem dos provedores foi invertida.
+    //
+    // `salesLoading` vira false aqui de proposito: sem isso a tela de login
+    // ficaria presa no "carregando" para sempre, esperando uma colecao que
+    // (corretamente) nunca vai ser pedida.
+    if (!podeLerColecoes) { setSalesLoading(false); return; }
+
     let unsubscribe = null;
 
     const startSalesListener = () => {
@@ -577,7 +614,7 @@ export function AppProvider({ children }) {
       // e zera o contador de um listener que nem existe mais.
       if (salesEstavelTimer.current) clearTimeout(salesEstavelTimer.current);
     };
-  }, []);
+  }, [podeLerColecoes]);
 
   // A /eggCollections antiga (cadastro manual) nao e mais lida: o Ornabird
   // virou a fonte da verdade da coleta e o app le /ornabirdEggCollections.
@@ -660,16 +697,39 @@ export function AppProvider({ children }) {
     return () => unsub();
   }, [quer_ordens, marcarPronta, marcarFalha, limparFalha]);
 
-  // O registro da ultima rodada e UM documento so — uma leitura. Fica sempre
-  // ligado: e o que permite avisar que a rotina das 6h falhou sem depender de
-  // o dono abrir a tela de Ordens.
+  // O registro da ultima rodada e UM documento so — uma leitura. E o que
+  // permite avisar que a rotina das 6h falhou sem depender de o dono abrir a
+  // tela de Ordens.
+  //
+  // SO PARA ADMIN, E SO DEPOIS DE ENTRAR.
+  //
+  // firestore.rules exige `isAdmin()` para ler este documento. Antes o efeito
+  // tinha dependencia `[]` e montava junto com o provedor, ou seja ANTES do
+  // login: levava permission-denied, o Firestore derrubava o alvo, o handler
+  // so fazia devError (que some em producao) e — por causa do `[]` — ele nunca
+  // mais reassinava depois que o login acontecia.
+  //
+  // Com `rotinaDiaria` preso em null a sessao inteira, a tela de Ordens de
+  // Pagamento mentia em tres lugares:
+  //   * "a rotina nunca rodou"            -> aparecia SEMPRE;
+  //   * "a ultima rodada FALHOU"          -> nunca aparecia;
+  //   * "N venda(s) nao entraram em ordem nenhuma, ninguem vai receber por
+  //     elas"                             -> nunca aparecia.
+  //
+  // O ultimo e dinheiro de investidor sumindo sem nada na tela. E o primeiro
+  // empurrava o dono para o botao "Rodar agora", que custa milhares de
+  // leituras por clique.
+  //
+  // Agora depende de `isAdmin`, entao ele assina no momento em que o login
+  // confirma o papel.
   useEffect(() => {
     if (PORTAL_MODE) return;
+    if (!isAdmin) { setRotinaDiaria(null); return; }
     const unsub = onSnapshot(ROTINA_DOC, (snap) => {
       setRotinaDiaria(snap.exists() ? snap.data() : null);
     }, (error) => devError('Rotina diaria listen error:', error));
     return () => unsub();
-  }, []);
+  }, [isAdmin]);
 
   // One-shot migration: promote legacy appData.sales into /sales/{id}.
   //
