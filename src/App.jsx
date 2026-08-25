@@ -62,6 +62,7 @@ import InvestorPortal from './pages/InvestorPortal';
 import DirectPortal from './pages/DirectPortal';
 import EmployeePortal from './pages/EmployeePortal';
 import InvestorPagesPortal from './pages/InvestorPagesPortal';
+import AvisoEspelhosCaidos from './components/AvisoEspelhosCaidos';
 import {
   LayoutDashboard, Users, Bird, ShoppingCart, Wallet, FileBarChart, Menu, X, LogOut, Receipt, Egg, Thermometer, Heart, Baby, AlertTriangle
 , Layers , Store, Banknote, Tag } from 'lucide-react';
@@ -168,6 +169,7 @@ function AdminLayout() {
             </div>
           </div>
         )}
+        <AvisoEspelhosCaidos />
         <Routes>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/investidores" element={<Investors />} />
