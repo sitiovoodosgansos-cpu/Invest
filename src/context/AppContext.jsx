@@ -214,6 +214,47 @@ export function AppProvider({ children }) {
     [colecoesProntas]
   );
 
+  // ESPELHOS QUE MORRERAM CALADOS.
+  //
+  // Cada um dos sete listeners de espelho tratava erro assim:
+  //
+  //     }, (error) => marcarFalha('bandejas', error));
+  //
+  // `devError` some em producao. Do lado de fora nao acontece NADA: a tela nao
+  // recebe dado novo e tambem nao recebe aviso. `colecaoPronta` continua false
+  // para sempre, entao a tela fica girando "carregando" sem fim — ou, pior,
+  // mostrando o numero da ultima vez que deu certo, como se fosse o de hoje.
+  //
+  // Num app que paga gente por coleta de ovos, numero velho sem aviso e o
+  // defeito mais caro que existe: ele e indistinguivel de estar certo. Este
+  // projeto ja consertou cinco falhas silenciosas; esta e a mesma familia.
+  //
+  // NAO SE RELIGA AQUI DE PROPOSITO. Religar sozinho foi exatamente o que
+  // torrou 467 mil leituras num dia (ver o listener de /sales). O certo e
+  // contar o que houve e deixar a pessoa recarregar.
+  const [espelhosComFalha, setEspelhosComFalha] = useState(() => ({}));
+
+  // As duas entram na lista de dependencias dos efeitos de espelho. Isso SO e
+  // seguro porque `useCallback([])` as torna estaveis: se elas mudassem a cada
+  // render, cada render desligaria e religaria os sete listeners — que e
+  // exatamente a tempestade de religacao que torrou 467 mil leituras num dia.
+  const marcarFalha = useCallback((nome, error) => {
+    devError(`Espelho ${nome}: listener caiu`, error);
+    setEspelhosComFalha(prev => (
+      prev[nome] === (error?.code || 'erro') ? prev : { ...prev, [nome]: error?.code || 'erro' }
+    ));
+  }, []);
+
+  // Um snapshot que chega e a prova de que voltou.
+  const limparFalha = useCallback((nome) => {
+    setEspelhosComFalha(prev => {
+      if (!(nome in prev)) return prev;
+      const proximo = { ...prev };
+      delete proximo[nome];
+      return proximo;
+    });
+  }, []);
+
   const [ornabirdTrays, setOrnabirdTrays] = useState([]);
   const [ornabirdVitrine, setOrnabirdVitrine] = useState([]);
   const [ornabirdEggCollections, setOrnabirdEggCollections] = useState([]);
@@ -529,9 +570,10 @@ export function AppProvider({ children }) {
     const unsub = onSnapshot(ORNABIRD_TRAYS_COLLECTION, (snap) => {
       setOrnabirdTrays(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       marcarPronta('bandejas');
-    }, (error) => devError('Ornabird trays listen error:', error));
+      limparFalha('bandejas');
+    }, (error) => marcarFalha('bandejas', error));
     return () => unsub();
-  }, [quer_bandejas, marcarPronta]);
+  }, [quer_bandejas, marcarPronta, marcarFalha, limparFalha]);
 
   const quer_vitrine = colecoesPedidas.has('vitrine');
   useEffect(() => {
@@ -539,9 +581,10 @@ export function AppProvider({ children }) {
     const unsub = onSnapshot(ORNABIRD_VITRINE_COLLECTION, (snap) => {
       setOrnabirdVitrine(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       marcarPronta('vitrine');
-    }, (error) => devError('Ornabird vitrine listen error:', error));
+      limparFalha('vitrine');
+    }, (error) => marcarFalha('vitrine', error));
     return () => unsub();
-  }, [quer_vitrine, marcarPronta]);
+  }, [quer_vitrine, marcarPronta, marcarFalha, limparFalha]);
 
   // Coletas de ovos espelhadas. Coleção SEPARADA da /eggCollections antiga (o
   // cadastro manual que está saindo): misturar as duas faria a sincronização —
@@ -553,9 +596,10 @@ export function AppProvider({ children }) {
     const unsub = onSnapshot(ORNABIRD_EGGS_COLLECTION, (snap) => {
       setOrnabirdEggCollections(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       marcarPronta('coletas');
-    }, (error) => devError('Ornabird egg collections listen error:', error));
+      limparFalha('coletas');
+    }, (error) => marcarFalha('coletas', error));
     return () => unsub();
-  }, [quer_coletas, marcarPronta]);
+  }, [quer_coletas, marcarPronta, marcarFalha, limparFalha]);
 
   // Lotes de chocadeira espelhados do Ornabird.
   const quer_chocadeiras = colecoesPedidas.has('chocadeiras');
@@ -564,9 +608,10 @@ export function AppProvider({ children }) {
     const unsub = onSnapshot(ORNABIRD_BATCHES_COLLECTION, (snap) => {
       setOrnabirdIncubatorBatches(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       marcarPronta('chocadeiras');
-    }, (error) => devError('Ornabird incubator batches listen error:', error));
+      limparFalha('chocadeiras');
+    }, (error) => marcarFalha('chocadeiras', error));
     return () => unsub();
-  }, [quer_chocadeiras, marcarPronta]);
+  }, [quer_chocadeiras, marcarPronta, marcarFalha, limparFalha]);
 
   // Catalogo da Vitrine espelhado (os anuncios a venda). Separado de
   // ornabirdVitrine, que guarda as VENDAS — sao duas coisas diferentes.
@@ -576,9 +621,10 @@ export function AppProvider({ children }) {
     const unsub = onSnapshot(ORNABIRD_LISTINGS_COLLECTION, (snap) => {
       setOrnabirdVitrineListings(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       marcarPronta('anuncios');
-    }, (error) => devError('Ornabird vitrine listings listen error:', error));
+      limparFalha('anuncios');
+    }, (error) => marcarFalha('anuncios', error));
     return () => unsub();
-  }, [quer_anuncios, marcarPronta]);
+  }, [quer_anuncios, marcarPronta, marcarFalha, limparFalha]);
 
   // Ordens de pagamento, sob demanda.
   const quer_ordens = colecoesPedidas.has('ordens');
@@ -587,9 +633,10 @@ export function AppProvider({ children }) {
     const unsub = onSnapshot(PAYMENT_ORDERS_COLLECTION, (snap) => {
       setPaymentOrders(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       marcarPronta('ordens');
-    }, (error) => devError('Payment orders listen error:', error));
+      limparFalha('ordens');
+    }, (error) => marcarFalha('ordens', error));
     return () => unsub();
-  }, [quer_ordens, marcarPronta]);
+  }, [quer_ordens, marcarPronta, marcarFalha, limparFalha]);
 
   // O registro da ultima rodada e UM documento so — uma leitura. Fica sempre
   // ligado: e o que permite avisar que a rotina das 6h falhou sem depender de
@@ -2048,6 +2095,8 @@ export function AppProvider({ children }) {
     addCustomSpecies, deleteCustomSpecies,
     forceSync,
     pedirColecoes, colecaoPronta,
+    // Quais espelhos estao com o listener caido, por nome. `{}` = todos de pe.
+    espelhosComFalha,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
