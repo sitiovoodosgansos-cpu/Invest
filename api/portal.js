@@ -116,6 +116,29 @@ function publicBird(bird, investorId) {
     // Nao revela nada: e o id de um lote que ELE possui, e o recorte que este
     // mesmo servidor faz ja e por este id. Ele so recebe as proprias aves.
     ornabirdGroupId: bird.ornabirdGroupId || null,
+
+    // OS TERMOS DO PROPRIO LOTE — percentual e preco de referencia do ovo.
+    //
+    // Sem estes tres campos, `hasRateOverride(bird)` dava false na tela do
+    // investidor e ela mostrava "(padrao geral)": 10% e o preco geral, para
+    // TODA ave. Enquanto isso o lucro que ele recebe e calculado com o
+    // percentual de verdade do lote.
+    //
+    // Ou seja, a tela dizia 10% e o pagamento saia por 7,9%. Numero errado na
+    // tela e pior que numero nenhum: o investidor confere, a conta nao fecha, e
+    // quem parece desonesto e o criatorio.
+    //
+    // Uma ave sem venda de ovo ficava ainda pior — "Ovo sem preco" —, porque o
+    // unico preco que chegava aqui vinha do indice de vendas observadas
+    // (precoOvoDoLote, fonte 'venda'), nunca do que foi configurado no card.
+    //
+    // Nao ha vazamento: sao as condicoes das aves DELE, o combinado dele. Nada
+    // nestes campos pertence a outro investidor.
+    eggProfitRate: typeof bird.eggProfitRate === 'number' ? bird.eggProfitRate : undefined,
+    birdProfitRate: typeof bird.birdProfitRate === 'number' ? bird.birdProfitRate : undefined,
+    precoOvoReferencia: typeof bird.precoOvoReferencia === 'number'
+      ? bird.precoOvoReferencia
+      : undefined,
   };
 }
 
