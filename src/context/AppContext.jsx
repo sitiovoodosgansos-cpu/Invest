@@ -47,6 +47,10 @@ const FIRESTORE_DOC = doc(db, 'config', 'appData');
 // used to silently drop writes around the ~1100-sale mark. See firestore.rules
 // for the matching security model and the migration comment below.
 const SALES_COLLECTION = collection(db, 'sales');
+// Ver o comentario extenso onde ela e usada, no listener de /sales.
+const ERROS_SEM_VOLTA = new Set([
+  'resource-exhausted', 'permission-denied', 'unauthenticated',
+]);
 // Egg collections also live in their own collection now, for the same
 // Read-only mirror of Ornabird (ornabird.app). Bulk-replaced by the sync;
 // never edited by hand. Separate collections so they cannot re-create the
@@ -411,10 +415,22 @@ export function AppProvider({ children }) {
   // exponential backoff (2s, 4s, 8s). We also refuse to overwrite a
   // previously-loaded sales array with an empty snapshot — that pattern
   // indicates a transient Firestore glitch, not a real data change.
+  // Os erros em que RELIGAR nunca ajuda — e sempre custa.
+  //
+  // Religar um listener de colecao cobra a colecao INTEIRA. Nestes tres o
+  // proximo intento vai falhar igual, entao a unica coisa que a insistencia
+  // produz e mais consumo:
+  //   * resource-exhausted -> a cota ja acabou; reler e cavar mais fundo;
+  //   * permission-denied  -> a regra recusa; ela nao muda porque tentamos;
+  //   * unauthenticated    -> a credencial e a mesma na proxima tentativa.
   const salesLoadedOnce = useRef(false);
   const salesRetryCount = useRef(0);
   const salesRetryTimer = useRef(null);
+  const salesEstavelTimer = useRef(null);
   const MAX_SALES_RETRIES = 3;
+  // Quanto tempo de pe conta como "a conexao voltou de verdade". Abaixo disso,
+  // um sucesso e so o intervalo entre duas quedas, e nao merece zerar o teto.
+  const JANELA_ESTAVEL_MS = 60000;
 
   useEffect(() => {
     // PRIVACY: the full /sales collection must never reach a portal browser.
@@ -422,8 +438,29 @@ export function AppProvider({ children }) {
     let unsubscribe = null;
 
     const startSalesListener = () => {
+      // DESLIGA O ANTERIOR ANTES DE LIGAR OUTRO.
+      //
+      // Sem esta linha, `unsubscribe` era SOBRESCRITO a cada tentativa e o
+      // listener velho ficava vivo para sempre. Na queda seguinte todos os
+      // vazados recebiam o erro, e cada um tentava reconectar por conta
+      // propria — 12 quedas viravam 29 religacoes, e crescendo.
+      if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+
       unsubscribe = onSnapshot(SALES_COLLECTION, (snapshot) => {
-        salesRetryCount.current = 0; // reset on success
+        // O CONTADOR DE TENTATIVAS NAO ZERA MAIS A CADA SUCESSO.
+        //
+        // Ele zerava, e por isso o teto de 3 nunca valeu: cai, tenta, funciona,
+        // zera, cai de novo, tenta... para sempre. Cada religacao RELE A
+        // COLECAO INTEIRA, entao a conta e multiplicacao.
+        //
+        // Agora so zera depois de um tempo bom de pe — uma conexao que
+        // sobreviveu a JANELA_ESTAVEL_MS merece credito novo; uma que cai a
+        // cada dois segundos, nao.
+        if (salesEstavelTimer.current) clearTimeout(salesEstavelTimer.current);
+        salesEstavelTimer.current = setTimeout(() => {
+          salesRetryCount.current = 0;
+        }, JANELA_ESTAVEL_MS);
+
         const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
         // PROTECTION: If we previously loaded 100+ sales and the new
@@ -443,6 +480,17 @@ export function AppProvider({ children }) {
         devError('Sales collection listen error:', error);
         setSalesLoading(false);
 
+        // NAO INSISTIR NO QUE NAO SE RESOLVE SOZINHO.
+        //
+        // Cota estourada, regra recusando, credencial recusada: religar nao
+        // conserta nenhum dos tres, e religar CUSTA a colecao inteira. Insistir
+        // com a cota estourada e jogar gasolina — foi assim que a cota do dia
+        // seguinte era torrada na hora em que nascia.
+        if (ERROS_SEM_VOLTA.has(error?.code)) {
+          devWarn(`Sales listener parado: ${error.code} nao se resolve tentando de novo.`);
+          return;
+        }
+
         // Retry with exponential backoff
         if (salesRetryCount.current < MAX_SALES_RETRIES) {
           const delay = Math.pow(2, salesRetryCount.current + 1) * 1000;
@@ -451,6 +499,8 @@ export function AppProvider({ children }) {
           salesRetryTimer.current = setTimeout(() => {
             startSalesListener();
           }, delay);
+        } else {
+          devWarn('Sales listener: teto de tentativas atingido, parando.');
         }
       });
     };
@@ -460,6 +510,9 @@ export function AppProvider({ children }) {
     return () => {
       if (unsubscribe) unsubscribe();
       if (salesRetryTimer.current) clearTimeout(salesRetryTimer.current);
+      // O relogio da estabilidade tambem: sem isto ele sobrevive a desmontagem
+      // e zera o contador de um listener que nem existe mais.
+      if (salesEstavelTimer.current) clearTimeout(salesEstavelTimer.current);
     };
   }, []);
 
