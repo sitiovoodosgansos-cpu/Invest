@@ -436,11 +436,33 @@ export function AppProvider({ children }) {
     }, (error) => {
       devError('Firestore error:', error);
       setFirestoreError(error.code || 'Erro de conexao');
-      // Fallback to localStorage if Firestore fails
+
+      // A COPIA LOCAL ENTRA NA TELA, MAS NAO PODE VOLTAR PRO BANCO.
+      //
+      // Ler falhou — cota estourada, regra recusando, rede caindo. Mostrar o
+      // que temos no localStorage e melhor que mostrar tela vazia. Mas o objeto
+      // montado aqui e NOVO, e o efeito de gravar dispara quando a identidade
+      // de `data` muda, sem saber de onde ela veio. Sem a marcacao abaixo ele
+      // seguia em frente e fazia `setDoc` SEM MERGE: uma falha de LEITURA
+      // acabava REVERTENDO /config/appData para a copia velha desta aba.
+      //
+      // E o mesmo estrago que o beforeunload fazia (ver o comentario extenso
+      // mais abaixo), por outra porta — e esta abre justamente quando a cota
+      // estoura, que e quando mais abas estao com copia velha em memoria.
+      //
+      // Marcar com `dataDoSnapshot` reusa o guarda de identidade: o efeito
+      // reconhece este objeto e nao devolve. Se o dono editar depois, `data`
+      // vira outro objeto, a comparacao falha e a gravacao acontece — que e
+      // exatamente o que tem que acontecer.
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        setData(stored ? { ...defaultData, ...semCamposLegados(JSON.parse(stored)) } : defaultData);
+        const local = stored
+          ? { ...defaultData, ...semCamposLegados(JSON.parse(stored)) }
+          : defaultData;
+        dataDoSnapshot.current = local;
+        setData(local);
       } catch {
+        dataDoSnapshot.current = defaultData;
         setData(defaultData);
       }
       setLoading(false);
