@@ -222,24 +222,11 @@ function AppRouter() {
   return <Login />;
 }
 
-// O AuthProvider VEM POR FORA DO AppProvider.
-//
-// Ate 25/08 era o contrario, e o AppProvider montava — e assinava o Firestore —
-// antes de existir login. Somado a `allow read: if true` em /sales
-// (firestore.rules:154), isso fazia com que TODA abertura da URL, por quem quer
-// que fosse, baixasse a colecao de vendas inteira. E como `loading` incluia
-// `salesLoading`, o formulario de login so aparecia depois disso terminar.
-//
-// Era a unica fonte de gasto que escalava com TRAFEGO em vez de com acao, e
-// nao aparecia em log nenhum do servidor: vai direto do navegador ao Firestore.
-//
-// Invertendo, o AppProvider enxerga quem entrou e so assina o que aquela pessoa
-// pode ler. A inversao nao cria ciclo: o AuthContext nao importa o AppContext.
 export default function App() {
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <AppProvider>
+      <AppProvider>
+        <AuthProvider>
           <HashRouter>
             <Routes>
               <Route path="/portal/:token" element={<DirectPortal />} />
@@ -250,8 +237,8 @@ export default function App() {
               <Route path="*" element={<AppRouter />} />
             </Routes>
           </HashRouter>
-        </AppProvider>
-      </AuthProvider>
+        </AuthProvider>
+      </AppProvider>
     </ErrorBoundary>
   );
 }
