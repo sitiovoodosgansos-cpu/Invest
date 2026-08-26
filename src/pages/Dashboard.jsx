@@ -19,7 +19,7 @@ const MONTH_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Se
 
 export default function Dashboard() {
   // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
-  useColecoes('coletas', 'chocadeiras');
+  useColecoes('vendas', 'coletas', 'chocadeiras');
   const {
     investors, birds, sales, financialInvestments, expenses,
     ornabirdEggCollections, ornabirdIncubatorBatches,

@@ -495,9 +495,32 @@ export function AppProvider({ children }) {
   // um sucesso e so o intervalo entre duas quedas, e nao merece zerar o teto.
   const JANELA_ESTAVEL_MS = 60000;
 
+  // /sales SO CARREGA NA TELA QUE PRECISA DELA.
+  //
+  // Seis espelhos ja eram assim (ver o comentario do useColecoes). A colecao
+  // de vendas foi a unica que ficou de fora: ela era assinada na montagem do
+  // provedor, com dependencia `[]`, ou seja em TODA tela — inclusive na de
+  // login, na Coleta de Ovos, na Prateleira, na Vitrine, nas Chocadeiras, nos
+  // Pintinhos, na Sanidade, nas Vendas Ornabird e nas Ordens de Pagamento,
+  // que nao usam uma linha de venda sequer.
+  //
+  // E ligar um listener de colecao cobra a colecao INTEIRA. Com 1.619 vendas,
+  // abrir o app em qualquer uma dessas telas custava 1.619 leituras para nada.
+  // O teto do dia inteiro sao 50 mil.
+  //
+  // As telas que USAM vendas declaram `useColecoes('vendas')`:
+  //   Dashboard, Plantel, Vendas, Investidores, Financeiro, Despesas,
+  //   Relatorios, InvestorPortal e DirectPortal.
+  //
+  // PREFERIR O "CARREGANDO" AO NUMERO ERRADO: `salesLoading` continua entrando
+  // no `loading` geral, entao uma tela que pediu vendas espera a lista chegar
+  // em vez de renderizar com zero. Uma tela que nao pediu nao espera nada.
+  const quer_vendas = colecoesPedidas.has('vendas');
   useEffect(() => {
     // PRIVACY: the full /sales collection must never reach a portal browser.
     if (PORTAL_MODE) { setSalesLoading(false); return; }
+    // Ninguem pediu: nao assina, e nao deixa a tela presa em "carregando".
+    if (!quer_vendas) { setSalesLoading(false); return; }
     let unsubscribe = null;
 
     const startSalesListener = () => {
@@ -539,6 +562,10 @@ export function AppProvider({ children }) {
         if (docs.length > 0) salesLoadedOnce.current = true;
         setSales(docs);
         setSalesLoading(false);
+        // Mesma sinalizacao dos outros espelhos: a tela consegue distinguir
+        // "ainda carregando" de "nao ha venda nenhuma".
+        marcarPronta('vendas');
+        limparFalha('vendas');
       }, (error) => {
         devError('Sales collection listen error:', error);
         setSalesLoading(false);
@@ -551,6 +578,9 @@ export function AppProvider({ children }) {
         // seguinte era torrada na hora em que nascia.
         if (ERROS_SEM_VOLTA.has(error?.code)) {
           devWarn(`Sales listener parado: ${error.code} nao se resolve tentando de novo.`);
+          // Parar em silencio era o defeito do PR #143 noutro lugar: a tela
+          // seguiria mostrando a ultima lista como se fosse a de agora.
+          marcarFalha('vendas', error);
           return;
         }
 
@@ -577,7 +607,11 @@ export function AppProvider({ children }) {
       // e zera o contador de um listener que nem existe mais.
       if (salesEstavelTimer.current) clearTimeout(salesEstavelTimer.current);
     };
-  }, []);
+    // `quer_vendas` e booleano e so vai de false para true (colecoesPedidas
+    // nunca encolhe); as tres funcoes sao useCallback([]). Nada aqui muda a
+    // cada render, entao o listener liga UMA vez — o cuidado de sempre desde
+    // a tempestade de religacao do PR #142.
+  }, [quer_vendas, marcarPronta, marcarFalha, limparFalha]);
 
   // A /eggCollections antiga (cadastro manual) nao e mais lida: o Ornabird
   // virou a fonte da verdade da coleta e o app le /ornabirdEggCollections.

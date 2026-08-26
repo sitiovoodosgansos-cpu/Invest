@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useApp, BIRD_SPECIES } from '../context/AppContext';
+import { useApp, useColecoes, BIRD_SPECIES } from '../context/AppContext';
 import {
   formatCurrency, getInitials, formatDate, formatPercent, getOwnershipPeriods,
   getEggProfitRate, resolveRateFor, hasRateOverride,
@@ -58,6 +58,9 @@ export default function Plantel() {
     comissaoConfig, ornabirdVitrine,
     somenteLeitura,
   } = useApp();
+  // A colecao /sales tem 1.619 documentos e cobra a colecao inteira para
+  // ligar. Esta tela usa vendas, entao pede — as que nao usam nao pagam.
+  useColecoes('vendas');
   // Global fallback rates, used as placeholders and to show each animal's
   // effective rate when it has no override of its own.
   const globals = { eggProfitRate: globalEggRate, birdProfitRate: globalBirdRate };

@@ -137,7 +137,7 @@ function Pagination({ total, page, pageSize, onPage }) {
 
 export default function Reports() {
   // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
-  useColecoes('coletas', 'chocadeiras');
+  useColecoes('vendas', 'coletas', 'chocadeiras');
   const {
     investors, birds, sales, financialInvestments, payments, expenses,
     ornabirdEggCollections, ornabirdIncubatorBatches,

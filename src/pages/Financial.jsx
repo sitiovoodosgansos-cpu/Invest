@@ -16,7 +16,7 @@ const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444'
 
 export default function Financial() {
   // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
-  useColecoes('vitrine', 'ordens');
+  useColecoes('vendas', 'vitrine', 'ordens');
   const {
     investors, birds, sales, financialInvestments, payments,
     addFinancialInvestment, deleteFinancialInvestment, addPayment, deletePayment,
