@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import {
   formatCurrency, formatDate, formatPercent, calculateProfitDistribution,
   isEggProduct, getEggProfitRate, getBirdProfitRate, filterValidTransactions, matchSaleToBird,
@@ -26,6 +26,9 @@ export default function Sales() {
     eggProfitRate, birdProfitRate, comissaoConfig,
     updateProfitRates, recalculateAllSaleProfits,
   } = useApp();
+  // A colecao /sales tem 1.619 documentos e cobra a colecao inteira para
+  // ligar. Esta tela usa vendas, entao pede — as que nao usam nao pagam.
+  useColecoes('vendas');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [dedupeRunning, setDedupeRunning] = useState(false);

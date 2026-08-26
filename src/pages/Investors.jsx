@@ -27,7 +27,7 @@ const FORMULARIO_VAZIO = {
 
 export default function Investors() {
   // Esta tela usa estes espelhos — sem declarar, eles nao sao lidos.
-  useColecoes('vitrine', 'ordens');
+  useColecoes('vendas', 'vitrine', 'ordens');
   const {
     investors, birds, sales,
     addInvestor, updateInvestor, deleteInvestor,

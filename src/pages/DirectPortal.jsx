@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, Component } from 'react';
 import { useParams } from 'react-router-dom';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import { usePortalData } from '../hooks/usePortalData';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
@@ -48,6 +48,9 @@ class PortalErrorBoundary extends Component {
 function DirectPortalContent() {
   const { token } = useParams();
   const appData = useApp();
+  // A colecao /sales tem 1.619 documentos e cobra a colecao inteira para
+  // ligar. Esta tela usa vendas, entao pede — as que nao usam nao pagam.
+  useColecoes('vendas');
   const portal = usePortalData(token);
   const [period, setPeriod] = useState('monthly');
 

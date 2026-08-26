@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import { formatCurrency, formatDate, getMonthsDifference, calculateCompoundInterest } from '../utils/helpers';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -61,6 +61,9 @@ function fileToBase64(file) {
 
 export default function Expenses() {
   const { expenses, sales, financialInvestments, investors, customExpenseCategories, addExpense, bulkAddExpenses, updateExpense, deleteExpense, addCustomExpenseCategory, deleteCustomExpenseCategory } = useApp();
+  // A colecao /sales tem 1.619 documentos e cobra a colecao inteira para
+  // ligar. Esta tela usa vendas, entao pede — as que nao usam nao pagam.
+  useColecoes('vendas');
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [viewImage, setViewImage] = useState(null);

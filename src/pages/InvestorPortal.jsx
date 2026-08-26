@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useApp } from '../context/AppContext';
+import { useApp, useColecoes } from '../context/AppContext';
 import {
   formatCurrency, formatDate, calculateProfitDistribution,
   getInitials, getMonthsDifference, calculateCompoundInterest, groupSalesByPeriod
@@ -16,6 +16,9 @@ const COLORS = ['#6C2BD9', '#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444'
 export default function InvestorPortal() {
   const { currentUser, logout } = useAuth();
   const { investors, birds, sales, financialInvestments, payments, eggProfitRate, birdProfitRate } = useApp();
+  // A colecao /sales tem 1.619 documentos e cobra a colecao inteira para
+  // ligar. Esta tela usa vendas, entao pede — as que nao usam nao pagam.
+  useColecoes('vendas');
   const [period, setPeriod] = useState('monthly');
   const [sortField, setSortField] = useState('date');
   const [sortDirection, setSortDirection] = useState('desc');
