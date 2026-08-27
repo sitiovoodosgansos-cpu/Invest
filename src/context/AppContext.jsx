@@ -1373,7 +1373,40 @@ export function AppProvider({ children }) {
     const alvo = MIRROR_KINDS[kind];
     if (!alvo) throw new Error(`espelho desconhecido: ${kind}`);
     const collectionName = alvo.collection;
-    const existing = alvo.ref.current;
+
+    // BASE DE COMPARACAO VAZIA NAO SIGNIFICA "COLECAO VAZIA".
+    //
+    // O diff abaixo compara com `alvo.ref.current` — o estado LOCAL do espelho.
+    // Ele so esta preenchido se a tela atual tiver pedido aquele espelho
+    // (useColecoes). Mas `syncFromOrnabird` grava os CINCO, sempre.
+    //
+    // Entao, sincronizando a partir da Coleta de Ovos — que pede so `coletas` —
+    // os outros quatro chegavam aqui com a lista vazia. Sem base, TODA linha
+    // conta como nova, e o espelho inteiro e regravado.
+    //
+    // Medido em producao (26/08): 14 mil gravacoes num dia, 5 mil numa hora so,
+    // exatamente na hora dos cliques em Sincronizar. So a `ornabirdVitrine` tem
+    // ~1.600 documentos. O teto diario de gravacao sao 20 mil.
+    //
+    // E cada documento regravado volta como mudanca para quem estiver ouvindo
+    // aquela colecao — ou seja, queima as DUAS cotas.
+    //
+    // A rotina do servidor sempre acertou isto (api/_rotina-diaria.js:52 le a
+    // colecao antes de comparar). Aqui a leitura so acontece quando nao ha base
+    // local: quando ha, ela veio de um onSnapshot e JA e o estado da colecao.
+    //
+    // Trocar N gravacoes por N leituras e vantajoso duas vezes: a cota de
+    // gravacao e menor (20 mil contra 50 mil) e a gravacao ainda gera leitura
+    // no eco. Numa sincronizacao sem novidade, o custo passa a ser so a leitura.
+    let existing = alvo.ref.current;
+    if (!existing || existing.length === 0) {
+      const atual = await getDocs(collection(db, collectionName));
+      existing = atual.docs.map(d => ({ id: d.id, ...d.data() }));
+      devWarn(
+        `Espelho ${kind}: sem base local, li ${existing.length} documentos `
+        + 'do banco antes de comparar (evita regravar a colecao inteira).'
+      );
+    }
     try {
       // Apaga o que sumiu la em cima e grava SO o que mudou.
       //
