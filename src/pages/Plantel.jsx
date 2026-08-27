@@ -60,7 +60,18 @@ export default function Plantel() {
   } = useApp();
   // A colecao /sales tem 1.619 documentos e cobra a colecao inteira para
   // ligar. Esta tela usa vendas, entao pede — as que nao usam nao pagam.
-  useColecoes('vendas');
+  //
+  // 'vitrine' tambem, e faltava: o `indicePreco` logo abaixo e montado a partir
+  // de `ornabirdVitrine`. Sem pedir, a lista chega VAZIA — nao chega erro. Dai
+  // `precoOvoDoLote` devolve `{preco: null}` para todo lote que ainda nao tem
+  // `precoOvoReferencia` digitado, e o cartao fica sem o lucro do ovo e sem a
+  // comissao da ave. O "Ultima venda: R$ X" do formulario, que e a dica de
+  // quanto digitar, some junto.
+  //
+  // E aparecia de forma INTERMITENTE: `colecoesPedidas` nunca encolhe, entao
+  // quem passou antes por Investidores ou Ordens (as duas pedem 'vitrine') via
+  // os numeros; quem recarregava a pagina em cima do Plantel, nao.
+  useColecoes('vendas', 'vitrine');
   // Global fallback rates, used as placeholders and to show each animal's
   // effective rate when it has no override of its own.
   const globals = { eggProfitRate: globalEggRate, birdProfitRate: globalBirdRate };
