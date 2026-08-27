@@ -39,6 +39,70 @@ function segredoConfere(recebido, esperado) {
   return diferenca === 0;
 }
 
+// O QUE A LINHA DO LOG PRECISA CONTAR.
+//
+// Uma linha por rodada no log da Vercel. E o unico lugar onde da pra ver a
+// historia de varios dias — o /config/rotinaDiaria so guarda a ultima.
+//
+// So que ela vinha contando `ordens`, `aPagar` e `semDono`, e as duas
+// primeiras sao ZERO FIXO enquanto a emissao automatica nao for liberada (ver
+// o ramo `!liberado` em _rotina-diaria.js). Ou seja: a rodada de 27/08 saiu
+// como `{"ordens":0,"aPagar":0,"semDono":0}` — que e exatamente o que sairia
+// se a sincronizacao nao tivesse trazido nada. Um log que da a mesma resposta
+// pra "funcionou" e pra "nao fez nada" nao serve pra conferir nada.
+//
+// Agora vai o que VARIA: quanto cada espelho gravou/apagou, quantos resumos de
+// portal foram escritos, e quantas vendas estao esperando o dono liberar.
+//
+// TOTAL DE PROPOSITO: isto roda DEPOIS da rodada ter dado certo. Uma excecao
+// aqui dentro cairia no catch e devolveria 500 para uma rodada que funcionou —
+// o log passaria a mentir sobre o proprio sucesso. Por isso nada aqui indexa
+// sem conferir, e o pior caso e um campo faltando na linha.
+export function linhaDoLog(resumo) {
+  const r = resumo || {};
+  const linha = { referenceDate: r.referenceDate ?? null };
+
+  // Os cinco espelhos somados: e o numero que diz se a sincronizacao das 6h
+  // trouxe alguma coisa do Ornabird.
+  const espelhos = r.espelhos && typeof r.espelhos === 'object' ? r.espelhos : {};
+  const soma = { gravadas: 0, apagadas: 0, inalteradas: 0 };
+  for (const e of Object.values(espelhos)) {
+    if (!e || typeof e !== 'object') continue;
+    soma.gravadas += Number(e.gravadas) || 0;
+    soma.apagadas += Number(e.apagadas) || 0;
+    soma.inalteradas += Number(e.inalteradas) || 0;
+  }
+  linha.espelhos = soma;
+
+  // O resumo do portal e o que faz a tela do investidor custar 1 leitura em
+  // vez das 1.619 vendas. Se parar de ser gravado, o custo volta calado.
+  const res = r.resumos && typeof r.resumos === 'object' ? r.resumos : null;
+  if (res) {
+    linha.resumos = {
+      vendasLidas: Number(res.vendasLidas) || 0,
+      gravados: Number(res.gravados) || 0,
+      inalterados: Number(res.inalterados) || 0,
+      apagados: Number(res.apagados) || 0,
+      grandesDemais: Array.isArray(res.grandesDemais)
+        ? res.grandesDemais.length
+        : (Number(res.grandesDemais) || 0),
+    };
+  }
+
+  linha.ordens = Number(r.ordens) || 0;
+  linha.aPagar = Number(r.aPagar) || 0;
+  // So aparecem enquanto a emissao esta travada — e ai sao O numero que
+  // importa, porque `ordens` e `aPagar` ficam zerados por regra.
+  if (r.aguardandoLiberacao === true) {
+    linha.aguardandoLiberacao = true;
+    linha.pendentes = Number(r.pendentes) || 0;
+    linha.pendentesValor = Number(r.pendentesValor) || 0;
+  }
+  linha.semDono = Array.isArray(r.semDono) ? r.semDono.length : (Number(r.semDono) || 0);
+  linha.avisos = Array.isArray(r.warnings) ? r.warnings.length : 0;
+  return linha;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
 
@@ -55,14 +119,7 @@ export default async function handler(req, res) {
 
   try {
     const resumo = await rodarERegistrar({ origem: 'cron' });
-    // Uma linha por rodada no log da Vercel. E o unico lugar onde da pra ver a
-    // historia de varios dias — o /config/rotinaDiaria so guarda a ultima.
-    console.log('[cron-diario]', JSON.stringify({
-      referenceDate: resumo.referenceDate,
-      ordens: resumo.ordens,
-      aPagar: resumo.aPagar,
-      semDono: resumo.semDono.length,
-    }));
+    console.log('[cron-diario]', JSON.stringify(linhaDoLog(resumo)));
     return res.status(200).json({ ok: true, ...resumo });
   } catch (err) {
     console.error('[cron-diario]', JSON.stringify({
