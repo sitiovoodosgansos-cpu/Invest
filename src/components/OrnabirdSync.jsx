@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { RefreshCw, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { descreverRotina } from '../utils/sincronizacao';
 
 // Botão de sincronização dos espelhos do Ornabird (Prateleira e Vitrine).
 //
@@ -13,7 +14,7 @@ import { useAuth } from '../context/AuthContext';
 // um lote vinculado que o Ornabird não conhece significa que aquele investidor
 // não vai receber nada no rateio, e isso não pode passar despercebido.
 export default function OrnabirdSync({ label = 'Sincronizar com o Ornabird' }) {
-  const { syncFromOrnabird, somenteLeitura } = useApp();
+  const { syncFromOrnabird, somenteLeitura, rotinaDiaria } = useApp();
   const { isAdmin } = useAuth();
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
@@ -23,6 +24,20 @@ export default function OrnabirdSync({ label = 'Sincronizar com o Ornabird' }) {
   // somente-leitura, mesmo que quem esteja olhando seja o administrador. Ali a
   // sincronizacao e bloqueada pelo contexto, entao o botao so daria erro.
   if (!isAdmin || somenteLeitura) return null;
+
+  // A RODADA DAS 6H, ANTES DO BOTAO.
+  //
+  // Este botao mora em cinco telas e, ate 02/09, nao dizia uma palavra sobre
+  // a sincronizacao automatica. O dono clicou nele a meia-noite e pediu "o
+  // ideal seria fazer automatica as 6 da manha" — ela ja rodava havia cinco
+  // dias. Uma rodada que roda e nao avisa e igual a uma que nao roda: gera o
+  // clique manual, que custa duas ou tres vezes mais leituras que a rodada no
+  // servidor.
+  //
+  // `rotinaDiaria` e o /config/rotinaDiaria, que o contexto ja escuta sempre
+  // (um documento, uma leitura). Nao custa nada a mais mostrar.
+  const rotina = descreverRotina(rotinaDiaria);
+  const rotinaCalma = rotina.tom === 'ok' || rotina.tom === 'nunca';
 
   const run = async () => {
     setRunning(true);
@@ -41,6 +56,22 @@ export default function OrnabirdSync({ label = 'Sincronizar com o Ornabird' }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {/* Cinza quando esta tudo certo (ou ainda carregando); laranja quando
+          parou ou falhou — ai o dado da tela pode estar velho, e isso tem que
+          gritar mais que o botao. */}
+      <div
+        data-rotina={rotina.tom}
+        className={rotinaCalma ? undefined : 'badge badge-orange'}
+        style={rotinaCalma
+          ? { fontSize: 12, color: '#6b7280', display: 'flex', alignItems: 'flex-start', gap: 6 }
+          : { display: 'flex', alignItems: 'flex-start', gap: 6 }}
+      >
+        {rotina.tom === 'ok'
+          ? <Clock size={13} style={{ flexShrink: 0, marginTop: 2 }} />
+          : <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 1 }} />}
+        <span>{rotina.texto}</span>
+      </div>
+
       <button type="button" className="btn btn-secondary btn-sm" onClick={run} disabled={running}>
         <RefreshCw size={16} />
         {running ? 'Sincronizando…' : label}
